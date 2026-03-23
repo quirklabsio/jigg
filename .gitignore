@@ -1,0 +1,7 @@
+node_modules/
+dist/
+crates/jigg-analysis/pkg/
+crates/jigg-analysis/target/
+.DS_Store
+*.env
+.env.local

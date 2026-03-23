@@ -1,0 +1,16 @@
+{
+  "name": "jigg",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "wasm:build": "cd crates/jigg-analysis && wasm-pack build --target no-modules && cp pkg/jigg_analysis.js pkg/jigg_analysis_bg.wasm ../../public/wasm/"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0"
+  }
+}
