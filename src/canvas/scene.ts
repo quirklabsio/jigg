@@ -1,12 +1,13 @@
 import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { WorkerMessage } from '../puzzle/types';
 import { gridCut } from '../puzzle/cutter';
+import { scatterPieces } from '../puzzle/scatter';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const GRID_SIZE = 4;
 
-function buildGridSprites(app: Application, texture: Texture, scale: number, offsetX: number, offsetY: number): Sprite[] {
+function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
   const pieces = gridCut(texture.width, texture.height, GRID_SIZE, GRID_SIZE);
   usePuzzleStore.getState().setPieces(pieces);
 
@@ -19,45 +20,33 @@ function buildGridSprites(app: Application, texture: Texture, scale: number, off
     );
     const pieceTexture = new Texture({ source: texture.source, frame });
     const sprite = new Sprite(pieceTexture);
-    sprite.position.set(
-      offsetX + piece.position.x * scale,
-      offsetY + piece.position.y * scale,
-    );
     sprite.scale.set(scale);
+    sprite.anchor.set(0.5);
     app.stage.addChild(sprite);
     return sprite;
   });
 }
 
-function getScaleAndOffset(texture: Texture, screenWidth: number, screenHeight: number): { scale: number; offsetX: number; offsetY: number } {
-  const scale = Math.min(screenWidth / texture.width, screenHeight / texture.height);
-  const offsetX = (screenWidth - texture.width * scale) / 2;
-  const offsetY = (screenHeight - texture.height * scale) / 2;
-  return { scale, offsetX, offsetY };
-}
-
-function repositionSprites(sprites: Sprite[], texture: Texture, screenWidth: number, screenHeight: number): void {
-  const { scale, offsetX, offsetY } = getScaleAndOffset(texture, screenWidth, screenHeight);
+function applyScatterToSprites(sprites: Sprite[]): void {
   const pieces = usePuzzleStore.getState().pieces;
   sprites.forEach((sprite, i) => {
-    sprite.scale.set(scale);
-    sprite.position.set(
-      offsetX + pieces[i].position.x * scale,
-      offsetY + pieces[i].position.y * scale,
-    );
+    sprite.position.set(pieces[i].position.x, pieces[i].position.y);
+    sprite.rotation = pieces[i].rotation;
   });
 }
 
 export async function loadScene(app: Application, imageUrl: string): Promise<void> {
   const texture = await Assets.load<Texture>(imageUrl);
 
-  const { scale, offsetX, offsetY } = getScaleAndOffset(texture, app.screen.width, app.screen.height);
-  const sprites = buildGridSprites(app, texture, scale, offsetX, offsetY);
-  console.log('pieces created:', usePuzzleStore.getState().pieces.length); // should log: pieces created: 16
+  const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
+  const pieceScreenW = (texture.width / GRID_SIZE) * scale;
+  const pieceScreenH = (texture.height / GRID_SIZE) * scale;
 
-  app.renderer.on('resize', (width: number, height: number) => {
-    repositionSprites(sprites, texture, width, height);
-  });
+  const sprites = buildGridSprites(app, texture, scale);
+
+  scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
+  applyScatterToSprites(sprites);
+  console.log('pieces scattered:', usePuzzleStore.getState().pieces.length);
 
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);
