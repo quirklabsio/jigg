@@ -143,7 +143,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 
 ### Epic: Core Pipeline (de-risk first)
 - [x] Story 1: WASM pipeline proof of life
-- [ ] Story 2: PixiJS canvas init + image load
+- [x] Story 2: PixiJS canvas init + image load
 - [ ] Story 3: Connect WASM output to PixiJS canvas
 
 ### Epic: Core Puzzle Loop
@@ -186,7 +186,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ---
 
 ## Current Session
-Working on: Story 1 — WASM pipeline proof of life
-Last completed: —
+Working on: Story 3 — Connect WASM output to PixiJS canvas
+Last completed: Story 2 — PixiJS canvas init + image load
 Known issues: —
-Next after this: Story 2 — PixiJS canvas init + image load
+Next after this: Story 4 — Grid cut (divide image into NxN sprites)
