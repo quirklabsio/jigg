@@ -147,7 +147,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 - [x] Story 3: Connect WASM output to PixiJS canvas
 
 ### Epic: Core Puzzle Loop
-- [ ] Story 4: Grid cut — divide image into NxN sprites
+- [x] Story 4: Grid cut — divide image into NxN sprites
 - [ ] Story 5: Scatter pieces on load
 - [ ] Story 6: Drag and drop a piece
 - [ ] Story 7: Snap piece to correct position
@@ -186,7 +186,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ---
 
 ## Current Session
-Working on: Story 4 — Grid cut (divide image into NxN sprites)
-Last completed: Story 3 — Connect WASM output to PixiJS canvas
+Working on: Story 5 — Scatter pieces on load
+Last completed: Story 4 — Grid cut (divide image into NxN sprites)
 Known issues: —
-Next after this: Story 5 — Scatter pieces on load
+Next after this: Story 6 — Drag and drop a piece
