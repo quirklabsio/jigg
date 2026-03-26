@@ -111,7 +111,7 @@ interface WorkerMessage<T = unknown> {
 npm run dev                                              # dev server
 npm run build                                            # production build
 npm run typecheck                                        # tsc --noEmit
-cd crates/jigg-analysis && wasm-pack build --target no-modules  # build WASM
+cd crates/jigg-analysis && wasm-pack build --target web  # build WASM
 ```
 
 Claude should run `npm run typecheck` after every story to verify no type errors.
@@ -122,7 +122,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 - WASM must be initialized async before any function calls
 - PixiJS v8 API differs significantly from v4/v5 — do not reference legacy docs or examples
 - Vite requires `?worker` suffix for Web Worker imports: `import Worker from './workers/analysis.worker.ts?worker'`
-- wasm-pack target must be `--target no-modules` for Web Worker context, not `--target web`
+- wasm-pack target must be `--target web` — generates an ES module importable in module workers; `--target no-modules` uses `importScripts()` which breaks in Vite's module workers
 - Zustand: use `getState()` / `setState()` outside of any React context — never import hooks
 - PixiJS Sprite textures must be created from the shared renderer, not instantiated directly
 
@@ -144,7 +144,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ### Epic: Core Pipeline (de-risk first)
 - [x] Story 1: WASM pipeline proof of life
 - [x] Story 2: PixiJS canvas init + image load
-- [ ] Story 3: Connect WASM output to PixiJS canvas
+- [x] Story 3: Connect WASM output to PixiJS canvas
 
 ### Epic: Core Puzzle Loop
 - [ ] Story 4: Grid cut — divide image into NxN sprites
@@ -186,7 +186,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ---
 
 ## Current Session
-Working on: Story 3 — Connect WASM output to PixiJS canvas
-Last completed: Story 2 — PixiJS canvas init + image load
+Working on: Story 4 — Grid cut (divide image into NxN sprites)
+Last completed: Story 3 — Connect WASM output to PixiJS canvas
 Known issues: —
-Next after this: Story 4 — Grid cut (divide image into NxN sprites)
+Next after this: Story 5 — Scatter pieces on load
