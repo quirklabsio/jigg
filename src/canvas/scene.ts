@@ -2,6 +2,7 @@ import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { WorkerMessage } from '../puzzle/types';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
+import { attachDrag, Z_IDLE } from '../puzzle/drag';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
@@ -42,11 +43,20 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const pieceScreenW = (texture.width / GRID_SIZE) * scale;
   const pieceScreenH = (texture.height / GRID_SIZE) * scale;
 
+  app.stage.sortableChildren = true;
+  app.stage.eventMode = 'static';
+
   const sprites = buildGridSprites(app, texture, scale);
 
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
   console.log('pieces scattered:', usePuzzleStore.getState().pieces.length);
+
+  const pieces = usePuzzleStore.getState().pieces;
+  sprites.forEach((sprite, i) => {
+    sprite.zIndex = Z_IDLE;
+    attachDrag(app, sprite, pieces[i].id);
+  });
 
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);

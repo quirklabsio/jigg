@@ -149,7 +149,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ### Epic: Core Puzzle Loop
 - [x] Story 4: Grid cut — divide image into NxN sprites
 - [x] Story 5: Scatter pieces on load
-- [ ] Story 6: Drag and drop a piece
+- [x] Story 6: Drag and drop a piece
 - [ ] Story 7: Snap piece to correct position
 - [ ] Story 8: Detect puzzle completion
 
@@ -186,7 +186,7 @@ Claude should run `npm run typecheck` after every story to verify no type errors
 ---
 
 ## Current Session
-Working on: Story 6 — Drag and drop a piece
-Last completed: Story 5 — Scatter pieces on load
+Working on: Story 7 — Snap piece to correct position
+Last completed: Story 6 — Drag and drop a piece
 Known issues: —
-Next after this: Story 7 — Snap piece to correct position
+Next after this: Story 8 — Detect puzzle completion
