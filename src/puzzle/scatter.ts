@@ -36,12 +36,17 @@ export function scatterPieces(
       attempts++;
     } while (overlapsCenter(px, py) && attempts < MAX_ATTEMPTS);
 
-    return { ...group, position: { x: px, y: py } };
+    // group.rotation must match piece.rotation so snap detection is correct
+    const rotation = ROTATIONS[Math.floor(Math.random() * 4)];
+    return { ...group, position: { x: px, y: py }, rotation };
   });
+
+  // Build groupId → rotation so pieces and groups stay in sync
+  const groupRotation = new Map(scatteredGroups.map((g) => [g.id, g.rotation]));
 
   const scatteredPieces = pieces.map((piece) => ({
     ...piece,
-    rotation: ROTATIONS[Math.floor(Math.random() * 4)],
+    rotation: groupRotation.get(piece.groupId) ?? 0,
   }));
 
   usePuzzleStore.getState().setGroups(scatteredGroups);

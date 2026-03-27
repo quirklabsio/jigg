@@ -21,6 +21,7 @@ interface PuzzleState {
   updatePieceRotation: (id: string, rotation: number) => void;
   moveGroup: (groupId: string, position: { x: number; y: number }) => void;
   rotateGroup: (groupId: string) => void;
+  mergeGroups: (survivorId: string, absorbedId: string) => void;
 }
 
 export const usePuzzleStore = createStore<PuzzleState>((set) => ({
@@ -58,6 +59,29 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const groups = state.groups.map((g) =>
         g.id === groupId ? { ...g, rotation: g.rotation + HALF_PI } : g,
       );
+      return { pieces, groups, piecesById: toRecord(pieces), groupsById: toRecord(groups) };
+    }),
+  mergeGroups: (survivorId, absorbedId) =>
+    set((state) => {
+      const survivor = state.groupsById[survivorId];
+      const absorbed = state.groupsById[absorbedId];
+      if (!survivor || !absorbed) return state;
+      // Re-express absorbed pieces' localPositions relative to survivor's origin
+      const pieces = state.pieces.map((p) => {
+        if (p.groupId !== absorbedId) return p;
+        return {
+          ...p,
+          groupId: survivorId,
+          localPosition: {
+            x: absorbed.position.x + p.localPosition.x - survivor.position.x,
+            y: absorbed.position.y + p.localPosition.y - survivor.position.y,
+          },
+        };
+      });
+      const mergedPieceIds = [...survivor.pieceIds, ...absorbed.pieceIds];
+      const groups = state.groups
+        .filter((g) => g.id !== absorbedId)
+        .map((g) => (g.id === survivorId ? { ...g, pieceIds: mergedPieceIds } : g));
       return { pieces, groups, piecesById: toRecord(pieces), groupsById: toRecord(groups) };
     }),
 }));

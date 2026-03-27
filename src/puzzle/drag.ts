@@ -81,11 +81,15 @@ let groupEntries: GroupEntry[] = [];
 const _pos = new Point();
 const spatialHash = new SpatialHash();
 
-// ─── Rotate callback (wired by scene.ts) ──────────────────────────────────────
+// ─── Callbacks wired by scene.ts ──────────────────────────────────────────────
+let _spriteMap: Map<string, Sprite> | null = null;
 let _rotateCallback: ((groupId: string) => void) | null = null;
 let _lastTapMs = 0;
 let _lastTapGroupId = '';
 const DOUBLE_TAP_MS = 300;
+
+type SnapResult = { survivorId: string; absorbedId: string };
+let _snapCallback: ((groupId: string) => SnapResult | null) | null = null;
 
 // ─── AABB helpers ─────────────────────────────────────────────────────────────
 
@@ -162,11 +166,8 @@ function onUp(e?: FederatedPointerEvent): void {
   dragging = false;
   activePointerId = null;
 
-  const zIdx = ++settleCounter;
-  for (const { sprite: s } of groupEntries) {
-    s.scale.set(baseScale);
-    s.zIndex = zIdx;
-  }
+  // Reset drag scale — zIndex assigned after snap check below
+  for (const { sprite: s } of groupEntries) s.scale.set(baseScale);
   if (_hitLayer) _hitLayer.cursor = 'grab';
 
   const as = anchorSprite;
@@ -179,6 +180,35 @@ function onUp(e?: FederatedPointerEvent): void {
   if (aabb) spatialHash.update(activeGroupId, aabb.x, aabb.y, aabb.w, aabb.h);
 
   usePuzzleStore.getState().moveGroup(activeGroupId, { x: gox, y: goy });
+
+  // Snap check — may reposition sprites and merge groups
+  let finalGroupId = activeGroupId;
+  if (_snapCallback && _spriteMap) {
+    const result = _snapCallback(activeGroupId);
+    if (result) {
+      spatialHash.remove(result.absorbedId);
+      const snapState = usePuzzleStore.getState();
+      const survivorGroup = snapState.groupsById[result.survivorId];
+      if (survivorGroup) {
+        const saabb = initAABB(survivorGroup, snapState.piecesById, _spriteMap);
+        if (saabb) spatialHash.update(result.survivorId, saabb.x, saabb.y, saabb.w, saabb.h);
+      }
+      finalGroupId = result.survivorId;
+    }
+  }
+
+  // Assign unified settle zIndex to the dropped (or merged) group
+  const zIdx = ++settleCounter;
+  const finalState = usePuzzleStore.getState();
+  const finalGroup = finalState.groupsById[finalGroupId];
+  if (finalGroup && _spriteMap) {
+    for (const pid of finalGroup.pieceIds) {
+      const s = _spriteMap.get(pid);
+      if (s) s.zIndex = zIdx;
+    }
+  } else {
+    for (const { sprite: s } of groupEntries) s.zIndex = zIdx;
+  }
 
   activeGroupId = '';
   groupEntries = [];
@@ -216,6 +246,7 @@ export function initDragListeners(
 ): void {
   _app = app;
   _hitLayer = hl;
+  _spriteMap = spriteMap;
   settleCounter = spriteMap.size; // first drop gets zIndex > all initial per-sprite values
 
   // Populate spatial hash from scattered positions
@@ -316,8 +347,11 @@ export function initDragListeners(
     dragging = true;
     activeGroupId = bestGroupId;
 
+    // Only scale up solo pieces — multi-piece groups scale around individual
+    // centers which pulls inner edges apart and looks broken
+    const liftScale = group.pieceIds.length === 1 ? baseScale * DRAG_SCALE : baseScale;
     for (const { sprite: s } of groupEntries) {
-      s.scale.set(baseScale * DRAG_SCALE);
+      s.scale.set(liftScale);
       s.zIndex = settleCounter + 1; // above all currently settled pieces
     }
     hl.cursor = 'grabbing';
@@ -338,6 +372,16 @@ export function setRotateCallback(cb: (groupId: string) => void): void {
   _rotateCallback = cb;
 }
 
+/**
+ * Register the snap handler. Called once from scene.ts.
+ * Invoked on every drag drop; returns snap result or null.
+ */
+export function setSnapCallback(
+  cb: (groupId: string) => SnapResult | null,
+): void {
+  _snapCallback = cb;
+}
+
 /** Enable the hit layer. Call from main.ts after the full load chain resolves. */
 export function activateDrag(): void {
   if (_hitLayer) _hitLayer.eventMode = 'static';
@@ -353,6 +397,8 @@ export function resetDrag(): void {
   groupEntries = [];
   settleCounter = 0;
   _rotateCallback = null;
+  _snapCallback = null;
+  _spriteMap = null;
   _lastTapMs = 0;
   _lastTapGroupId = '';
   if (_hitLayer) { _hitLayer.eventMode = 'none'; _hitLayer = null; }
