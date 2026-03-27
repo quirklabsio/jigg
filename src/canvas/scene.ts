@@ -2,15 +2,21 @@ import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { WorkerMessage } from '../puzzle/types';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
-import { attachDrag, Z_IDLE } from '../puzzle/drag';
+import { createHitLayer, initDragListeners } from '../puzzle/drag';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const GRID_SIZE = 4;
 
 function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
-  const pieces = gridCut(texture.width, texture.height, GRID_SIZE, GRID_SIZE);
+  const { pieces, groups } = gridCut(texture.width, texture.height, GRID_SIZE, GRID_SIZE);
+
+  const gridIndex = new Map<string, string>();
+  pieces.forEach((p) => gridIndex.set(`${p.gridCoord.col},${p.gridCoord.row}`, p.id));
+
   usePuzzleStore.getState().setPieces(pieces);
+  usePuzzleStore.getState().setGroups(groups);
+  usePuzzleStore.getState().setGridIndex(gridIndex);
 
   return pieces.map((piece) => {
     const frame = new Rectangle(
@@ -29,10 +35,16 @@ function buildGridSprites(app: Application, texture: Texture, scale: number): Sp
 }
 
 function applyScatterToSprites(sprites: Sprite[]): void {
-  const pieces = usePuzzleStore.getState().pieces;
+  const { pieces, groups } = usePuzzleStore.getState();
+  const groupById = new Map(groups.map((g) => [g.id, g]));
   sprites.forEach((sprite, i) => {
-    sprite.position.set(pieces[i].position.x, pieces[i].position.y);
-    sprite.rotation = pieces[i].rotation;
+    const piece = pieces[i];
+    const group = groupById.get(piece.groupId)!;
+    sprite.position.set(
+      group.position.x + piece.localPosition.x,
+      group.position.y + piece.localPosition.y,
+    );
+    sprite.rotation = piece.rotation;
   });
 }
 
@@ -50,13 +62,20 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
-  console.log('pieces scattered:', usePuzzleStore.getState().pieces.length);
 
   const pieces = usePuzzleStore.getState().pieces;
+  console.log('pieces scattered:', pieces.length);
+
+  const spriteMap = new Map<string, Sprite>();
+  sprites.forEach((sprite, i) => spriteMap.set(pieces[i].id, sprite));
+
   sprites.forEach((sprite, i) => {
-    sprite.zIndex = Z_IDLE;
-    attachDrag(app, sprite, pieces[i].id);
+    sprite.zIndex = i; // unique per piece so topmost selection works before any drag
+    sprite.eventMode = 'none'; // permanently non-interactive — hitLayer handles all pointer events
   });
+
+  const hitLayer = createHitLayer(app);
+  initDragListeners(hitLayer, app, spriteMap);
 
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);

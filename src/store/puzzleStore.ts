@@ -1,22 +1,44 @@
 import { createStore } from 'zustand/vanilla';
-import type { Piece } from '../puzzle/types';
+import type { Piece, PieceGroup } from '../puzzle/types';
+
+function toRecord<T extends { id: string }>(arr: T[]): Record<string, T> {
+  const rec: Record<string, T> = {};
+  for (const item of arr) rec[item.id] = item;
+  return rec;
+}
 
 interface PuzzleState {
+  // Arrays — used by scatter.ts / scene.ts for iteration
   pieces: Piece[];
+  groups: PieceGroup[];
+  // Records — O(1) keyed lookup used by drag.ts and future snap logic
+  piecesById: Record<string, Piece>;
+  groupsById: Record<string, PieceGroup>;
+  gridIndex: Map<string, string>;
   setPieces: (pieces: Piece[]) => void;
-  updatePiecePosition: (id: string, position: { x: number; y: number }) => void;
+  setGroups: (groups: PieceGroup[]) => void;
+  setGridIndex: (index: Map<string, string>) => void;
   updatePieceRotation: (id: string, rotation: number) => void;
+  moveGroup: (groupId: string, position: { x: number; y: number }) => void;
 }
 
 export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   pieces: [],
-  setPieces: (pieces) => set({ pieces }),
-  updatePiecePosition: (id, position) =>
-    set((state) => ({
-      pieces: state.pieces.map((p) => (p.id === id ? { ...p, position } : p)),
-    })),
+  groups: [],
+  piecesById: {},
+  groupsById: {},
+  gridIndex: new Map(),
+  setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces) }),
+  setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
+  setGridIndex: (gridIndex) => set({ gridIndex }),
   updatePieceRotation: (id, rotation) =>
-    set((state) => ({
-      pieces: state.pieces.map((p) => (p.id === id ? { ...p, rotation } : p)),
-    })),
+    set((state) => {
+      const pieces = state.pieces.map((p) => (p.id === id ? { ...p, rotation } : p));
+      return { pieces, piecesById: toRecord(pieces) };
+    }),
+  moveGroup: (groupId, position) =>
+    set((state) => {
+      const groups = state.groups.map((g) => (g.id === groupId ? { ...g, position } : g));
+      return { groups, groupsById: toRecord(groups) };
+    }),
 }));

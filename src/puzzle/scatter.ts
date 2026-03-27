@@ -10,7 +10,7 @@ export function scatterPieces(
   pieceScreenW: number,
   pieceScreenH: number,
 ): void {
-  const pieces = usePuzzleStore.getState().pieces;
+  const { pieces, groups } = usePuzzleStore.getState();
 
   // Central reserved zone — 50% of viewport, centred
   const cx0 = viewportWidth * 0.25;
@@ -25,7 +25,7 @@ export function scatterPieces(
   const maxX = viewportWidth - pieceScreenW - PAD;
   const maxY = viewportHeight - pieceScreenH - PAD;
 
-  const scattered = pieces.map((piece) => {
+  const scatteredGroups = groups.map((group) => {
     let px = PAD;
     let py = PAD;
     let attempts = 0;
@@ -36,9 +36,14 @@ export function scatterPieces(
       attempts++;
     } while (overlapsCenter(px, py) && attempts < MAX_ATTEMPTS);
 
-    const rotationRad = (Math.random() * 90 - 45) * DEG_TO_RAD;
-    return { ...piece, position: { x: px, y: py }, rotation: rotationRad };
+    return { ...group, position: { x: px, y: py } };
   });
 
-  usePuzzleStore.getState().setPieces(scattered);
+  const scatteredPieces = pieces.map((piece) => ({
+    ...piece,
+    rotation: (Math.random() * 90 - 45) * DEG_TO_RAD,
+  }));
+
+  usePuzzleStore.getState().setGroups(scatteredGroups);
+  usePuzzleStore.getState().setPieces(scatteredPieces);
 }

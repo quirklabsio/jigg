@@ -1,11 +1,20 @@
 export interface Piece {
   id: string;
-  textureRegion: { x: number; y: number; w: number; h: number };
-  position: { x: number; y: number };
+  groupId: string;
+  localPosition: { x: number; y: number };
+  correctPosition: { x: number; y: number };
+  gridCoord: { col: number; row: number };
   rotation: number;
   placed: boolean;
   touched: boolean;
   stackIndex: number;
+  textureRegion: { x: number; y: number; w: number; h: number };
+}
+
+export interface PieceGroup {
+  id: string;
+  pieceIds: string[];
+  position: { x: number; y: number };
 }
 
 export interface PuzzleConfig {
