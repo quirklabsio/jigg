@@ -2,7 +2,8 @@ import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { WorkerMessage } from '../puzzle/types';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
-import { createHitLayer, initDragListeners } from '../puzzle/drag';
+import { createHitLayer, initDragListeners, setRotateCallback } from '../puzzle/drag';
+import { rotateGroup } from '../puzzle/rotate';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
@@ -76,6 +77,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   const hitLayer = createHitLayer(app);
   initDragListeners(hitLayer, app, spriteMap);
+  setRotateCallback((groupId) => rotateGroup(groupId, spriteMap));
 
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);

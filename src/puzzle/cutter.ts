@@ -35,6 +35,7 @@ export function gridCut(
         id: groupId,
         pieceIds: [id],
         position: { x, y },
+        rotation: 0,
       });
     }
   }

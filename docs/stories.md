@@ -10,7 +10,7 @@
 - [x] Story 5: Scatter pieces on load
 - [x] Story 6: Drag and drop a piece
 - [x] Story 7: Refactor to group model (PieceGroup, drag moves group)
-- [ ] Story 8: Rotate a piece/group (double-tap, 90° increments)
+- [x] Story 8: Rotate a piece/group (double-tap, 90° increments)
 - [ ] Story 9: Piece-to-piece snap (merge groups on compatible edge proximity)
 - [ ] Story 10: Board border + slot grid overlay
 - [ ] Story 11: Board snap (group snaps to correct world position)
@@ -49,6 +49,6 @@
 ---
 
 ## Current Session
-Last completed: Story 7 — Refactor to group model + drag bug fixes (z-index, hit accuracy)
-Next: Story 8 — Rotate a piece/group (double-tap, 90° increments)
+Last completed: Story 8 — Double-tap to rotate group 90° CW
+Next: Story 9 — Piece-to-piece snap (merge groups on compatible edge proximity)
 Known issues: —

@@ -20,6 +20,7 @@ interface PuzzleState {
   setGridIndex: (index: Map<string, string>) => void;
   updatePieceRotation: (id: string, rotation: number) => void;
   moveGroup: (groupId: string, position: { x: number; y: number }) => void;
+  rotateGroup: (groupId: string) => void;
 }
 
 export const usePuzzleStore = createStore<PuzzleState>((set) => ({
@@ -40,5 +41,23 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
     set((state) => {
       const groups = state.groups.map((g) => (g.id === groupId ? { ...g, position } : g));
       return { groups, groupsById: toRecord(groups) };
+    }),
+  rotateGroup: (groupId) =>
+    set((state) => {
+      const HALF_PI = Math.PI / 2;
+      const targetGroup = state.groupsById[groupId];
+      if (!targetGroup) return state;
+      const pieceIdSet = new Set(targetGroup.pieceIds);
+      // Bake 90° CW into localPosition: newLocalX = -localY, newLocalY = localX
+      // Also increment piece.rotation so sprites rebuild correctly from store state
+      const pieces = state.pieces.map((p) => {
+        if (!pieceIdSet.has(p.id)) return p;
+        const { x: lx, y: ly } = p.localPosition;
+        return { ...p, localPosition: { x: -ly, y: lx }, rotation: p.rotation + HALF_PI };
+      });
+      const groups = state.groups.map((g) =>
+        g.id === groupId ? { ...g, rotation: g.rotation + HALF_PI } : g,
+      );
+      return { pieces, groups, piecesById: toRecord(pieces), groupsById: toRecord(groups) };
     }),
 }));

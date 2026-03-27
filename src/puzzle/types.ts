@@ -15,6 +15,7 @@ export interface PieceGroup {
   id: string;
   pieceIds: string[];
   position: { x: number; y: number };
+  rotation: number; // radians, multiples of π/2, incremented on group rotate
 }
 
 export interface PuzzleConfig {

@@ -1,6 +1,6 @@
 import { usePuzzleStore } from '../store/puzzleStore';
 
-const DEG_TO_RAD = Math.PI / 180;
+const ROTATIONS = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
 const PAD = 12;
 const MAX_ATTEMPTS = 300;
 
@@ -41,7 +41,7 @@ export function scatterPieces(
 
   const scatteredPieces = pieces.map((piece) => ({
     ...piece,
-    rotation: (Math.random() * 90 - 45) * DEG_TO_RAD,
+    rotation: ROTATIONS[Math.floor(Math.random() * 4)],
   }));
 
   usePuzzleStore.getState().setGroups(scatteredGroups);

@@ -81,6 +81,12 @@ let groupEntries: GroupEntry[] = [];
 const _pos = new Point();
 const spatialHash = new SpatialHash();
 
+// ─── Rotate callback (wired by scene.ts) ──────────────────────────────────────
+let _rotateCallback: ((groupId: string) => void) | null = null;
+let _lastTapMs = 0;
+let _lastTapGroupId = '';
+const DOUBLE_TAP_MS = 300;
+
 // ─── AABB helpers ─────────────────────────────────────────────────────────────
 
 // AABB from current groupEntries and a known group origin
@@ -121,6 +127,20 @@ function initAABB(
   return minX === Infinity ? null : { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+// ─── Group origin ─────────────────────────────────────────────────────────────
+
+/**
+ * Recover the world-space group origin from any anchor sprite + its localPosition.
+ * Works correctly when localPositions have been baked (rotated groups included).
+ */
+function getVisualGroupOrigin(
+  sprite: Sprite,
+  localX: number,
+  localY: number,
+): { x: number; y: number } {
+  return { x: sprite.x - localX, y: sprite.y - localY };
+}
+
 // ─── Move / Up (module-level, no per-sprite closures) ─────────────────────────
 
 function onMove(e: FederatedPointerEvent): void {
@@ -152,8 +172,7 @@ function onUp(e?: FederatedPointerEvent): void {
   const as = anchorSprite;
   if (!as) return;
 
-  const gox = as.x - anchorLocalX;
-  const goy = as.y - anchorLocalY;
+  const { x: gox, y: goy } = getVisualGroupOrigin(as, anchorLocalX, anchorLocalY);
 
   // Final hash update — covers the case where pointer was never moved
   const aabb = aabbFromEntries(gox, goy);
@@ -252,6 +271,29 @@ export function initDragListeners(
 
     if (!bestGroupId) return;
 
+    // ── Double-tap detection ──────────────────────────────────────────────────
+    const now = performance.now();
+    if (
+      _rotateCallback &&
+      bestGroupId === _lastTapGroupId &&
+      now - _lastTapMs < DOUBLE_TAP_MS
+    ) {
+      // Double-tap: rotate, update hash, reset tap state, do not start drag
+      _rotateCallback(bestGroupId);
+      const rst = usePuzzleStore.getState();
+      const rg = rst.groupsById[bestGroupId];
+      if (rg) {
+        const raabb = initAABB(rg, rst.piecesById, spriteMap);
+        if (raabb) spatialHash.update(bestGroupId, raabb.x, raabb.y, raabb.w, raabb.h);
+      }
+      _lastTapMs = 0;
+      _lastTapGroupId = '';
+      e.stopPropagation();
+      return;
+    }
+    _lastTapMs = now;
+    _lastTapGroupId = bestGroupId;
+
     const group = st.groupsById[bestGroupId];
     const anchorPieceId = group.pieceIds[0];
     const anchorPiece = st.piecesById[anchorPieceId];
@@ -280,11 +322,20 @@ export function initDragListeners(
     }
     hl.cursor = 'grabbing';
 
-    dragOffsetX = (anchorRef.x - anchorPiece.localPosition.x) - px;
-    dragOffsetY = (anchorRef.y - anchorPiece.localPosition.y) - py;
+    const origin = getVisualGroupOrigin(anchorRef, anchorPiece.localPosition.x, anchorPiece.localPosition.y);
+    dragOffsetX = origin.x - px;
+    dragOffsetY = origin.y - py;
 
     e.stopPropagation();
   });
+}
+
+/**
+ * Register the rotation handler. Called once from scene.ts.
+ * When a double-tap is detected, drag.ts calls this with the groupId.
+ */
+export function setRotateCallback(cb: (groupId: string) => void): void {
+  _rotateCallback = cb;
 }
 
 /** Enable the hit layer. Call from main.ts after the full load chain resolves. */
@@ -301,6 +352,9 @@ export function resetDrag(): void {
   anchorSprite = null;
   groupEntries = [];
   settleCounter = 0;
+  _rotateCallback = null;
+  _lastTapMs = 0;
+  _lastTapGroupId = '';
   if (_hitLayer) { _hitLayer.eventMode = 'none'; _hitLayer = null; }
   _app = null;
 }
