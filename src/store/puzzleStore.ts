@@ -22,6 +22,7 @@ interface PuzzleState {
   moveGroup: (groupId: string, position: { x: number; y: number }) => void;
   rotateGroup: (groupId: string) => void;
   mergeGroups: (survivorId: string, absorbedId: string) => void;
+  markGroupPlaced: (groupId: string) => void;
 }
 
 export const usePuzzleStore = createStore<PuzzleState>((set) => ({
@@ -60,6 +61,16 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
         g.id === groupId ? { ...g, rotation: g.rotation + HALF_PI } : g,
       );
       return { pieces, groups, piecesById: toRecord(pieces), groupsById: toRecord(groups) };
+    }),
+  markGroupPlaced: (groupId) =>
+    set((state) => {
+      const group = state.groupsById[groupId];
+      if (!group) return state;
+      const pieceIdSet = new Set(group.pieceIds);
+      const pieces = state.pieces.map((p) =>
+        pieceIdSet.has(p.id) ? { ...p, placed: true } : p,
+      );
+      return { pieces, piecesById: toRecord(pieces) };
     }),
   mergeGroups: (survivorId, absorbedId) =>
     set((state) => {

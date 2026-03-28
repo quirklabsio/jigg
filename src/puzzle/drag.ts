@@ -91,15 +91,25 @@ const DOUBLE_TAP_MS = 300;
 type SnapResult = { survivorId: string; absorbedId: string };
 let _snapCallback: ((groupId: string) => SnapResult | null) | null = null;
 
+type BoardSnapResult = { groupId: string; pieceIds: string[] };
+let _boardSnapCallback: ((groupId: string) => BoardSnapResult | null) | null = null;
+
 // ─── AABB helpers ─────────────────────────────────────────────────────────────
 
-// AABB from current groupEntries and a known group origin
+// AABB from current groupEntries and a known group origin.
+// Uses rotation-corrected half-extents so rotated pieces are fully covered.
 function aabbFromEntries(
   gox: number, goy: number,
 ): { x: number; y: number; w: number; h: number } | null {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const rot = usePuzzleStore.getState().groupsById[activeGroupId]?.rotation ?? 0;
+  const ac = Math.abs(Math.cos(rot));
+  const as = Math.abs(Math.sin(rot));
   for (const { sprite: s, localX, localY } of groupEntries) {
-    const hw = s.width / 2; const hh = s.height / 2;
+    const tw = s.texture.frame.width * s.scale.x;
+    const th = s.texture.frame.height * s.scale.y;
+    const hw = (tw * ac + th * as) / 2;
+    const hh = (tw * as + th * ac) / 2;
     const cx = gox + localX; const cy = goy + localY;
     if (cx - hw < minX) minX = cx - hw;
     if (cy - hh < minY) minY = cy - hh;
@@ -109,18 +119,24 @@ function aabbFromEntries(
   return minX === Infinity ? null : { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-// AABB for initial spatial hash population (from store positions + sprite sizes)
+// AABB for initial spatial hash population (from store positions + sprite sizes).
+// Uses rotation-corrected half-extents so rotated pieces are fully covered.
 function initAABB(
   group: PieceGroup,
   piecesById: Record<string, Piece>,
   spriteMap: Map<string, Sprite>,
 ): { x: number; y: number; w: number; h: number } | null {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const ac = Math.abs(Math.cos(group.rotation));
+  const as = Math.abs(Math.sin(group.rotation));
   for (const pid of group.pieceIds) {
     const piece = piecesById[pid];
     const s = spriteMap.get(pid);
     if (!piece || !s) continue;
-    const hw = s.width / 2; const hh = s.height / 2;
+    const tw = s.texture.frame.width * s.scale.x;
+    const th = s.texture.frame.height * s.scale.y;
+    const hw = (tw * ac + th * as) / 2;
+    const hh = (tw * as + th * ac) / 2;
     const cx = group.position.x + piece.localPosition.x;
     const cy = group.position.y + piece.localPosition.y;
     if (cx - hw < minX) minX = cx - hw;
@@ -181,7 +197,7 @@ function onUp(e?: FederatedPointerEvent): void {
 
   usePuzzleStore.getState().moveGroup(activeGroupId, { x: gox, y: goy });
 
-  // Snap check — may reposition sprites and merge groups
+  // Piece-to-piece snap check — may reposition sprites and merge groups
   let finalGroupId = activeGroupId;
   if (_snapCallback && _spriteMap) {
     const result = _snapCallback(activeGroupId);
@@ -194,6 +210,14 @@ function onUp(e?: FederatedPointerEvent): void {
         if (saabb) spatialHash.update(result.survivorId, saabb.x, saabb.y, saabb.w, saabb.h);
       }
       finalGroupId = result.survivorId;
+    }
+  }
+
+  // Board snap check — after piece-to-piece snap
+  if (_boardSnapCallback && _spriteMap) {
+    const boardResult = _boardSnapCallback(finalGroupId);
+    if (boardResult) {
+      spatialHash.remove(boardResult.groupId);
     }
   }
 
@@ -382,6 +406,17 @@ export function setSnapCallback(
   _snapCallback = cb;
 }
 
+/**
+ * Register the board snap handler. Called once from scene.ts.
+ * Invoked after piece-to-piece snap on every drag drop.
+ * On snap: removes group from spatial hash (pieces become non-interactive).
+ */
+export function setBoardSnapCallback(
+  cb: (groupId: string) => BoardSnapResult | null,
+): void {
+  _boardSnapCallback = cb;
+}
+
 /** Enable the hit layer. Call from main.ts after the full load chain resolves. */
 export function activateDrag(): void {
   if (_hitLayer) _hitLayer.eventMode = 'static';
@@ -398,6 +433,7 @@ export function resetDrag(): void {
   settleCounter = 0;
   _rotateCallback = null;
   _snapCallback = null;
+  _boardSnapCallback = null;
   _spriteMap = null;
   _lastTapMs = 0;
   _lastTapGroupId = '';

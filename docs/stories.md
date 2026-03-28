@@ -13,7 +13,7 @@
 - [x] Story 8: Rotate a piece/group (double-tap, 90° increments)
 - [x] Story 9: Piece-to-piece snap (merge groups on compatible edge proximity)
 - [x] Story 10: Board border + slot grid overlay
-- [ ] Story 11: Board snap (group snaps to correct world position)
+- [x] Story 11: Board snap (group snaps to correct world position)
 - [ ] Story 12: Detect puzzle completion
 
 ## Epic: Smart Cutting
@@ -49,5 +49,5 @@
 ---
 
 ## Current Session
-Last completed: Story 10 — Board border + slot grid overlay
-Next: Story 11 — Board snap (group snaps to correct world position)
+Last completed: Story 11 — Board snap (group snaps to correct world position)
+Next: Story 12 — Detect puzzle completion

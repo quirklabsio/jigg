@@ -1,7 +1,9 @@
 import type { Sprite } from 'pixi.js';
+import type { Piece } from './types';
 import { usePuzzleStore } from '../store/puzzleStore';
 
 const SNAP_THRESHOLD_SQ = 40 * 40;
+const BOARD_SNAP_THRESHOLD_SQ = 60 * 60;
 const TWO_PI = 2 * Math.PI;
 
 // [dCol, dRow, ldx, ldy]
@@ -163,4 +165,89 @@ export function checkAndApplySnap(
 
   console.groupEnd();
   return result;
+}
+
+/**
+ * After a drag drop (and after piece-to-piece snap), check if any piece in
+ * the group is close enough to its correctPosition to board-snap the whole group.
+ *
+ * Only fires when group rotation is ≈ 0 — rotated groups cannot land in a slot.
+ *
+ * On snap:
+ *   1. Computes offset from the triggering piece's worldPos → correctPosition
+ *   2. Applies offset to group.position and all sprites immediately
+ *   3. Commits position + markGroupPlaced to Zustand
+ *
+ * Returns { groupId, pieceIds } or null.
+ */
+export function checkAndApplyBoardSnap(
+  groupId: string,
+  spriteMap: Map<string, Sprite>,
+): { groupId: string; pieceIds: string[] } | null {
+  const state = usePuzzleStore.getState();
+  const group = state.groupsById[groupId];
+  if (!group) return null;
+
+  // Rotated groups cannot board-snap — axis-aligned only
+  const rot = normRot(group.rotation);
+  if (rot > 0.01 && rot < TWO_PI - 0.01) return null;
+
+  console.group('Board snap check');
+
+  let snapPiece: Piece | null = null;
+
+  for (const pid of group.pieceIds) {
+    const piece = state.piecesById[pid];
+    if (!piece) continue;
+    const wx = group.position.x + piece.localPosition.x;
+    const wy = group.position.y + piece.localPosition.y;
+    const dSq =
+      (wx - piece.correctPosition.x) ** 2 + (wy - piece.correctPosition.y) ** 2;
+    const snaps = dSq < BOARD_SNAP_THRESHOLD_SQ;
+    console.log(
+      'piece:', pid,
+      'worldPos:', { x: Math.round(wx), y: Math.round(wy) },
+      'correctPos:', {
+        x: Math.round(piece.correctPosition.x),
+        y: Math.round(piece.correctPosition.y),
+      },
+      'distSq:', Math.round(dSq),
+      'threshold:', BOARD_SNAP_THRESHOLD_SQ,
+      'snap:', snaps,
+    );
+    if (snaps && !snapPiece) snapPiece = piece;
+  }
+
+  if (snapPiece) {
+    const wx = group.position.x + snapPiece.localPosition.x;
+    const wy = group.position.y + snapPiece.localPosition.y;
+    const offsetX = snapPiece.correctPosition.x - wx;
+    const offsetY = snapPiece.correctPosition.y - wy;
+    const newGroupPos = {
+      x: group.position.x + offsetX,
+      y: group.position.y + offsetY,
+    };
+
+    // Move all sprites to snapped positions immediately
+    for (const pid of group.pieceIds) {
+      const p = state.piecesById[pid];
+      const s = spriteMap.get(pid);
+      if (!p || !s) continue;
+      s.x = newGroupPos.x + p.localPosition.x;
+      s.y = newGroupPos.y + p.localPosition.y;
+    }
+
+    usePuzzleStore.getState().moveGroup(groupId, newGroupPos);
+    usePuzzleStore.getState().markGroupPlaced(groupId);
+
+    const totalPlaced = usePuzzleStore.getState().pieces.filter((p) => p.placed).length;
+    console.log(
+      'BOARD SNAP:', groupId,
+      'pieces placed:', group.pieceIds.length,
+      'total placed:', totalPlaced,
+    );
+  }
+
+  console.groupEnd();
+  return snapPiece ? { groupId, pieceIds: [...group.pieceIds] } : null;
 }

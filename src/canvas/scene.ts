@@ -3,16 +3,17 @@ import type { WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
-import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback } from '../puzzle/drag';
+import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback, setBoardSnapCallback } from '../puzzle/drag';
 import { rotateGroup } from '../puzzle/rotate';
-import { checkAndApplySnap } from '../puzzle/snap';
+import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
-const GRID_SIZE = 4;
+const COLS = 2;
+const ROWS = 4;
 
 function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
-  const { pieces, groups } = gridCut(texture.width, texture.height, GRID_SIZE, GRID_SIZE);
+  const { pieces, groups } = gridCut(texture.width, texture.height, COLS, ROWS);
 
   const gridIndex = new Map<string, string>();
   pieces.forEach((p) => gridIndex.set(`${p.gridCoord.col},${p.gridCoord.row}`, p.id));
@@ -55,19 +56,37 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const texture = await Assets.load<Texture>(imageUrl);
 
   const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
-  const pieceScreenW = (texture.width / GRID_SIZE) * scale;
-  const pieceScreenH = (texture.height / GRID_SIZE) * scale;
+  const pieceScreenW = (texture.width / COLS) * scale;
+  const pieceScreenH = (texture.height / ROWS) * scale;
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
 
-  const board = createBoard(texture.width, texture.height, GRID_SIZE, GRID_SIZE, scale, app.screen.width, app.screen.height);
+  const board = createBoard(texture.width, texture.height, COLS, ROWS, scale, app.screen.width, app.screen.height);
   app.stage.addChild(board);
 
   const sprites = buildGridSprites(app, texture, scale);
 
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
+
+  // Convert correctPositions from image-pixel space → world-screen space.
+  // Board is centred: left = (screenW - imageW*scale) / 2, top = (screenH - imageH*scale) / 2.
+  // Piece sprites have anchor(0.5), so the correct world centre of each slot is:
+  //   boardLeft + correctPosition.x * scale + pieceScreenW / 2
+  const boardLeft = (app.screen.width  - texture.width  * scale) / 2;
+  const boardTop  = (app.screen.height - texture.height * scale) / 2;
+  {
+    const { pieces: currentPieces } = usePuzzleStore.getState();
+    const worldPieces = currentPieces.map((p) => ({
+      ...p,
+      correctPosition: {
+        x: boardLeft + p.correctPosition.x * scale + pieceScreenW / 2,
+        y: boardTop  + p.correctPosition.y * scale + pieceScreenH / 2,
+      },
+    }));
+    usePuzzleStore.getState().setPieces(worldPieces);
+  }
 
   const pieces = usePuzzleStore.getState().pieces;
   console.log('pieces scattered:', pieces.length);
@@ -84,6 +103,40 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   initDragListeners(hitLayer, app, spriteMap);
   setRotateCallback((groupId) => rotateGroup(groupId, spriteMap));
   setSnapCallback((groupId) => checkAndApplySnap(groupId, spriteMap));
+  setBoardSnapCallback((groupId) => {
+    const result = checkAndApplyBoardSnap(groupId, spriteMap);
+    if (result) {
+      // 150ms scale pulse (1.0 → 1.05 → 1.0) + brightness tint (0xffffff → 0xeeeeff → 0xffffff)
+      const startTime = performance.now();
+      const DURATION_MS = 150;
+      const tickerFn = () => {
+        const t = Math.min((performance.now() - startTime) / DURATION_MS, 1);
+        const pulseFactor = 1 + 0.05 * Math.sin(t * Math.PI);
+        // G channel: 255 → 238 → 255 (R and B stay at 255)
+        const gChannel = Math.round(255 - 17 * Math.sin(t * Math.PI));
+        const tint = (0xff << 16) | (gChannel << 8) | 0xff;
+        for (const pid of result.pieceIds) {
+          const s = spriteMap.get(pid);
+          if (s) {
+            s.scale.set(scale * pulseFactor);
+            s.tint = tint;
+          }
+        }
+        if (t >= 1) {
+          for (const pid of result.pieceIds) {
+            const s = spriteMap.get(pid);
+            if (s) {
+              s.scale.set(scale);
+              s.tint = 0xffffff;
+            }
+          }
+          app.ticker.remove(tickerFn);
+        }
+      };
+      app.ticker.add(tickerFn);
+    }
+    return result;
+  });
 
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);
