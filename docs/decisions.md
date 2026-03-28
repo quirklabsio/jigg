@@ -24,3 +24,7 @@ Do not revisit without asking.
 - **activePointerId pointer lock** — prevents two groups being dragged simultaneously; checked on every pointermove and pointerup.
 - **pointerupoutside on stage** — prevents stuck-drag when pointer leaves canvas.
 - **baseScale captured at drag start** — not at init time, so scale is correct if pieces have been resized.
+- **DRAG_SCALE solo-only** — scale lift on drag only applied when group has exactly 1 piece. Multi-piece groups scale individual sprites around their own centers, creating visible gaps at inner edges.
+
+## Process
+- **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

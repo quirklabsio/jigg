@@ -12,7 +12,7 @@
 - [x] Story 7: Refactor to group model (PieceGroup, drag moves group)
 - [x] Story 8: Rotate a piece/group (double-tap, 90° increments)
 - [x] Story 9: Piece-to-piece snap (merge groups on compatible edge proximity)
-- [ ] Story 10: Board border + slot grid overlay
+- [x] Story 10: Board border + slot grid overlay
 - [ ] Story 11: Board snap (group snaps to correct world position)
 - [ ] Story 12: Detect puzzle completion
 
@@ -49,6 +49,6 @@
 ---
 
 ## Current Session
-Last completed: Story 9 — Piece-to-piece snap, group merge
-Next: Story 10 — Board border + slot grid overlay
-Known issues: —
+Last completed: Story 9 — Piece-to-piece snap (verified)
+In progress: Story 10 — Board border + slot grid overlay (uncommitted, awaiting test)
+Next: Story 11 — Board snap (group snaps to correct world position)

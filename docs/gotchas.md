@@ -20,6 +20,11 @@
 - PixiJS Sprite textures must be created from the shared renderer, not instantiated directly
 - `s.width` on a rotated sprite returns the AABB width, not the texture width — use `s.texture.frame.width` for rotation-aware hit testing
 - Initial sprite zIndex should be unique per sprite (use loop index `i`); set `settleCounter = spriteMap.size` in `initDragListeners` so first drop's zIndex clears all initial values
+- **Graphics path resets on fill()/stroke()**: In PixiJS v8, each `g.fill()` or `g.stroke()` call applies to the current path and then resets it. Batch all path commands (moveTo/lineTo, circle, rect) before calling fill()/stroke() to apply one style to many shapes in a single draw call. Calling fill() in a loop = separate draw calls per shape.
+- **DRAG_SCALE gap on inner edges**: Applying scale > 1 to every sprite in a multi-piece group scales each around its own center (anchor=0.5), pulling inner edges apart visibly. Fix: only apply DRAG_SCALE when `group.pieceIds.length === 1`.
+
+## Snap / Rotation
+- **group.rotation not set in scatter**: `scatter.ts` was randomising `piece.rotation` but not updating `group.rotation`. Snap checks `group.rotation`, not `piece.rotation`. Symptom: snap never fires for rotated pieces because `normRot(group.rotation)` always returned 0. Fix: assign `group.rotation = piece.rotation` in scatter when setting piece rotation.
 
 ## Pixel Extraction
 - OffscreenCanvas used for pixel extraction in scene.ts: `texture.source.resource as CanvasImageSource` draws onto `OffscreenCanvas` 2d context; use `new Uint8Array(imageData.data.buffer)` to convert `Uint8ClampedArray` → `Uint8Array` for postMessage to worker
