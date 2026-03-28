@@ -1,5 +1,6 @@
 import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { WorkerMessage } from '../puzzle/types';
+import { createBoard } from './board';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
 import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback } from '../puzzle/drag';
@@ -59,6 +60,9 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
+
+  const board = createBoard(texture.width, texture.height, GRID_SIZE, GRID_SIZE, scale, app.screen.width, app.screen.height);
+  app.stage.addChild(board);
 
   const sprites = buildGridSprites(app, texture, scale);
 

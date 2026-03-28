@@ -49,6 +49,5 @@
 ---
 
 ## Current Session
-Last completed: Story 9 — Piece-to-piece snap (verified)
-In progress: Story 10 — Board border + slot grid overlay (uncommitted, awaiting test)
+Last completed: Story 10 — Board border + slot grid overlay
 Next: Story 11 — Board snap (group snaps to correct world position)
