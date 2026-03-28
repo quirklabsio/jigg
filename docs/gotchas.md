@@ -5,6 +5,8 @@
 - wasm-pack target must be `--target web` — generates ES module importable in module workers; `--target no-modules` uses `importScripts()` which breaks in Vite's module workers (Vite dev mode always serves `?worker` imports as module workers)
 - WASM loaded in workers via dynamic import with vite-ignore: `import(/* @vite-ignore */ '/wasm/jigg_analysis.js')` — Vite skips bundling the static public asset. Do not use `importScripts()`
 - `vite.config.ts` `worker.format: 'iife'` was explored in Story 1 then removed in Story 3 — only applies to production builds, not Vite dev mode. Do not re-add it
+- **`wasm-pack: command not found` in npm scripts**: `wasm-pack` lives in `~/.cargo/bin` which is not on the default shell PATH when npm scripts run. Fix: `export PATH="$HOME/.cargo/bin:$PATH" && npm run wasm:build`, or add `~/.cargo/bin` to the system PATH permanently. Same applies to `cargo`.
+- **`Vec<u8>` → `Uint8Array` return type**: wasm-bindgen correctly maps `Vec<u8>` return values to `Uint8Array` on the JS side. No cast needed — the generated `.d.ts` reflects this after `wasm-pack build`. Always check the generated type before adding manual casts.
 
 ## TypeScript / tsconfig
 - tsconfig must exclude worker files to prevent DOM lib conflict: `src/workers/` files use `/// <reference no-default-lib="true"/>` which strips DOM types from the entire compilation if not excluded. Fix: `"exclude": ["src/workers"]` in tsconfig.json. Workers still compiled by Vite at runtime; exclusion is only for `tsc --noEmit`. tsconfig `lib` should be `["ES2022", "DOM", "DOM.Iterable"]` (no "WebWorker" since workers are excluded)
@@ -28,6 +30,10 @@
 
 ## Pixel Extraction
 - OffscreenCanvas used for pixel extraction in scene.ts: `texture.source.resource as CanvasImageSource` draws onto `OffscreenCanvas` 2d context; use `new Uint8Array(imageData.data.buffer)` to convert `Uint8ClampedArray` → `Uint8Array` for postMessage to worker
+- **Image conversion tooling not available in this environment**: `convert` (ImageMagick), `ffmpeg`, and Python `PIL` are all absent. To swap test images, copy the file directly and update `TEST_IMAGE_URL` in `main.ts` to match the extension. PNG works fine with PixiJS `Assets.load`.
+
+## PixiJS Texture from Canvas
+- **`Texture.from(HTMLCanvasElement)` works in PixiJS v8**: `HTMLCanvasElement` is part of `ImageResource` which is part of `TextureResourceOrOptions`. Pass a canvas element directly — no intermediate `ImageBitmap` or data URL needed. Creates a GPU-backed texture immediately.
 
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks

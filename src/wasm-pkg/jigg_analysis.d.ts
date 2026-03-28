@@ -2,18 +2,20 @@
 /* eslint-disable */
 
 /**
- * Placeholder: returns the byte length of the pixel buffer.
- * For a width×height RGBA image this equals width * height * 4.
+ * Canny edge detection.
+ * Input: RGBA pixel buffer (width * height * 4 bytes).
+ * Output: edge map, same dimensions, 255 = edge pixel, 0 = non-edge pixel.
  */
-export function analyze_image(pixels: Uint8Array, _width: number, _height: number): number;
+export function analyze_image(pixels: Uint8Array, width: number, height: number): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly analyze_image: (a: number, b: number, c: number, d: number) => number;
+    readonly analyze_image: (a: number, b: number, c: number, d: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

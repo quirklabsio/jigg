@@ -32,5 +32,9 @@ Do not revisit without asking.
 - **Completion message is screen-space PixiJS, not DOM** — UI container at `zIndex: 9999` with `app.screen` coordinates stays centred regardless of zoom/pan. No DOM elements for in-puzzle UI (consistent with the PixiJS-owns-canvas principle).
 - **Hit layer disabled on completion, not pieces individually** — setting `hitLayer.eventMode = 'none'` is a single call that stops all interaction. Per-piece toggling would be error-prone as piece count grows.
 
+## WASM / Worker
+- **Direct wasm-pkg import over dynamic `/wasm/` path import**: Workers import `init` and exported functions from `../wasm-pkg/jigg_analysis.js` directly rather than the earlier `import(/* @vite-ignore */ '/wasm/...')` pattern. Direct import is statically typed (no manual casts), tree-shaken by Vite, and avoids maintaining a separate `public/wasm/` copy. `wasm-pkg/` files are generated artifacts — committed but not hand-edited.
+- **Edge overlay starts hidden, toggled with E**: Always-on overlay is too noisy during normal play. Debug overlays default to `visible=false`; developer toggles with a key. Consistent pattern for all future debug layers.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

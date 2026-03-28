@@ -15,13 +15,13 @@ self.addEventListener(
     await initPromise;
 
     const { pixels, width, height } = event.data;
-    const pixelCount = analyze_image(pixels, width, height);
+    const edgeMap = analyze_image(pixels, width, height);
 
-    const response: WorkerMessage<{ pixelCount: number }> = {
+    const response: WorkerMessage<{ edgeMap: Uint8Array; width: number; height: number }> = {
       type: 'ANALYSIS_COMPLETE',
-      payload: { pixelCount },
+      payload: { edgeMap, width, height },
     };
 
-    self.postMessage(response);
+    self.postMessage(response, [edgeMap.buffer]);
   },
 );

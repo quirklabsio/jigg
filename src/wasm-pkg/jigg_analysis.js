@@ -1,18 +1,21 @@
 /* @ts-self-types="./jigg_analysis.d.ts" */
 
 /**
- * Placeholder: returns the byte length of the pixel buffer.
- * For a width×height RGBA image this equals width * height * 4.
+ * Canny edge detection.
+ * Input: RGBA pixel buffer (width * height * 4 bytes).
+ * Output: edge map, same dimensions, 255 = edge pixel, 0 = non-edge pixel.
  * @param {Uint8Array} pixels
- * @param {number} _width
- * @param {number} _height
- * @returns {number}
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
  */
-export function analyze_image(pixels, _width, _height) {
+export function analyze_image(pixels, width, height) {
     const ptr0 = passArray8ToWasm0(pixels, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.analyze_image(ptr0, len0, _width, _height);
-    return ret >>> 0;
+    const ret = wasm.analyze_image(ptr0, len0, width, height);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
 }
 
 function __wbg_get_imports() {
@@ -32,6 +35,11 @@ function __wbg_get_imports() {
         __proto__: null,
         "./jigg_analysis_bg.js": import0,
     };
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let cachedUint8ArrayMemory0 = null;

@@ -3,7 +3,7 @@ import { initApp } from './canvas/app';
 import { loadScene } from './canvas/scene';
 import { activateDrag } from './puzzle/drag';
 
-const TEST_IMAGE_URL = '/test-image.jpg';
+const TEST_IMAGE_URL = '/test-face.png';
 
 const container = document.getElementById('app')!;
 const app = await initApp(container);

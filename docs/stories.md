@@ -17,7 +17,7 @@
 - [x] Story 12: Detect puzzle completion
 
 ## Epic: Smart Cutting
-- [ ] Story 13: Edge detection in WASM → visualize overlay
+- [x] Story 13: Edge detection in WASM → visualize overlay
 - [ ] Story 14: Bezier cut generation from edge map
 - [ ] Story 15: Content-aware cut routing (follows contours)
 
@@ -49,8 +49,15 @@
 ---
 
 ## Current Session
-Last completed: Story 12 — Detect puzzle completion
-Next: Story 13 — Edge detection in WASM → visualize overlay
+Last completed: Story 13 — Edge detection in WASM → visualize overlay
+Next: Story 14 — Bezier cut generation from edge map
+
+### Story 13 notes
+- Full Canny in `lib.rs`: greyscale → Gaussian blur → Sobel → NMS → double threshold → hysteresis BFS — see `wasm-pipeline.md` for detail
+- Worker message protocol updated: posts `{ edgeMap, width, height }`, transfers buffer — see `wasm-pipeline.md`
+- Edge overlay in `scene.ts`: cyan RGBA canvas → `Texture.from(canvas)` → Sprite at board position, `alpha=0.6`, `zIndex=999`, starts hidden, `E` toggles
+- `wasm-pack: command not found` on first run — `~/.cargo/bin` not on PATH; fix in `gotchas.md`
+- `Vec<u8>` return maps to `Uint8Array` after wasm-pack build — no manual cast needed
 
 ### Story 12 notes
 - `isComplete` in `completion.ts` — pure O(n) early-exit check over `piecesById`
