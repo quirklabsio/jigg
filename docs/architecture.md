@@ -3,7 +3,7 @@
 ## Principles
 
 ### Implemented
-- PixiJS owns the canvas — never use DOM elements for puzzle pieces
+- PixiJS owns the canvas — never use DOM elements for puzzle pieces or in-puzzle UI
 - State lives in Zustand, PixiJS reads it imperatively via `getState()`
 - All CPU-heavy work runs in Web Workers; WASM communicates via `postMessage` only — no shared state
 - All piece positions are stored in world space, never screen space
@@ -13,6 +13,7 @@
 - Spatial hash maps screen cells to group IDs for O(1) pointer-to-group lookup on pointerdown
 - Z-index uses a monotonic `settleCounter` — each drop gets a unique value so most-recently-placed group always renders on top
 - `activePointerId` pointer lock prevents two groups from being dragged simultaneously
+- `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/` — prevents circular deps
 
 ### Planned (not yet implemented)
 - Dexie writes debounced 500ms via persistence bridge that subscribes to Zustand — nothing else writes to Dexie directly (Stories 27–29)
@@ -26,8 +27,8 @@
 ### Exists now
 ```
 src/
-  canvas/        # PixiJS setup, scene management, render loop
-  puzzle/        # piece logic, cutting, drag, scatter
+  canvas/        # PixiJS setup, scene management, render loop, UI overlays
+  puzzle/        # piece logic, cutting, drag, scatter, snap, completion
   workers/       # Web Worker entry points
   store/         # Zustand stores
   wasm-pkg/      # generated WASM bindings (do not edit — output of wasm:build)
@@ -35,7 +36,6 @@ crates/
   jigg-analysis/ # Rust WASM crate (edge detection, Bezier cut generation)
 public/
   wasm/          # static WASM assets served directly (not bundled by Vite)
-stories/         # agent story files
 docs/            # this directory
 ```
 
@@ -44,7 +44,6 @@ docs/            # this directory
 src/
   db/            # Dexie schema and queries (Stories 27–29)
   shaders/       # GLSL .frag/.vert files (Stories 16–19)
-  ui/            # toolbar, panels (Stories 20+)
 ```
 
 ---

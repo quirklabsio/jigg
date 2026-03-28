@@ -4,13 +4,14 @@ import { createBoard } from './board';
 import { gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
 import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback, setBoardSnapCallback } from '../puzzle/drag';
+import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const COLS = 2;
-const ROWS = 4;
+const ROWS = 2;
 
 function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
   const { pieces, groups } = gridCut(texture.width, texture.height, COLS, ROWS);
@@ -134,6 +135,10 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         }
       };
       app.ticker.add(tickerFn);
+
+      if (usePuzzleStore.getState().puzzleComplete) {
+        onComplete(app, hitLayer, usePuzzleStore.getState().pieces.length);
+      }
     }
     return result;
   });

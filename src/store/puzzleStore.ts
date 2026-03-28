@@ -15,6 +15,7 @@ interface PuzzleState {
   piecesById: Record<string, Piece>;
   groupsById: Record<string, PieceGroup>;
   gridIndex: Map<string, string>;
+  puzzleComplete: boolean;
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
@@ -31,6 +32,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   piecesById: {},
   groupsById: {},
   gridIndex: new Map(),
+  puzzleComplete: false,
   setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces) }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
@@ -70,7 +72,15 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const pieces = state.pieces.map((p) =>
         pieceIdSet.has(p.id) ? { ...p, placed: true } : p,
       );
-      return { pieces, piecesById: toRecord(pieces) };
+      const piecesById = toRecord(pieces);
+      let puzzleComplete = false;
+      if (!state.puzzleComplete) {
+        puzzleComplete = true;
+        for (const piece of Object.values(piecesById)) {
+          if (!piece.placed) { puzzleComplete = false; break; }
+        }
+      }
+      return { pieces, piecesById, puzzleComplete: state.puzzleComplete || puzzleComplete };
     }),
   mergeGroups: (survivorId, absorbedId) =>
     set((state) => {

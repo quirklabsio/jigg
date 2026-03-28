@@ -26,5 +26,11 @@ Do not revisit without asking.
 - **baseScale captured at drag start** — not at init time, so scale is correct if pieces have been resized.
 - **DRAG_SCALE solo-only** — scale lift on drag only applied when group has exactly 1 piece. Multi-piece groups scale individual sprites around their own centers, creating visible gaps at inner edges.
 
+## Completion Detection
+- **Completion check inlined in store, not imported from `completion.ts`** — avoids a circular dependency (`puzzleStore` → `completion` → `puzzleStore`). The check is three lines and belongs conceptually in `markGroupPlaced` anyway. `isComplete` still lives in `completion.ts` as a pure utility for external callers.
+- **`onComplete` receives `totalCount` as a param** — avoids `completion.ts` importing `usePuzzleStore`. `scene.ts` is the natural owner of both `app`, `hitLayer`, and store access; it passes what's needed.
+- **Completion message is screen-space PixiJS, not DOM** — UI container at `zIndex: 9999` with `app.screen` coordinates stays centred regardless of zoom/pan. No DOM elements for in-puzzle UI (consistent with the PixiJS-owns-canvas principle).
+- **Hit layer disabled on completion, not pieces individually** — setting `hitLayer.eventMode = 'none'` is a single call that stops all interaction. Per-piece toggling would be error-prone as piece count grows.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

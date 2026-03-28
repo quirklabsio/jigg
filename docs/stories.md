@@ -14,7 +14,7 @@
 - [x] Story 9: Piece-to-piece snap (merge groups on compatible edge proximity)
 - [x] Story 10: Board border + slot grid overlay
 - [x] Story 11: Board snap (group snaps to correct world position)
-- [ ] Story 12: Detect puzzle completion
+- [x] Story 12: Detect puzzle completion
 
 ## Epic: Smart Cutting
 - [ ] Story 13: Edge detection in WASM → visualize overlay
@@ -49,5 +49,13 @@
 ---
 
 ## Current Session
-Last completed: Story 11 — Board snap (group snaps to correct world position)
-Next: Story 12 — Detect puzzle completion
+Last completed: Story 12 — Detect puzzle completion
+Next: Story 13 — Edge detection in WASM → visualize overlay
+
+### Story 12 notes
+- `isComplete` in `completion.ts` — pure O(n) early-exit check over `piecesById`
+- Completion check inlined in `markGroupPlaced` (store) to avoid circular dep: `puzzleStore` ↔ `completion`
+- `puzzleComplete: boolean` added to Zustand store; set once, never unset
+- `onComplete(app, hitLayer, totalCount)` — disables hit layer, logs, triggers fade-in message
+- `showCompletionMessage` in `ui.ts` — PixiJS Container at zIndex 9999, dark panel + white 32px text, Ticker fade 0→1 over 2s
+- Completion checked in `setBoardSnapCallback` in `scene.ts` after board snap fires
