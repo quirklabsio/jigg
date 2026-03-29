@@ -1,7 +1,7 @@
-import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
-import { buildPieceMask, gridCut } from '../puzzle/cutter';
+import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
 import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback, setBoardSnapCallback } from '../puzzle/drag';
 import { onComplete } from '../puzzle/completion';
@@ -172,22 +172,41 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const pixels = new Uint8Array(imageData.data.buffer);
 
   let edgeOverlay: Sprite | null = null;
+  // DEBUG: current edge influence — 1/2/3 keys override this at runtime.
+  let currentEdgeInfluence = EDGE_INFLUENCE;
 
   window.addEventListener('keydown', (e) => {
     if ((e.key === 'e' || e.key === 'E') && edgeOverlay) {
       edgeOverlay.visible = !edgeOverlay.visible;
+      return;
     }
+    // DEBUG key bindings — rebuild cuts with different edge influence.
+    if (e.key === '1') currentEdgeInfluence = 0.0;
+    else if (e.key === '2') currentEdgeInfluence = 0.5;
+    else if (e.key === '3') currentEdgeInfluence = 1.0;
+    else return;
+    console.log(`[debug] edge_influence → ${currentEdgeInfluence}`);
+    worker.postMessage({
+      type: 'GENERATE_CUTS',
+      payload: {
+        cols: COLS,
+        rows: ROWS,
+        pieceWidth: piecePixelW,
+        pieceHeight: piecePixelH,
+        seed: 0x4a_49_47_47,
+        edgeInfluence: currentEdgeInfluence,
+        imageWidth: width,
+        imageHeight: height,
+      },
+    } satisfies WorkerMessage<{
+      cols: number; rows: number; pieceWidth: number; pieceHeight: number;
+      seed: number; edgeInfluence: number; imageWidth: number; imageHeight: number;
+    }>);
   });
 
   // Piece pixel dimensions (before scale)
   const piecePixelW = Math.floor(texture.width  / COLS);
   const piecePixelH = Math.floor(texture.height / ROWS);
-
-  let analysisComplete = false;
-  let cutsComplete = false;
-  const terminateIfDone = () => {
-    if (analysisComplete && cutsComplete) worker.terminate();
-  };
 
   const worker = new AnalysisWorker();
 
@@ -205,8 +224,14 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       pieceWidth: piecePixelW,
       pieceHeight: piecePixelH,
       seed: 0x4a_49_47_47, // "JIGG" as u32
+      edgeInfluence: currentEdgeInfluence,
+      imageWidth: width,
+      imageHeight: height,
     },
-  } satisfies WorkerMessage<{ cols: number; rows: number; pieceWidth: number; pieceHeight: number; seed: number }>);
+  } satisfies WorkerMessage<{
+    cols: number; rows: number; pieceWidth: number; pieceHeight: number;
+    seed: number; edgeInfluence: number; imageWidth: number; imageHeight: number;
+  }>);
 
   worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
     const { type, payload } = event.data;
@@ -242,8 +267,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       app.stage.addChild(edgeOverlay);
 
       console.log(`Edge map ready: ${width}x${height}, press E to toggle overlay`);
-      analysisComplete = true;
-      terminateIfDone();
       return;
     }
 
@@ -255,14 +278,23 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         const sprite = spriteMap.get(piece.id);
         if (!sprite) continue;
 
+        // Clear any existing mask before applying the new one (supports debug rebuild).
+        if (sprite.mask) {
+          const old = sprite.mask as Graphics;
+          sprite.removeChild(old);
+          old.destroy();
+          sprite.mask = null;
+        }
+
         const mask = buildPieceMask(piece, cuts, COLS, ROWS, piecePixelW, piecePixelH);
+        // roundPixels = true: snaps stencil geometry to integer device pixels,
+        // eliminating the sub-pixel fringe gap at shared mask boundaries.
+        mask.roundPixels = true;
         sprite.addChild(mask);
         sprite.mask = mask;
       }
 
       console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);
-      cutsComplete = true;
-      terminateIfDone();
     }
   });
 }

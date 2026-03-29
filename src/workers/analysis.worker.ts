@@ -9,6 +9,13 @@ import init, { analyze_image, generate_cuts } from '../wasm-pkg/jigg_analysis.js
 // inside the generated jigg_analysis.js glue.
 const initPromise = init();
 
+// Edge map stored after ANALYZE_IMAGE so GENERATE_CUTS can reuse it without
+// re-running Canny.  A copy is kept here; the original buffer is transferred
+// to the main thread via postMessage so it has zero-copy access.
+let storedEdgeMap: Uint8Array = new Uint8Array(0);
+let storedImageWidth = 0;
+let storedImageHeight = 0;
+
 self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
   await initPromise;
 
@@ -21,6 +28,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
       height: number;
     };
     const edgeMap = analyze_image(pixels, width, height);
+    // Keep a copy before the buffer is transferred to the main thread.
+    storedEdgeMap = edgeMap.slice();
+    storedImageWidth = width;
+    storedImageHeight = height;
     const response: WorkerMessage<{ edgeMap: Uint8Array; width: number; height: number }> = {
       type: 'ANALYSIS_COMPLETE',
       payload: { edgeMap, width, height },
@@ -30,14 +41,19 @@ self.addEventListener('message', async (event: MessageEvent<WorkerMessage>) => {
   }
 
   if (type === 'GENERATE_CUTS') {
-    const { cols, rows, pieceWidth, pieceHeight, seed } = payload as {
+    const { cols, rows, pieceWidth, pieceHeight, seed, edgeInfluence } = payload as {
       cols: number;
       rows: number;
       pieceWidth: number;
       pieceHeight: number;
       seed: number;
+      edgeInfluence: number;
     };
-    const json = generate_cuts(cols, rows, pieceWidth, pieceHeight, seed);
+    const json = generate_cuts(
+      cols, rows, pieceWidth, pieceHeight, seed,
+      storedEdgeMap, storedImageWidth, storedImageHeight,
+      edgeInfluence,
+    );
     const cuts = JSON.parse(json);
     const response: WorkerMessage<{ cuts: unknown }> = {
       type: 'CUTS_COMPLETE',

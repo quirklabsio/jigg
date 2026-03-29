@@ -37,6 +37,35 @@
 - **Root cause**: `snap.ts` computed `pieceW/pieceH` from `firstSprite.texture.frame.width/height`. After texture frames grew to include tab overhang, those values were larger than the actual grid cell size, so the expected neighbour world position was wrong and distance always exceeded the threshold.
 - **Fix**: use `firstPiece.textureRegion.w * sprite.scale.x` and `firstPiece.textureRegion.h * sprite.scale.y`. `textureRegion` always holds the original un-expanded grid dimensions. Rule: **never derive grid piece size from `texture.frame`** — use `textureRegion` from the Piece model.
 
+## Edge-influence shifts cut endpoints off grid corners (Story 15)
+- **Symptom**: black slivers between adjacent pieces; mask bezier curves start from wrong positions at corners.
+- **Root cause**: `generate_cuts` applied the edge-influence baseline offset to ALL points in the cut path, including `pts[0]` and `pts[18]`. These endpoints are supposed to sit at the exact grid corner coordinates so adjacent horizontal and vertical cuts connect at the same point. After the offset, they no longer matched.
+- **Fix**: After computing the shifted bezier path, override the endpoints back to the unshifted grid corner: `pts[0][1] = cut_y_grid; pts[18][1] = cut_y_grid;` for horizontal cuts; `pts[0][0] = cut_x_grid; pts[18][0] = cut_x_grid;` for vertical cuts.
+- **Rule**: Cut path endpoints must always sit exactly on the grid corner coordinates. Edge influence offsets the BASELINE (middle of the path), not the endpoints.
+
+## `drawCutSegments` assumes cursor is already at pts[0]
+- **Symptom**: mask path has an invisible "skip" at each cut join — bezier starts from wherever the cursor happens to be rather than from the cut's first point.
+- **Root cause**: `drawCutSegments` starts its loop at index 1, treating the caller's current cursor as the implicit pts[0]. If any discrepancy exists between the cursor and pts[0] in local space, the first bezier segment starts from the wrong point.
+- **Fix**: Always call `g.lineTo(toLocal(pts[0]))` before `drawCutSegments`. When pts[0] equals the cursor (no edge influence), this is a zero-length no-op. When they differ, it bridges the gap explicitly.
+- **Rule**: Never call `drawCutSegments` without first lining to pts[0].
+
+## PixiJS v8: no `antialias: false` on Graphics — use `roundPixels: true`
+- **Symptom**: sub-pixel gap pixels at shared stencil mask boundaries appear as dark slivers.
+- **Root cause**: PixiJS v8 `GraphicsOptions` has `roundPixels?: boolean` but NO `antialias` property. Graphics masks use `StencilMask` (binary stencil buffer), which is inherently non-antialiased. However, stencil triangles at sub-pixel boundary positions can leave a boundary pixel unclaimed by either adjacent mask.
+- **Fix**: Set `mask.roundPixels = true` after building the mask (or `new Graphics({ roundPixels: true })`). This snaps stencil geometry vertices to integer device pixels so shared boundaries always land on a whole pixel and are unambiguously claimed by one of the two adjacent masks.
+- **PixiJS v8 mask type routing**: `AlphaMask.test(mask)` returns true only for `Sprite` instances; `StencilMask.test(mask)` returns true for any `Container` (including Graphics). Graphics masks always use the stencil buffer — no alpha fringe.
+
+## Worker edgeMap buffer transfer detaches the buffer — must slice() before postMessage
+- **Symptom**: `generate_cuts` receives an empty/detached `Uint8Array` for `edge_map` when trying to reuse the edge map computed by `analyze_image`.
+- **Root cause**: `self.postMessage(response, [edgeMap.buffer])` transfers the buffer to the main thread. After transfer, the worker's `edgeMap` variable references a zero-length detached buffer. Any attempt to read it returns zeros.
+- **Fix**: Before transferring, store a copy: `storedEdgeMap = edgeMap.slice()`. The `.slice()` creates a new buffer that remains in the worker's memory. Transfer the original.
+- **Rule**: Any `Uint8Array` that will be transferred via postMessage must be `.slice()`d first if the worker needs to retain the data.
+
+## `Graphics` missing from PixiJS import when casting `sprite.mask as Graphics`
+- **Symptom**: TypeScript error `Cannot find name 'Graphics'` in scene.ts when adding mask-clear logic (`sprite.mask as Graphics`).
+- **Root cause**: `Graphics` was not in the PixiJS named import in scene.ts — the file only used `Sprite`, `Application`, etc.
+- **Fix**: Add `Graphics` to the import: `import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';`
+
 ## PixiJS Sprite.addChild deprecation (v8)
 - `sprite.addChild(graphics)` works in v8 (Sprite extends Container) but logs a deprecation warning: "Only Containers will be allowed to add children in v8.0.0". This will break in v9. Current workaround: accept the warning for now; future fix is to wrap sprite+mask in a parent Container. The mask still moves with the sprite because it is a child.
 

@@ -19,7 +19,7 @@
 ## Epic: Smart Cutting
 - [x] Story 13: Edge detection in WASM → visualize overlay
 - [x] Story 14: Bezier cut generation from edge map
-- [ ] Story 15: Content-aware cut routing (follows contours)
+- [x] Story 15: Content-aware cut routing (follows contours)
 
 ## Epic: Piece Fidelity
 - [ ] Story 16: Bevel shader on cut edges
@@ -49,8 +49,29 @@
 ---
 
 ## Current Session
-Last completed: Story 14 tab refinement + snap regression fix
-Next: Story 15 — Content-aware cut routing
+Last completed: Story 15 + sliver gap critical fix
+Next: Story 16 — Bevel shader on cut edges
+
+### Story 15 notes
+- `generate_cuts` in `lib.rs` gains `edge_map: &[u8]`, `image_width`, `image_height`, `edge_influence` params
+- `sample_edge_band()` scans ±pieceSize×0.3 band every 4 px; returns (strength 0..1, signed_pixel_offset)
+- Baseline offset = `sign(offset) * strength * edge_influence * pieceSize * 0.25`; skipped if strength < 0.1
+- Variation scaled: `var_h = 1 - influence*(2/3)` (±15%→±5%) and `var_w = 1 - influence*0.5` (±10%→±5%)
+- `analysis.worker.ts`: stores `edgeMap.slice()` in module scope after `ANALYZE_IMAGE` (before buffer transfer); GENERATE_CUTS reads `edgeInfluence` from payload and passes stored map to WASM
+- `cutter.ts`: exports `EDGE_INFLUENCE = 0.5` — single partition point for cut style config
+- `scene.ts`: imports `EDGE_INFLUENCE`; passes it + `imageWidth`/`imageHeight` in GENERATE_CUTS payload; worker is no longer terminated (stays alive for debug re-runs); CUTS_COMPLETE handler clears old masks before applying new ones
+- Debug key bindings in `scene.ts`: 1→0.0, 2→0.5, 3→1.0 — rebuilds cuts without page reload; remove after story is verified
+- `Graphics` added to PixiJS import in `scene.ts` (needed for mask cast in rebuild path)
+
+### Story 15 critical fix — sliver gaps between adjacent pieces
+
+**Cause 1 (lib.rs)**: Edge-influence offset shifts `cut_y`/`cut_x` off the grid line. Cut path endpoints (pts[0] and pts[18]) are now pinned to the unshifted grid corner after path generation. Adjacent horizontal and vertical cuts always meet at the exact same corner coordinate.
+
+**Cause 2 (cutter.ts)**: `drawCutSegments` implicitly draws from the cursor, which may differ from pts[0] if any small offset exists. Added explicit `lineTo(pts[0])` before each `drawCutSegments` call for all four edges. Also changed `new Graphics()` to `new Graphics({ roundPixels: true })` for crisp integer-pixel mask geometry.
+
+**Cause 3 (scene.ts)**: PixiJS v8 has no `antialias: false` option on Graphics; stencil masks are binary by design but sub-pixel boundaries can leave a gap pixel unclaimed by either adjacent mask. `mask.roundPixels = true` set after `buildPieceMask` snaps the stencil vertices to integer device pixels, ensuring the shared boundary is always at a whole pixel and covered by one of the two adjacent masks.
+
+Rule: **never call drawCutSegments without first lineTo to pts[0]** — the cursor must be exactly at the cut path start before drawing.
 
 ### Post-Story-14 session notes (tab refinement + snap fix)
 

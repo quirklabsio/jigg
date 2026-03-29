@@ -21,6 +21,11 @@ export function analyze_image(pixels, width, height) {
 /**
  * Generate interlocking cut paths for all interior grid edges.
  *
+ * `edge_map`      — Canny output from `analyze_image` (0 or 255 per pixel).
+ *                   Pass an empty slice to disable edge-aware routing.
+ * `edge_influence` — 0.0 = classic seeded variation only;
+ *                    1.0 = strong contour following, variation reduced to ±5%.
+ *
  * Returns a JSON string (array of CutPath objects) because passing structured
  * data through wasm-bindgen without serde is cleanest as a serialised string.
  * @param {number} cols
@@ -28,18 +33,24 @@ export function analyze_image(pixels, width, height) {
  * @param {number} piece_width
  * @param {number} piece_height
  * @param {number} seed
+ * @param {Uint8Array} edge_map
+ * @param {number} image_width
+ * @param {number} image_height
+ * @param {number} edge_influence
  * @returns {string}
  */
-export function generate_cuts(cols, rows, piece_width, piece_height, seed) {
-    let deferred1_0;
-    let deferred1_1;
+export function generate_cuts(cols, rows, piece_width, piece_height, seed, edge_map, image_width, image_height, edge_influence) {
+    let deferred2_0;
+    let deferred2_1;
     try {
-        const ret = wasm.generate_cuts(cols, rows, piece_width, piece_height, seed);
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
+        const ptr0 = passArray8ToWasm0(edge_map, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.generate_cuts(cols, rows, piece_width, piece_height, seed, ptr0, len0, image_width, image_height, edge_influence);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
 

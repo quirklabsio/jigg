@@ -1,6 +1,15 @@
 import { Graphics } from 'pixi.js';
 import type { CutPath, CutPoint, Piece, PieceGroup } from './types';
 
+/**
+ * Edge influence for cut routing: 0.0 = classic seeded variation only,
+ * 1.0 = fully contour-driven with variation reduced to ±5%.
+ *
+ * This is the single partition point for cut style configuration.
+ * Wire up future config UI or presets by changing only this value.
+ */
+export const EDGE_INFLUENCE = 0.5;
+
 export function gridCut(
   imageWidth: number,
   imageHeight: number,
@@ -115,12 +124,18 @@ export function buildPieceMask(
   const hw = pw / 2;
   const hh = ph / 2;
 
-  const g = new Graphics();
+  // roundPixels snaps the mask's rendered vertices to integer device pixels,
+  // preventing the sub-pixel gap that appears at shared stencil boundaries.
+  const g = new Graphics({ roundPixels: true });
   g.moveTo(-hw, -hh); // top-left
 
   // ── Top edge: left → right ──────────────────────────────────────────────
   const topCut = row > 0 ? hCut.get(`${col},${row - 1}`) : undefined;
   if (topCut) {
+    // lineTo pts[0] first: guarantees the cursor is at the exact cut start
+    // before the bezier segments are drawn (pts[0] is skipped by drawCutSegments).
+    const [t0x, t0y] = toLocal(topCut.points[0], col, row, pw, ph);
+    g.lineTo(t0x, t0y);
     drawCutSegments(g, topCut.points, col, row, pw, ph);
   } else {
     g.lineTo(hw, -hh);
@@ -129,6 +144,8 @@ export function buildPieceMask(
   // ── Right edge: top → bottom ────────────────────────────────────────────
   const rightCut = col < cols - 1 ? vCut.get(`${col},${row}`) : undefined;
   if (rightCut) {
+    const [r0x, r0y] = toLocal(rightCut.points[0], col, row, pw, ph);
+    g.lineTo(r0x, r0y);
     drawCutSegments(g, rightCut.points, col, row, pw, ph);
   } else {
     g.lineTo(hw, hh);
@@ -137,7 +154,10 @@ export function buildPieceMask(
   // ── Bottom edge: right → left (reversed) ───────────────────────────────
   const bottomCut = row < rows - 1 ? hCut.get(`${col},${row}`) : undefined;
   if (bottomCut) {
-    drawCutSegments(g, reverseCutPoints(bottomCut.points), col, row, pw, ph);
+    const revBottom = reverseCutPoints(bottomCut.points);
+    const [b0x, b0y] = toLocal(revBottom[0], col, row, pw, ph);
+    g.lineTo(b0x, b0y);
+    drawCutSegments(g, revBottom, col, row, pw, ph);
   } else {
     g.lineTo(-hw, hh);
   }
@@ -145,7 +165,10 @@ export function buildPieceMask(
   // ── Left edge: bottom → top (reversed) ─────────────────────────────────
   const leftCut = col > 0 ? vCut.get(`${col - 1},${row}`) : undefined;
   if (leftCut) {
-    drawCutSegments(g, reverseCutPoints(leftCut.points), col, row, pw, ph);
+    const revLeft = reverseCutPoints(leftCut.points);
+    const [l0x, l0y] = toLocal(revLeft[0], col, row, pw, ph);
+    g.lineTo(l0x, l0y);
+    drawCutSegments(g, revLeft, col, row, pw, ph);
   } else {
     g.lineTo(-hw, -hh);
   }

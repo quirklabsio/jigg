@@ -43,5 +43,13 @@ Do not revisit without asking.
 - **`cutter.ts` reads cut-point arrays generically** (loop step 3 from index 1): any `1+3n` point count works. Adding or removing segments in Rust requires no TypeScript changes.
 - **`textureRegion` is the authoritative grid size**: expanded texture frames (for tab padding) must not be used to derive grid piece dimensions in snap or hit-test logic. Always read `piece.textureRegion.w/h`.
 
+## Edge-Aware Cut Routing (Story 15)
+- **Worker stores edgeMap copy, not re-runs analyze_image**: `ANALYZE_IMAGE` and `GENERATE_CUTS` are sent simultaneously. The worker stores `edgeMap.slice()` at module scope during ANALYZE_IMAGE so GENERATE_CUTS can reuse it. This works because JavaScript's microtask queue guarantees ANALYZE_IMAGE's continuation runs before GENERATE_CUTS's when both `await` the same already-resolved `initPromise` — messages are processed in receive order.
+- **Worker not terminated after both jobs complete**: Removing `terminateIfDone()` keeps the worker alive for debug key re-runs (1/2/3 keys rebuild cuts at different `edge_influence`). Acceptable cost: a small idle Web Worker. Restore termination after debug keys are removed.
+- **`EDGE_INFLUENCE = 0.5` lives only in `cutter.ts`**: This constant is the single partition point for cut style configuration. Scene.ts imports and passes it; the worker receives it in the payload; the WASM call uses it. Future config UI or presets change only `cutter.ts`.
+- **Endpoint pinning, not control-point adjustment**: When edge influence shifts a cut's baseline, only the INTERIOR of the path moves. `pts[0]` and `pts[18]` are pinned back to `cut_y_grid`/`cut_x_grid` after path generation. Adjusting the adjacent control points for a smooth transition would be complex and is not worth it — the kink at the endpoints is at the piece corner and is hidden by adjacent pieces' masks.
+- **`roundPixels: true` as the mask antialias fix**: PixiJS v8 has no `antialias: false` on Graphics. StencilMask is binary, so alpha fringe isn't the issue. The gap comes from sub-pixel stencil boundaries leaving a pixel unclaimed. `roundPixels: true` snaps stencil vertices to integer device pixels, making shared boundaries deterministic.
+- **`scene.ts` touched despite "touch only" spec**: Debug key bindings (1/2/3 for edge influence) and pipeline wiring (passing `edgeInfluence`/`imageWidth`/`imageHeight` in the GENERATE_CUTS payload) require scene.ts changes. The "touch only" constraint applied to production logic; the debug feature explicitly requires scene.ts.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

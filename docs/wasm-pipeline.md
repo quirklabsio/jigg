@@ -58,20 +58,48 @@ const pixels = new Uint8Array(imageData.data.buffer);
 worker.postMessage({ pixels, width, height }, [pixels.buffer]);
 ```
 
-## Message Protocol
+## Message Protocol (Story 15+)
 
-### scene.ts → worker
+### scene.ts → worker: ANALYZE_IMAGE
 ```typescript
-{ pixels: Uint8Array, width: number, height: number }
+{ type: 'ANALYZE_IMAGE', payload: { pixels: Uint8Array, width: number, height: number } }
 // Transfer pixels.buffer to avoid copy
 ```
 
-### worker → scene.ts
+### worker → scene.ts: ANALYSIS_COMPLETE
 ```typescript
-WorkerMessage<{ edgeMap: Uint8Array; width: number; height: number }>
-// type: 'ANALYSIS_COMPLETE'
-// Transfer edgeMap.buffer to avoid copy
+{ type: 'ANALYSIS_COMPLETE', payload: { edgeMap: Uint8Array; width: number; height: number } }
+// Transfer edgeMap.buffer — worker keeps edgeMap.slice() in module scope for reuse
 ```
+
+### scene.ts → worker: GENERATE_CUTS
+```typescript
+{
+  type: 'GENERATE_CUTS',
+  payload: {
+    cols: number; rows: number;
+    pieceWidth: number; pieceHeight: number;
+    seed: number;
+    edgeInfluence: number;   // 0.0–1.0, from EDGE_INFLUENCE in cutter.ts
+    imageWidth: number;
+    imageHeight: number;
+  }
+}
+```
+
+### worker → scene.ts: CUTS_COMPLETE
+```typescript
+{ type: 'CUTS_COMPLETE', payload: { cuts: CutPath[] } }
+```
+
+### Key constraint: edgeMap buffer transfer + module-scope copy
+When ANALYZE_IMAGE completes, the worker transfers `edgeMap.buffer` to the main thread (zero-copy). This detaches the buffer — the worker can no longer read it. Before posting, the worker stores `storedEdgeMap = edgeMap.slice()`. GENERATE_CUTS then passes `storedEdgeMap` to `generate_cuts`. **Never try to read a transferred buffer after postMessage — always slice() first.**
+
+### Ordering guarantee
+Both messages are sent simultaneously from scene.ts. Both handlers `await initPromise`. When `initPromise` is already resolved, both continuations are queued as microtasks in message-receive order. ANALYZE_IMAGE always completes before GENERATE_CUTS. Module-scope edgeMap storage is safe.
+
+### Worker lifetime
+The worker is **not terminated** after both jobs complete (removed `terminateIfDone`). This keeps it alive for debug key re-runs (1/2/3 rebuild cuts at different `edge_influence`). Remove debug keys and restore termination after Story 15 debug phase.
 
 ## Edge Map → PixiJS Overlay (scene.ts)
 ```typescript
@@ -95,6 +123,45 @@ overlay.alpha = 0.6;
 overlay.visible = false; // toggled with E key
 app.stage.addChild(overlay);
 ```
+
+## Edge-Aware Cut Routing (lib.rs, Story 15)
+
+### generate_cuts signature
+```rust
+pub fn generate_cuts(
+    cols: u32, rows: u32,
+    piece_width: f32, piece_height: f32,
+    seed: u32,
+    edge_map: &[u8],       // Canny output — 0 or 255 per pixel; empty slice = no edge routing
+    image_width: u32, image_height: u32,
+    edge_influence: f32,   // 0.0 = classic, 1.0 = fully contour-driven
+) -> String
+```
+
+### Edge sampling
+`sample_edge_band` scans ±`pieceSize * 0.3` perpendicular to each grid line, every 4px.
+Returns `(edge_strength: f32 0..1, signed_pixel_offset_from_grid_line: f32)`.
+If `edge_strength < 0.1`: no deviation.
+
+### Baseline offset formula
+```
+offset = sign(raw_offset) × edge_strength × edge_influence × (pieceSize × 0.25)
+adjusted_baseline = grid_line + offset
+```
+
+### Endpoint pinning (critical)
+After computing the bezier path with the shifted baseline, override pts[0] and pts[18] back to the exact grid-corner coordinates. Adjacent horizontal and vertical cuts must share the same corner point.
+```rust
+pts[0][1]  = cut_y_grid;   // horizontal cuts: y stays at grid line
+pts[18][1] = cut_y_grid;
+pts[0][0]  = cut_x_grid;   // vertical cuts: x stays at grid line
+pts[18][0] = cut_x_grid;
+```
+
+### Variation scaling at organic mode
+At `edge_influence = 1.0`, seeded variation is reduced to approximately ±5%:
+- `var_h = 1.0 - influence × (2/3)` — for the ±15% (height/width) variations
+- `var_w = 1.0 - influence × 0.5`  — for the ±10% (tab offset/neck) variations
 
 ## Canny Edge Detection (lib.rs)
 

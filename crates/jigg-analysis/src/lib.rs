@@ -149,6 +149,65 @@ fn vertical_tab_path(
     ]
 }
 
+/// Sample the edge map in a rectangular band around a grid line.
+///
+/// For a horizontal cut running along X:
+///   - `along_min/max` = x pixel range of the cut segment
+///   - `perp_center`   = cut_y (the grid line in the Y direction)
+///   - `perp_half`     = band half-width in Y
+///
+/// For a vertical cut running along Y:
+///   - `along_min/max` = y pixel range of the cut segment
+///   - `perp_center`   = cut_x
+///   - `perp_half`     = band half-width in X
+///
+/// Returns `(edge_strength 0..1, signed_pixel_offset_from_grid_line)`.
+/// Samples every 4 pixels for performance.
+fn sample_edge_band(
+    edge_map: &[u8],
+    img_w: usize,
+    img_h: usize,
+    along_min: f32,
+    along_max: f32,
+    perp_center: f32,
+    perp_half: f32,
+    horizontal: bool, // true = horizontal cut (perpendicular axis = Y)
+) -> (f32, f32) {
+    let perp_len = if horizontal { img_h } else { img_w };
+    let along_len = if horizontal { img_w } else { img_h };
+
+    let perp_min = (perp_center - perp_half).max(0.0) as usize;
+    let perp_max = ((perp_center + perp_half) as usize).min(perp_len.saturating_sub(1));
+    let a_min = along_min.max(0.0) as usize;
+    let a_max = (along_max as usize).min(along_len.saturating_sub(1));
+
+    let mut max_val = 0u8;
+    let mut best_offset = 0.0f32;
+
+    let mut perp = perp_min;
+    while perp <= perp_max {
+        let mut along = a_min;
+        while along <= a_max {
+            let idx = if horizontal {
+                perp * img_w + along
+            } else {
+                along * img_w + perp
+            };
+            if idx < edge_map.len() {
+                let v = edge_map[idx];
+                if v > max_val {
+                    max_val = v;
+                    best_offset = perp as f32 - perp_center;
+                }
+            }
+            along += 4;
+        }
+        perp += 4;
+    }
+
+    (max_val as f32 / 255.0, best_offset)
+}
+
 fn points_to_json(pts: &[[f32; 2]]) -> String {
     let inner: Vec<String> = pts
         .iter()
@@ -159,6 +218,11 @@ fn points_to_json(pts: &[[f32; 2]]) -> String {
 
 /// Generate interlocking cut paths for all interior grid edges.
 ///
+/// `edge_map`      — Canny output from `analyze_image` (0 or 255 per pixel).
+///                   Pass an empty slice to disable edge-aware routing.
+/// `edge_influence` — 0.0 = classic seeded variation only;
+///                    1.0 = strong contour following, variation reduced to ±5%.
+///
 /// Returns a JSON string (array of CutPath objects) because passing structured
 /// data through wasm-bindgen without serde is cleanest as a serialised string.
 #[wasm_bindgen]
@@ -168,15 +232,47 @@ pub fn generate_cuts(
     piece_width: f32,
     piece_height: f32,
     seed: u32,
+    edge_map: &[u8],
+    image_width: u32,
+    image_height: u32,
+    edge_influence: f32,
 ) -> String {
+    let img_w = image_width as usize;
+    let img_h = image_height as usize;
+    let use_edges = !edge_map.is_empty() && edge_influence > 0.0;
+
+    // Variation scale factors so that at edge_influence=1.0 all variation ≈ ±5%.
+    // ±15% → ±5% requires factor ≈ 1/3  → lerp from 1.0 to 1/3 over edge_influence.
+    // ±10% → ±5% requires factor = 1/2  → lerp from 1.0 to 1/2 over edge_influence.
+    let var_h = 1.0 - edge_influence * (2.0 / 3.0); // for ±15% variations
+    let var_w = 1.0 - edge_influence * 0.5;           // for ±10% variations
+
     let mut parts: Vec<String> = Vec::new();
 
     // ── Horizontal cuts  (between row r and row r+1) ────────────────────────
     for row in 0..rows.saturating_sub(1) {
         for col in 0..cols {
-            let cut_y = (row + 1) as f32 * piece_height;
+            let cut_y_grid = (row + 1) as f32 * piece_height;
             let x_left = col as f32 * piece_width;
             let x_right = (col + 1) as f32 * piece_width;
+
+            // Edge-aware baseline shift
+            let cut_y = if use_edges {
+                let (strength, raw_off) = sample_edge_band(
+                    edge_map, img_w, img_h,
+                    x_left, x_right,
+                    cut_y_grid, piece_height * 0.3,
+                    true,
+                );
+                if strength >= 0.1 {
+                    let max_dev = piece_height * 0.25;
+                    cut_y_grid + raw_off.signum() * strength * edge_influence * max_dev
+                } else {
+                    cut_y_grid
+                }
+            } else {
+                cut_y_grid
+            };
 
             let h = hash_edge(col, row, 0);
             let has_tab = if h % 2 == 0 { "A" } else { "B" };
@@ -184,17 +280,21 @@ pub fn generate_cuts(
             let edge_seed = h.wrapping_add(seed);
             let mut rng = mulberry32(edge_seed);
 
-            let tab_offset = (rng() - 0.5) * 0.2 * piece_width;
+            let tab_offset = (rng() - 0.5) * 0.2 * var_w * piece_width;
             let tab_center_x = (x_left + x_right) / 2.0 + tab_offset;
-            let raw_h = piece_height * 0.25 * (1.0 + (rng() - 0.5) * 0.3);
-            let tab_w = piece_width * 0.20 * (1.0 + (rng() - 0.5) * 0.3);
-            let neck_w = tab_w * 0.50 * (1.0 + (rng() - 0.5) * 0.2);
+            let raw_h = piece_height * 0.25 * (1.0 + (rng() - 0.5) * 0.3 * var_h);
+            let tab_w = piece_width * 0.20 * (1.0 + (rng() - 0.5) * 0.3 * var_h);
+            let neck_w = tab_w * 0.50 * (1.0 + (rng() - 0.5) * 0.2 * var_w);
             let shoulder_w = tab_w * 0.85;
 
             // A's tab protrudes DOWN (+Y), B's tab protrudes UP (−Y).
             let tab_dy = if has_tab == "A" { raw_h } else { -raw_h };
 
-            let pts = horizontal_tab_path(x_left, x_right, cut_y, tab_center_x, tab_dy, tab_w, neck_w, shoulder_w);
+            let mut pts = horizontal_tab_path(x_left, x_right, cut_y, tab_center_x, tab_dy, tab_w, neck_w, shoulder_w);
+            // Pin endpoints to exact grid corners so adjacent vertical cuts connect
+            // precisely regardless of any edge-influence baseline offset.
+            pts[0][1]  = cut_y_grid;
+            pts[18][1] = cut_y_grid;
 
             parts.push(format!(
                 "{{\"colA\":{},\"rowA\":{},\"colB\":{},\"rowB\":{},\
@@ -207,9 +307,27 @@ pub fn generate_cuts(
     // ── Vertical cuts  (between col c and col c+1) ──────────────────────────
     for col in 0..cols.saturating_sub(1) {
         for row in 0..rows {
-            let cut_x = (col + 1) as f32 * piece_width;
+            let cut_x_grid = (col + 1) as f32 * piece_width;
             let y_top = row as f32 * piece_height;
             let y_bottom = (row + 1) as f32 * piece_height;
+
+            // Edge-aware baseline shift
+            let cut_x = if use_edges {
+                let (strength, raw_off) = sample_edge_band(
+                    edge_map, img_w, img_h,
+                    y_top, y_bottom,
+                    cut_x_grid, piece_width * 0.3,
+                    false,
+                );
+                if strength >= 0.1 {
+                    let max_dev = piece_width * 0.25;
+                    cut_x_grid + raw_off.signum() * strength * edge_influence * max_dev
+                } else {
+                    cut_x_grid
+                }
+            } else {
+                cut_x_grid
+            };
 
             let h = hash_edge(col, row, 1);
             let has_tab = if h % 2 == 0 { "A" } else { "B" };
@@ -217,17 +335,21 @@ pub fn generate_cuts(
             let edge_seed = h.wrapping_add(seed);
             let mut rng = mulberry32(edge_seed);
 
-            let tab_offset = (rng() - 0.5) * 0.2 * piece_height;
+            let tab_offset = (rng() - 0.5) * 0.2 * var_w * piece_height;
             let tab_center_y = (y_top + y_bottom) / 2.0 + tab_offset;
-            let raw_h = piece_width * 0.25 * (1.0 + (rng() - 0.5) * 0.3);
-            let tab_w = piece_height * 0.20 * (1.0 + (rng() - 0.5) * 0.3);
-            let neck_w = tab_w * 0.50 * (1.0 + (rng() - 0.5) * 0.2);
+            let raw_h = piece_width * 0.25 * (1.0 + (rng() - 0.5) * 0.3 * var_h);
+            let tab_w = piece_height * 0.20 * (1.0 + (rng() - 0.5) * 0.3 * var_h);
+            let neck_w = tab_w * 0.50 * (1.0 + (rng() - 0.5) * 0.2 * var_w);
             let shoulder_w = tab_w * 0.85;
 
             // A's tab protrudes RIGHT (+X), B's tab protrudes LEFT (−X).
             let tab_dx = if has_tab == "A" { raw_h } else { -raw_h };
 
-            let pts = vertical_tab_path(y_top, y_bottom, cut_x, tab_center_y, tab_dx, tab_w, neck_w, shoulder_w);
+            let mut pts = vertical_tab_path(y_top, y_bottom, cut_x, tab_center_y, tab_dx, tab_w, neck_w, shoulder_w);
+            // Pin endpoints to exact grid corners so adjacent horizontal cuts connect
+            // precisely regardless of any edge-influence baseline offset.
+            pts[0][0]  = cut_x_grid;
+            pts[18][0] = cut_x_grid;
 
             parts.push(format!(
                 "{{\"colA\":{},\"rowA\":{},\"colB\":{},\"rowB\":{},\
