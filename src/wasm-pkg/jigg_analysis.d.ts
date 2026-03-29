@@ -8,11 +8,20 @@
  */
 export function analyze_image(pixels: Uint8Array, width: number, height: number): Uint8Array;
 
+/**
+ * Generate interlocking cut paths for all interior grid edges.
+ *
+ * Returns a JSON string (array of CutPath objects) because passing structured
+ * data through wasm-bindgen without serde is cleanest as a serialised string.
+ */
+export function generate_cuts(cols: number, rows: number, piece_width: number, piece_height: number, seed: number): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly analyze_image: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly generate_cuts: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

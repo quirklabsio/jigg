@@ -1,7 +1,7 @@
 import { Application, Assets, Rectangle, Sprite, Texture } from 'pixi.js';
-import type { WorkerMessage } from '../puzzle/types';
+import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
-import { gridCut } from '../puzzle/cutter';
+import { buildPieceMask, gridCut } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
 import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback, setBoardSnapCallback } from '../puzzle/drag';
 import { onComplete } from '../puzzle/completion';
@@ -10,8 +10,8 @@ import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
-const COLS = 2;
-const ROWS = 2;
+const COLS = 4;
+const ROWS = 4;
 
 function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
   const { pieces, groups } = gridCut(texture.width, texture.height, COLS, ROWS);
@@ -23,17 +23,38 @@ function buildGridSprites(app: Application, texture: Texture, scale: number): Sp
   usePuzzleStore.getState().setGroups(groups);
   usePuzzleStore.getState().setGridIndex(gridIndex);
 
+  // Expand each piece's texture frame so tab protrusions have pixel data.
+  // Tab height = pieceH * 0.25 ± 15%, so 0.4 * max(pw,ph) covers worst case.
+  const pw0 = pieces[0]?.textureRegion.w ?? 1;
+  const ph0 = pieces[0]?.textureRegion.h ?? 1;
+  const tabPad = Math.ceil(Math.max(pw0, ph0) * 0.4);
+
   return pieces.map((piece) => {
+    const { col, row } = piece.gridCoord;
+    const pw = piece.textureRegion.w;
+    const ph = piece.textureRegion.h;
+    // Clamp padding so we never request pixels outside the source image.
+    const leftPad   = Math.min(tabPad, col * pw);
+    const topPad    = Math.min(tabPad, row * ph);
+    const rightPad  = Math.min(tabPad, (COLS - col - 1) * pw);
+    const bottomPad = Math.min(tabPad, (ROWS - row - 1) * ph);
+    const expandedW = pw + leftPad + rightPad;
+    const expandedH = ph + topPad + bottomPad;
     const frame = new Rectangle(
-      piece.textureRegion.x,
-      piece.textureRegion.y,
-      piece.textureRegion.w,
-      piece.textureRegion.h,
+      piece.textureRegion.x - leftPad,
+      piece.textureRegion.y - topPad,
+      expandedW,
+      expandedH,
     );
     const pieceTexture = new Texture({ source: texture.source, frame });
     const sprite = new Sprite(pieceTexture);
     sprite.scale.set(scale);
-    sprite.anchor.set(0.5);
+    // Anchor at piece centre within the expanded frame so sprite.x/y stays
+    // at the piece centre and the mask (drawn relative to piece centre) aligns.
+    sprite.anchor.set(
+      (leftPad + pw / 2) / expandedW,
+      (topPad + ph / 2) / expandedH,
+    );
     app.stage.addChild(sprite);
     return sprite;
   });
@@ -158,12 +179,40 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 
+  // Piece pixel dimensions (before scale)
+  const piecePixelW = Math.floor(texture.width  / COLS);
+  const piecePixelH = Math.floor(texture.height / ROWS);
+
+  let analysisComplete = false;
+  let cutsComplete = false;
+  const terminateIfDone = () => {
+    if (analysisComplete && cutsComplete) worker.terminate();
+  };
+
   const worker = new AnalysisWorker();
-  worker.postMessage({ pixels, width, height });
-  worker.addEventListener('message', (event: MessageEvent<WorkerMessage<{ edgeMap: Uint8Array; width: number; height: number }>>) => {
+
+  // Send both jobs immediately
+  worker.postMessage({
+    type: 'ANALYZE_IMAGE',
+    payload: { pixels, width, height },
+  } satisfies WorkerMessage<{ pixels: Uint8Array; width: number; height: number }>);
+
+  worker.postMessage({
+    type: 'GENERATE_CUTS',
+    payload: {
+      cols: COLS,
+      rows: ROWS,
+      pieceWidth: piecePixelW,
+      pieceHeight: piecePixelH,
+      seed: 0x4a_49_47_47, // "JIGG" as u32
+    },
+  } satisfies WorkerMessage<{ cols: number; rows: number; pieceWidth: number; pieceHeight: number; seed: number }>);
+
+  worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
     const { type, payload } = event.data;
+
     if (type === 'ANALYSIS_COMPLETE') {
-      const { edgeMap } = payload;
+      const { edgeMap } = payload as { edgeMap: Uint8Array; width: number; height: number };
 
       // Build RGBA pixel data: edge pixels → cyan, non-edge → transparent
       const rgba = new Uint8ClampedArray(width * height * 4);
@@ -193,7 +242,27 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       app.stage.addChild(edgeOverlay);
 
       console.log(`Edge map ready: ${width}x${height}, press E to toggle overlay`);
-      worker.terminate();
+      analysisComplete = true;
+      terminateIfDone();
+      return;
+    }
+
+    if (type === 'CUTS_COMPLETE') {
+      const { cuts } = payload as { cuts: CutPath[] };
+      const currentPieces = usePuzzleStore.getState().pieces;
+
+      for (const piece of currentPieces) {
+        const sprite = spriteMap.get(piece.id);
+        if (!sprite) continue;
+
+        const mask = buildPieceMask(piece, cuts, COLS, ROWS, piecePixelW, piecePixelH);
+        sprite.addChild(mask);
+        sprite.mask = mask;
+      }
+
+      console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);
+      cutsComplete = true;
+      terminateIfDone();
     }
   });
 }

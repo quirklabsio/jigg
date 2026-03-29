@@ -31,9 +31,26 @@ export interface EdgeMap {
   height: number;
 }
 
+export interface CutPoint {
+  x: number;
+  y: number;
+}
+
+export interface CutPath {
+  colA: number;
+  rowA: number;
+  colB: number;
+  rowB: number;
+  direction: 'horizontal' | 'vertical';
+  points: CutPoint[]; // [start, cp1, cp2, end, cp1, cp2, end, ...] — 1 + 5×3 = 16 points
+  hasTab: 'A' | 'B';  // which piece carries the protruding tab
+}
+
 export type WorkerMessageType =
   | 'ANALYZE_IMAGE'
   | 'ANALYSIS_COMPLETE'
+  | 'GENERATE_CUTS'
+  | 'CUTS_COMPLETE'
   | 'ERROR';
 
 export interface WorkerMessage<T = unknown> {

@@ -307,16 +307,21 @@ export function initDragListeners(
       if (!group) continue;
       for (const pid of group.pieceIds) {
         const s = spriteMap.get(pid);
-        if (!s) continue;
-        // Rotation-aware hit test: transform pointer into sprite local space
+        const piece = st.piecesById[pid];
+        if (!s || !piece) continue;
+        // Rotation-aware hit test: transform pointer into sprite local space.
+        // sprite.x/y is the piece centre (anchor is set to piece centre within
+        // the expanded texture frame), so lx/ly are relative to piece centre.
         const dx = px - s.x;
         const dy = py - s.y;
         const cos = Math.cos(-s.rotation);
         const sin = Math.sin(-s.rotation);
         const lx = (cos * dx - sin * dy) / s.scale.x;
         const ly = (sin * dx + cos * dy) / s.scale.y;
-        const hw = s.texture.frame.width / 2;
-        const hh = s.texture.frame.height / 2;
+        // Use original piece dimensions — not the expanded frame — so the hit
+        // area matches the visible piece rectangle, not the tab-padding region.
+        const hw = piece.textureRegion.w / 2;
+        const hh = piece.textureRegion.h / 2;
         if (Math.abs(lx) <= hw && Math.abs(ly) <= hh) {
           if (s.zIndex > bestZ) { bestZ = s.zIndex; bestGroupId = groupId; }
           break; // pointer is inside this group — no need to check more pieces

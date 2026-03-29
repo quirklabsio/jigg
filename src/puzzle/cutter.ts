@@ -1,4 +1,5 @@
-import type { Piece, PieceGroup } from './types';
+import { Graphics } from 'pixi.js';
+import type { CutPath, CutPoint, Piece, PieceGroup } from './types';
 
 export function gridCut(
   imageWidth: number,
@@ -41,4 +42,116 @@ export function gridCut(
   }
 
   return { pieces, groups };
+}
+
+// ─── Mask building ────────────────────────────────────────────────────────────
+
+/** Reverse a Bezier path stored as [start, cp1, cp2, end, cp1, cp2, end, ...]. */
+function reverseCutPoints(pts: CutPoint[]): CutPoint[] {
+  // Number of segments = (pts.length - 1) / 3
+  const result: CutPoint[] = [pts[pts.length - 1]];
+  for (let i = pts.length - 4; i >= 0; i -= 3) {
+    result.push(pts[i + 2]); // cp2 → cp1 in reverse
+    result.push(pts[i + 1]); // cp1 → cp2 in reverse
+    result.push(pts[i]);     // previous endpoint
+  }
+  return result;
+}
+
+/** Convert an image-space CutPoint to sprite-local coordinates.
+ *  Sprite anchor is 0.5, so local origin = centre of piece. */
+function toLocal(pt: CutPoint, col: number, row: number, pw: number, ph: number): [number, number] {
+  return [pt.x - col * pw - pw / 2, pt.y - row * ph - ph / 2];
+}
+
+function drawCutSegments(
+  g: Graphics,
+  pts: CutPoint[],
+  col: number,
+  row: number,
+  pw: number,
+  ph: number,
+): void {
+  // pts[0] is the start (already at cursor), then groups of 3: cp1, cp2, end
+  for (let i = 1; i < pts.length; i += 3) {
+    const [c1x, c1y] = toLocal(pts[i],     col, row, pw, ph);
+    const [c2x, c2y] = toLocal(pts[i + 1], col, row, pw, ph);
+    const [ex,  ey]  = toLocal(pts[i + 2], col, row, pw, ph);
+    g.bezierCurveTo(c1x, c1y, c2x, c2y, ex, ey);
+  }
+}
+
+/**
+ * Build a PixiJS Graphics mask for a piece, stitching its four edges from the
+ * global cut-path list.  The Graphics is in the sprite's local coordinate
+ * space (anchor = 0.5, so origin = centre of piece in pixel units before scale).
+ *
+ * Traversal order (clockwise):
+ *   top: left → right  (piece is rowB → FORWARD)
+ *   right: top → bottom  (piece is colA → FORWARD)
+ *   bottom: right → left  (piece is rowA → REVERSE)
+ *   left: bottom → top  (piece is colB → REVERSE)
+ */
+export function buildPieceMask(
+  piece: Piece,
+  cutPaths: CutPath[],
+  cols: number,
+  rows: number,
+  pw: number, // piece pixel width
+  ph: number, // piece pixel height
+): Graphics {
+  const { col, row } = piece.gridCoord;
+
+  // Index cuts for fast lookup
+  // horizontal key: `h,${col},${rowA}`  (rowA = row above the cut)
+  // vertical   key: `v,${colA},${row}`  (colA = col to the left of the cut)
+  const hCut = new Map<string, CutPath>();
+  const vCut = new Map<string, CutPath>();
+  for (const c of cutPaths) {
+    if (c.direction === 'horizontal') hCut.set(`${c.colA},${c.rowA}`, c);
+    else                              vCut.set(`${c.colA},${c.rowA}`, c);
+  }
+
+  const hw = pw / 2;
+  const hh = ph / 2;
+
+  const g = new Graphics();
+  g.moveTo(-hw, -hh); // top-left
+
+  // ── Top edge: left → right ──────────────────────────────────────────────
+  const topCut = row > 0 ? hCut.get(`${col},${row - 1}`) : undefined;
+  if (topCut) {
+    drawCutSegments(g, topCut.points, col, row, pw, ph);
+  } else {
+    g.lineTo(hw, -hh);
+  }
+
+  // ── Right edge: top → bottom ────────────────────────────────────────────
+  const rightCut = col < cols - 1 ? vCut.get(`${col},${row}`) : undefined;
+  if (rightCut) {
+    drawCutSegments(g, rightCut.points, col, row, pw, ph);
+  } else {
+    g.lineTo(hw, hh);
+  }
+
+  // ── Bottom edge: right → left (reversed) ───────────────────────────────
+  const bottomCut = row < rows - 1 ? hCut.get(`${col},${row}`) : undefined;
+  if (bottomCut) {
+    drawCutSegments(g, reverseCutPoints(bottomCut.points), col, row, pw, ph);
+  } else {
+    g.lineTo(-hw, hh);
+  }
+
+  // ── Left edge: bottom → top (reversed) ─────────────────────────────────
+  const leftCut = col > 0 ? vCut.get(`${col - 1},${row}`) : undefined;
+  if (leftCut) {
+    drawCutSegments(g, reverseCutPoints(leftCut.points), col, row, pw, ph);
+  } else {
+    g.lineTo(-hw, -hh);
+  }
+
+  g.closePath();
+  g.fill({ color: 0xffffff });
+
+  return g;
 }

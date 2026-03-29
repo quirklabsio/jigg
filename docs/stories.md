@@ -18,7 +18,7 @@
 
 ## Epic: Smart Cutting
 - [x] Story 13: Edge detection in WASM → visualize overlay
-- [ ] Story 14: Bezier cut generation from edge map
+- [x] Story 14: Bezier cut generation from edge map
 - [ ] Story 15: Content-aware cut routing (follows contours)
 
 ## Epic: Piece Fidelity
@@ -49,8 +49,33 @@
 ---
 
 ## Current Session
-Last completed: Story 13 — Edge detection in WASM → visualize overlay
-Next: Story 14 — Bezier cut generation from edge map
+Last completed: Story 14 tab refinement + snap regression fix
+Next: Story 15 — Content-aware cut routing
+
+### Post-Story-14 session notes (tab refinement + snap fix)
+
+**Snap regression (texture.frame vs textureRegion)**
+- After Story 14 expanded sprite texture frames to include tab padding, `snap.ts` was reading `firstSprite.texture.frame.width/height` for `pieceW/pieceH`. Frame size > grid size → wrong expected neighbour distance → snap never fired.
+- Fix: read `firstPiece.textureRegion.w/h` — always the original grid cell size. See `gotchas.md`.
+
+**Tab profile redesign (lib.rs)**
+- Old: 5-segment path (16 pts), single cubic for cap → flat-topped bump, not a dome.
+- New: 6-segment path (19 pts), cap split into two K=0.5523 quarter-circle arcs → true semicircular dome, G1-continuous at all joins.
+- Profile: flat approach → shoulder flare + 5px waist dip → pinch to narrow neck (neck_w = tab_w × 0.50) → expand into dome → two quarter arcs → symmetric return.
+- `neck_y = cut_y + tab_dy − sgn·r` ensures dome height = r always (geometric circle regardless of piece aspect ratio).
+- Tab/blank interlock unchanged — path is symmetric, so blank is exact inverse.
+- `cutter.ts` required zero changes — reads point arrays generically with `i += 3`.
+
+### Story 14 notes
+- `generate_cuts` in `lib.rs`: returns JSON string (no serde dep) — 5-segment cubic Bezier tab per interior edge
+- Tab direction: `hash_edge(col, row, dir) % 2` → 'A' protrudes +Y/+X, 'B' protrudes −Y/−X; deterministic per seed
+- `mulberry32(seed)` PRNG for per-edge variation: tab offset ±10%, height/width ±15%, neck ±10%
+- Cut path format: 16 CutPoints — 1 start + 5 × (cp1, cp2, end); indexed by `h,col,rowA` / `v,colA,row`
+- Mask traversal: CW — top=FORWARD(rowB), right=FORWARD(colA), bottom=REVERSE(rowA), left=REVERSE(colB)
+- Graphics added as child of sprite (local pixel space, anchor 0.5); mask stays with sprite during drag
+- Worker handles both `ANALYZE_IMAGE` and `GENERATE_CUTS` in same instance; terminates when both complete
+- `generate_cuts` wasm-bindgen return type maps to `string` (not `JsValue`) — parse with `JSON.parse` in worker
+- `satisfies` used in `postMessage` calls in scene.ts for type-safe worker messages without casting
 
 ### Story 13 notes
 - Full Canny in `lib.rs`: greyscale → Gaussian blur → Sobel → NMS → double threshold → hysteresis BFS — see `wasm-pipeline.md` for detail

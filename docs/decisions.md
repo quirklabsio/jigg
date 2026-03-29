@@ -36,5 +36,12 @@ Do not revisit without asking.
 - **Direct wasm-pkg import over dynamic `/wasm/` path import**: Workers import `init` and exported functions from `../wasm-pkg/jigg_analysis.js` directly rather than the earlier `import(/* @vite-ignore */ '/wasm/...')` pattern. Direct import is statically typed (no manual casts), tree-shaken by Vite, and avoids maintaining a separate `public/wasm/` copy. `wasm-pkg/` files are generated artifacts — committed but not hand-edited.
 - **Edge overlay starts hidden, toggled with E**: Always-on overlay is too noisy during normal play. Debug overlays default to `visible=false`; developer toggles with a key. Consistent pattern for all future debug layers.
 
+## Jigsaw Tab Shape
+- **6-segment (19-point) cubic Bezier path per cut**: 5 segments (16 pts) could not produce a geometrically correct dome head — the single cap segment always produced a flat-topped bump. Splitting the cap into two quarter-circle arcs (K=0.5523 Bezier constant) gives G1-continuous joins at entry, tip, and exit, and a true dome shape regardless of tab size.
+- **K=0.5523 for quarter-circle arcs**: this constant (`4/3*(√2-1)`) is the standard Bezier approximation for a 90° arc. Each quarter arc is a single cubic segment; two arcs = semicircular dome. Applied symmetrically so the tab and blank are exact inverses.
+- **neck_y = cut_y + tab_dy − sgn·r**: this formula places the dome entry such that `tip_y − neck_y = r` always, giving a dome of radius r regardless of piece aspect ratio. The head is always a true semicircle.
+- **`cutter.ts` reads cut-point arrays generically** (loop step 3 from index 1): any `1+3n` point count works. Adding or removing segments in Rust requires no TypeScript changes.
+- **`textureRegion` is the authoritative grid size**: expanded texture frames (for tab padding) must not be used to derive grid piece dimensions in snap or hit-test logic. Always read `piece.textureRegion.w/h`.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

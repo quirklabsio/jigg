@@ -41,11 +41,12 @@ export function checkAndApplySnap(
   const draggedGroup = state.groupsById[draggedGroupId];
   if (!draggedGroup) return null;
 
-  // All pieces in a regular grid share the same texture dimensions
+  // Use original piece dimensions (textureRegion), not the expanded frame.
   const firstSprite = spriteMap.get(draggedGroup.pieceIds[0]);
-  if (!firstSprite) return null;
-  const pieceW = firstSprite.texture.frame.width * firstSprite.scale.x;
-  const pieceH = firstSprite.texture.frame.height * firstSprite.scale.y;
+  const firstPiece = state.piecesById[draggedGroup.pieceIds[0]];
+  if (!firstSprite || !firstPiece) return null;
+  const pieceW = firstPiece.textureRegion.w * firstSprite.scale.x;
+  const pieceH = firstPiece.textureRegion.h * firstSprite.scale.y;
 
   const draggedRot = normRot(draggedGroup.rotation);
   const cos = Math.cos(draggedGroup.rotation);
