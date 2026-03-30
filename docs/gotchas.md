@@ -66,6 +66,25 @@
 - **Root cause**: `Graphics` was not in the PixiJS named import in scene.ts — the file only used `Sprite`, `Application`, etc.
 - **Fix**: Add `Graphics` to the import: `import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';`
 
+## PixiJS v8 filters: `dFdx`/`dFdy` unavailable without extension
+- **Symptom**: GLSL shader compile error `'dFdx' : no matching overloaded function found` when using screen-space partial derivatives in a PixiJS filter.
+- **Root cause**: PixiJS v8 does NOT add `#version 300 es` to filter shaders. Without this directive, the GLSL compiler treats the source as GLSL ES 1.0 regardless of the WebGL2 context. In GLSL ES 1.0, `dFdx`/`dFdy` require the `GL_OES_standard_derivatives` extension which PixiJS does not enable automatically.
+- **Fix**: Avoid `dFdx`/`dFdy` entirely. Compute the gradient via central-difference texture samples:
+  ```glsl
+  uniform vec2 uDistanceFieldTexel; // vec2(1/textureWidth, 1/textureHeight)
+  float dx = texture(uTex, uv + vec2(uDistanceFieldTexel.x, 0.0)).r
+           - texture(uTex, uv - vec2(uDistanceFieldTexel.x, 0.0)).r;
+  float dy = texture(uTex, uv + vec2(0.0, uDistanceFieldTexel.y)).r
+           - texture(uTex, uv - vec2(0.0, uDistanceFieldTexel.y)).r;
+  ```
+- **Rule**: Never use `dFdx`/`dFdy` in PixiJS v8 filters; always pass texel size as a uniform and use finite differences.
+
+## Stale variable reference after removing debug code
+- **Symptom**: `error TS2304: Cannot find name 'currentEdgeInfluence'` after removing the Story 15 debug key bindings (1/2/3 keys that reassigned `currentEdgeInfluence`).
+- **Root cause**: The `GENERATE_CUTS` postMessage payload still referenced `currentEdgeInfluence` after the variable declaration and key-binding block were deleted. TypeScript correctly catches the dangling reference.
+- **Fix**: Replace `currentEdgeInfluence` with the canonical constant `EDGE_INFLUENCE` imported from `cutter.ts`. The debug bindings were the only thing that ever diverged from it.
+- **Rule**: When removing a debug variable that shadows a module constant, grep for every use of the debug variable before deleting the declaration — don't assume only one call site exists.
+
 ## PixiJS Sprite.addChild deprecation (v8)
 - `sprite.addChild(graphics)` works in v8 (Sprite extends Container) but logs a deprecation warning: "Only Containers will be allowed to add children in v8.0.0". This will break in v9. Current workaround: accept the warning for now; future fix is to wrap sprite+mask in a parent Container. The mask still moves with the sprite because it is a child.
 

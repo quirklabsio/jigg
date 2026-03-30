@@ -51,5 +51,8 @@ Do not revisit without asking.
 - **`roundPixels: true` as the mask antialias fix**: PixiJS v8 has no `antialias: false` on Graphics. StencilMask is binary, so alpha fringe isn't the issue. The gap comes from sub-pixel stencil boundaries leaving a pixel unclaimed. `roundPixels: true` snaps stencil vertices to integer device pixels, making shared boundaries deterministic.
 - **`scene.ts` touched despite "touch only" spec**: Debug key bindings (1/2/3 for edge influence) and pipeline wiring (passing `edgeInfluence`/`imageWidth`/`imageHeight` in the GENERATE_CUTS payload) require scene.ts changes. The "touch only" constraint applied to production logic; the debug feature explicitly requires scene.ts.
 
+## Rendering / Shaders
+- **lightAngle hardcoded to 45° (top-left)** — no UI for light direction, universal jigsaw convention. `BevelFilter rotation: 225` (= lightAngle + 180 in BevelFilter's convention). Revisit if surface texture story needs it.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.

@@ -1,4 +1,5 @@
 import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
+import { BevelFilter } from 'pixi-filters';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
@@ -14,6 +15,12 @@ const COLS = 4;
 const ROWS = 4;
 
 function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
+  // Expand each piece's texture frame so tab protrusions have pixel data.
+  // Tab height = pieceH * 0.25 ± 15%, so 0.4 * max(pw,ph) covers worst case.
+  const tabPad = Math.ceil(Math.max(
+    Math.floor(texture.width  / COLS),
+    Math.floor(texture.height / ROWS),
+  ) * 0.4);
   const { pieces, groups } = gridCut(texture.width, texture.height, COLS, ROWS);
 
   const gridIndex = new Map<string, string>();
@@ -22,12 +29,6 @@ function buildGridSprites(app: Application, texture: Texture, scale: number): Sp
   usePuzzleStore.getState().setPieces(pieces);
   usePuzzleStore.getState().setGroups(groups);
   usePuzzleStore.getState().setGridIndex(gridIndex);
-
-  // Expand each piece's texture frame so tab protrusions have pixel data.
-  // Tab height = pieceH * 0.25 ± 15%, so 0.4 * max(pw,ph) covers worst case.
-  const pw0 = pieces[0]?.textureRegion.w ?? 1;
-  const ph0 = pieces[0]?.textureRegion.h ?? 1;
-  const tabPad = Math.ceil(Math.max(pw0, ph0) * 0.4);
 
   return pieces.map((piece) => {
     const { col, row } = piece.gridCoord;
@@ -172,36 +173,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const pixels = new Uint8Array(imageData.data.buffer);
 
   let edgeOverlay: Sprite | null = null;
-  // DEBUG: current edge influence — 1/2/3 keys override this at runtime.
-  let currentEdgeInfluence = EDGE_INFLUENCE;
 
   window.addEventListener('keydown', (e) => {
     if ((e.key === 'e' || e.key === 'E') && edgeOverlay) {
       edgeOverlay.visible = !edgeOverlay.visible;
-      return;
     }
-    // DEBUG key bindings — rebuild cuts with different edge influence.
-    if (e.key === '1') currentEdgeInfluence = 0.0;
-    else if (e.key === '2') currentEdgeInfluence = 0.5;
-    else if (e.key === '3') currentEdgeInfluence = 1.0;
-    else return;
-    console.log(`[debug] edge_influence → ${currentEdgeInfluence}`);
-    worker.postMessage({
-      type: 'GENERATE_CUTS',
-      payload: {
-        cols: COLS,
-        rows: ROWS,
-        pieceWidth: piecePixelW,
-        pieceHeight: piecePixelH,
-        seed: 0x4a_49_47_47,
-        edgeInfluence: currentEdgeInfluence,
-        imageWidth: width,
-        imageHeight: height,
-      },
-    } satisfies WorkerMessage<{
-      cols: number; rows: number; pieceWidth: number; pieceHeight: number;
-      seed: number; edgeInfluence: number; imageWidth: number; imageHeight: number;
-    }>);
   });
 
   // Piece pixel dimensions (before scale)
@@ -224,7 +200,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       pieceWidth: piecePixelW,
       pieceHeight: piecePixelH,
       seed: 0x4a_49_47_47, // "JIGG" as u32
-      edgeInfluence: currentEdgeInfluence,
+      edgeInfluence: EDGE_INFLUENCE,
       imageWidth: width,
       imageHeight: height,
     },
@@ -278,7 +254,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         const sprite = spriteMap.get(piece.id);
         if (!sprite) continue;
 
-        // Clear any existing mask before applying the new one (supports debug rebuild).
+        // Clear any existing mask before applying the new one.
         if (sprite.mask) {
           const old = sprite.mask as Graphics;
           sprite.removeChild(old);
@@ -292,6 +268,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         mask.roundPixels = true;
         sprite.addChild(mask);
         sprite.mask = mask;
+
+        sprite.filters = [new BevelFilter({
+          rotation:    225, // top-left light, universal jigsaw convention
+          thickness:   2,
+          lightColor:  0xffffff,
+          lightAlpha:  0.3,
+          shadowColor: 0x000000,
+          shadowAlpha: 0.3,
+        })];
       }
 
       console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);

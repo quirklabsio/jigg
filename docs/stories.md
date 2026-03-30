@@ -22,7 +22,7 @@
 - [x] Story 15: Content-aware cut routing (follows contours)
 
 ## Epic: Piece Fidelity
-- [ ] Story 16: Bevel shader on cut edges
+- [x] Story 16: Bevel shader on cut edges
 - [ ] Story 17: Surface texture variants (matte/glossy/canvas/wood)
 - [ ] Story 18: Soft shadows relative to light source
 - [ ] Story 19: Realistic stacking z-order
@@ -49,8 +49,16 @@
 ---
 
 ## Current Session
-Last completed: Story 15 + sliver gap critical fix
-Next: Story 16 — Bevel shader on cut edges
+Last completed: Story 16 — Bevel shader on cut edges
+Next: Story 17 — Surface texture variants
+
+### Story 16 notes
+- Uses `pixi-filters` v6 `BevelFilter` — no custom GLSL or distance field required for v1
+- Applied per sprite in `CUTS_COMPLETE` after mask is set: `sprite.filters = [new BevelFilter({ rotation, thickness, lightAlpha, shadowAlpha })]`
+- `rotation: 225` hardcoded directly — light from top-left, universal jigsaw convention. No derivation from `lightAngle` (no UI for it). See decisions.md.
+- `thickness: 2`, `lightAlpha: 0.3`, `shadowAlpha: 0.3` for subtle effect
+- Removed Story 15 debug key bindings (1/2/3) — Story 15 phase complete
+- Custom distance-field shader (BFS in WASM + bevel.frag) prototyped but scrapped; logged as future polish story. Gotcha noted: PixiJS v8 filters cannot use `dFdx`/`dFdy` without `GL_OES_standard_derivatives`.
 
 ### Story 15 notes
 - `generate_cuts` in `lib.rs` gains `edge_map: &[u8]`, `image_width`, `image_height`, `edge_influence` params
