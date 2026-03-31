@@ -23,7 +23,7 @@
 
 ## Epic: Piece Fidelity
 - [x] Story 16: Bevel shader on cut edges
-- [ ] Story 17: Surface texture variants (matte/glossy/canvas/wood)
+- [x] Story 17: Surface texture variants (matte/glossy/canvas/wood)
 - [ ] Story 18: Soft shadows relative to light source
 - [ ] Story 19: Realistic stacking z-order
 
@@ -49,8 +49,15 @@
 ---
 
 ## Current Session
-Last completed: Story 16 — Bevel shader on cut edges
-Next: Story 17 — Surface texture variants
+Last completed: Story 17 — Workspace background (dark charcoal felt)
+Next: Story 18 — Soft shadows relative to light source
+
+### Story 17 notes
+- Background is a `Graphics` rect (`0x2a2a2a`, dark charcoal) filling world bounds at `zIndex = -2`
+- `SimplexNoiseFilter({ strength: 0.04 })` applied — breaks up flat colour at close zoom, invisible at normal zoom
+- Both a real wood JPG (AmbientCG Wood054) and a procedural WASM approach were prototyped and scrapped before settling on this
+- `pixi-filters` exports `SimplexNoiseFilter`, not `NoiseFilter` — check exports before importing by assumed name
+- Layer order: background (`zIndex=-2`) → board (`zIndex=-1`) → pieces (`zIndex=0..n-1`)
 
 ### Story 16 notes
 - Uses `pixi-filters` v6 `BevelFilter` — no custom GLSL or distance field required for v1

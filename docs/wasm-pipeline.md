@@ -99,7 +99,7 @@ When ANALYZE_IMAGE completes, the worker transfers `edgeMap.buffer` to the main 
 Both messages are sent simultaneously from scene.ts. Both handlers `await initPromise`. When `initPromise` is already resolved, both continuations are queued as microtasks in message-receive order. ANALYZE_IMAGE always completes before GENERATE_CUTS. Module-scope edgeMap storage is safe.
 
 ### Worker lifetime
-The worker is **not terminated** after both jobs complete (removed `terminateIfDone`). This keeps it alive for debug key re-runs (1/2/3 rebuild cuts at different `edge_influence`). Remove debug keys and restore termination after Story 15 debug phase.
+The worker is **not terminated** after ANALYZE_IMAGE and GENERATE_CUTS complete. The debug keys (1/2/3) that originally motivated this were removed in Story 16. Worker stays alive as settled behaviour — small idle cost, no action needed.
 
 ## Edge Map → PixiJS Overlay (scene.ts)
 ```typescript

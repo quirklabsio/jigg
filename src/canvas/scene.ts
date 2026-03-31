@@ -1,5 +1,5 @@
 import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
-import { BevelFilter } from 'pixi-filters';
+import { BevelFilter, SimplexNoiseFilter } from 'pixi-filters';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
@@ -84,6 +84,13 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
+
+  const bg = new Graphics();
+  bg.rect(0, 0, app.screen.width, app.screen.height);
+  bg.fill({ color: 0x2a2a2a });
+  bg.filters = [new SimplexNoiseFilter({ strength: 0.04 })];
+  bg.zIndex = -2; // below board (zIndex=-1) and all piece sprites
+  app.stage.addChild(bg);
 
   const board = createBoard(texture.width, texture.height, COLS, ROWS, scale, app.screen.width, app.screen.height);
   app.stage.addChild(board);

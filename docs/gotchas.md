@@ -91,6 +91,17 @@
 ## PixiJS Texture from Canvas
 - **`Texture.from(HTMLCanvasElement)` works in PixiJS v8**: `HTMLCanvasElement` is part of `ImageResource` which is part of `TextureResourceOrOptions`. Pass a canvas element directly — no intermediate `ImageBitmap` or data URL needed. Creates a GPU-backed texture immediately.
 
+## `pixi-filters` exports `SimplexNoiseFilter`, not `NoiseFilter`
+- **Symptom**: `error TS2305: Module '"pixi-filters"' has no exported member 'NoiseFilter'`
+- **Root cause**: There is no `NoiseFilter` in `pixi-filters` v6. The noise filter is named `SimplexNoiseFilter`. PixiJS v8 core also has no built-in noise filter.
+- **Fix**: `import { SimplexNoiseFilter } from 'pixi-filters'`. Constructor option is `strength` (default 0.5), not `noise`.
+- **Rule**: Always check `Object.keys(require('pixi-filters'))` or the package `.d.ts` files before importing by assumed name.
+
+## `Uint8Array.buffer` types as `ArrayBufferLike` — `ImageData` rejects it
+- **Symptom**: `error TS2769: No overload matches this call` when passing `new Uint8ClampedArray(uint8arr.buffer)` to `new ImageData(...)`.
+- **Root cause**: `TypedArray.buffer` is typed as `ArrayBufferLike` in TypeScript's DOM lib, which is a union of `ArrayBuffer | SharedArrayBuffer`. `ImageData`'s constructor only accepts `ArrayBuffer` (not `SharedArrayBuffer`), so the union doesn't satisfy the parameter type.
+- **Fix**: Cast to `ArrayBuffer`: `new Uint8ClampedArray(rgba.buffer as ArrayBuffer)`. In practice the buffer is always a regular `ArrayBuffer` from WASM; the cast is safe.
+
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks
 
