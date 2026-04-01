@@ -1,5 +1,6 @@
 import { Application, Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import { BevelFilter, DropShadowFilter } from 'pixi-filters';
+import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
@@ -21,6 +22,7 @@ import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const COLS = 4;
 const ROWS = 4;
+const WORLD_SIZE = 4000;
 
 // ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
 
@@ -62,7 +64,7 @@ function applyShadowPlaced(f: DropShadowFilter): void {
 // ─── Sprite builder ───────────────────────────────────────────────────────────
 
 function buildGridSprites(
-  app: Application,
+  parent: Container,
   texture: Texture,
   scale: number,
 ): { sprites: Sprite[]; containers: Container[] } {
@@ -113,7 +115,7 @@ function buildGridSprites(
     // masked jigsaw-shaped sprite rather than the full rectangle. (See gotchas.md)
     const container = new Container();
     container.addChild(sprite);
-    app.stage.addChild(container);
+    parent.addChild(container);
     sprites.push(sprite);
     containers.push(container);
   }
@@ -147,16 +149,40 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
 
+  // ── Viewport (infinite canvas) ─────────────────────────────────────────────
+  const viewport = new Viewport({
+    screenWidth: window.innerWidth,
+    screenHeight: window.innerHeight,
+    worldWidth: WORLD_SIZE,
+    worldHeight: WORLD_SIZE,
+    events: app.renderer.events,
+  });
+  app.stage.addChild(viewport);
+
+  viewport
+    .drag()
+    .pinch()
+    .wheel()
+    .decelerate({ friction: 0.95 });
+
+  viewport.clampZoom({
+    minScale: 0.05,
+    maxScale: 8.0,
+  });
+
+  viewport.sortableChildren = true;
+
+  // Resize viewport when window resizes (renderer resize handled by resizeTo: window)
+  window.addEventListener('resize', () => {
+    viewport.resize(window.innerWidth, window.innerHeight);
+  });
+
   // Background: handled entirely by the WebGL clear colour in app.ts
   // (background: '#f5f5f3'). A Graphics rect produced a thin triangle-seam
   // artifact on retina/HiDPI displays — removing it eliminates the line.
 
-  // Board card disabled — too visually intrusive on off-white background.
-  // Not added to stage at all to avoid any filter/rendering side effects.
-  // const board = createBoard(...);
-
   // ── Piece sprites + containers ─────────────────────────────────────────────
-  const { sprites, containers } = buildGridSprites(app, texture, scale);
+  const { sprites, containers } = buildGridSprites(viewport, texture, scale);
 
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
@@ -193,8 +219,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   });
 
   // ── Drag system ────────────────────────────────────────────────────────────
-  const hitLayer = createHitLayer(app);
-  initDragListeners(hitLayer, app, spriteMap);
+  const hitLayer = createHitLayer(viewport, WORLD_SIZE, WORLD_SIZE);
+  initDragListeners(hitLayer, app, spriteMap, viewport);
   setRotateCallback((groupId) => rotateGroup(groupId, spriteMap));
   setSnapCallback((groupId) => checkAndApplySnap(groupId, spriteMap));
 
@@ -337,7 +363,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       edgeOverlay.alpha   = 0.6;
       edgeOverlay.zIndex  = 999;
       edgeOverlay.visible = false;
-      app.stage.addChild(edgeOverlay);
+      viewport.addChild(edgeOverlay);
 
       console.log(`Edge map ready: ${width}x${height}, press E to toggle overlay`);
       return;

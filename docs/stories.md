@@ -29,7 +29,7 @@
 - [ ] Story 19: Realistic stacking z-order
 
 ## Epic: Workspace
-- [ ] Story 20: Infinite canvas + zoom with inertia
+- [x] Story 20: Infinite canvas + zoom with inertia
 - [ ] Story 21: Pan with momentum
 - [ ] Story 22: Zoom-locked reference image panel
 - [ ] Story 23: Ghost image underlay with opacity control
@@ -50,8 +50,20 @@
 ---
 
 ## Current Session
-Last completed: Story 18b — Visual foundation reset + bug fixes (off-white bg, subtle bevel, 1° drag rotation, Container wrapper architecture)
-Next: Story 19 — Realistic stacking z-order
+Last completed: Story 20 — Infinite canvas + zoom with inertia
+Next: Story 21 — Pan with momentum
+
+### Story 20 notes
+- **pixi-viewport**: `Viewport` from `pixi-viewport` replaces manual camera. Added to `app.stage` as the sole world-space parent.
+- **World content**: All piece containers, hit layer, and edge overlay live inside `viewport`. Completion UI (`ui.ts`) stays on `app.stage` (screen-space).
+- **Viewport plugins**: `.drag()` (pan), `.pinch()` (mobile zoom), `.wheel()` (scroll zoom), `.decelerate({ friction: 0.95 })` (inertia). Zoom clamped: `minScale: 0.15`, `maxScale: 8.0`.
+- **World size**: 4000×4000. Hit layer covers `(-2000, -2000)` to `(2000, 2000)`.
+- **Drag coord fix**: `drag.ts` accepts optional `worldContainer: Container` param for `toLocal()` and `sortChildren()`. Defaults to `app.stage` for backwards compat. Scene passes `viewport` as worldContainer.
+- **Hit layer**: `createHitLayer` now takes `(worldContainer, worldW, worldH)` instead of `(app)`. Rectangle centred at world origin.
+- **Resize**: Window resize listener calls `viewport.resize()`. Renderer resize still handled by `resizeTo: window`.
+- **No coordinate changes**: All piece positions remain in world space. Viewport transform handles screen mapping. Scatter, snap, and drag logic unchanged.
+- **Event conflict prevention**: Piece pointerdown calls `e.stopPropagation()` → viewport drag doesn't fire during piece drag. Non-piece clicks propagate to viewport for panning.
+- Story 19 skipped — z-order handled implicitly by drag system settle counter.
 
 ### Story 18b final state
 - **Background**: WebGL clear color `#f5f5f3` only (no Graphics rect — retina triangle-seam artifact). `index.html` body background also `#f5f5f3`.
