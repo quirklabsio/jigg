@@ -52,7 +52,10 @@ Do not revisit without asking.
 - **`scene.ts` touched despite "touch only" spec**: Debug key bindings (1/2/3 for edge influence) and pipeline wiring (passing `edgeInfluence`/`imageWidth`/`imageHeight` in the GENERATE_CUTS payload) require scene.ts changes. The "touch only" constraint applied to production logic; the debug feature explicitly requires scene.ts.
 
 ## Workspace Background
-- **Dark charcoal `Graphics` rect over photo texture over procedural WASM**: Three approaches tried in order — procedural WASM grain (scrapped: too synthetic), real AmbientCG Wood054 JPG (scrapped: wrong tone), dark charcoal `0x2a2a2a` `Graphics` rect with `SimplexNoiseFilter({ strength: 0.04 })` (final). Background is `zIndex = -2`, board is `zIndex = -1`, pieces are `zIndex = 0..n-1`. Pieces are photo paper — no surface applied to them.
+- **Off-white WebGL clear color over Graphics rect**: Previously used a dark charcoal `Graphics` rect with `SimplexNoiseFilter`. Story 18b switched to off-white `#f5f5f3`. A `Graphics` rect produced triangle-seam artifacts on retina displays (see gotchas.md), so the background is now handled entirely by the WebGL clear color (`app.init({ background: '#f5f5f3' })`). Zero geometry, no possible seams. Body CSS background also set to `#f5f5f3` to prevent black gaps at canvas edges.
+
+## Piece Shadows (DropShadowFilter)
+- **Disabled after experimentation**: Container-wrapped DropShadowFilter was implemented (resting/dragging/placed states) but produced two issues: (1) `resolution: DPR` caused a thin vertical seam on retina displays, (2) at `resolution: 1` the effect was too subtle at low alpha values (0.04–0.10) to justify the rendering overhead and code complexity. Shadows disabled for now. Container wrapper architecture remains in place for future use. If re-enabled, use `resolution: 1` and mutate filter properties in place (never replace the `filters` array).
 
 ## Rendering / Shaders
 - **lightAngle hardcoded to 45° (top-left)** — no UI for light direction, universal jigsaw convention. `BevelFilter rotation: 225` (= lightAngle + 180 in BevelFilter's convention). Revisit if surface texture story needs it.

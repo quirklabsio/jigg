@@ -24,7 +24,8 @@
 ## Epic: Piece Fidelity
 - [x] Story 16: Bevel shader on cut edges
 - [x] Story 17: Surface texture variants (matte/glossy/canvas/wood)
-- [ ] Story 18: Soft shadows relative to light source
+- [x] Story 18: Soft shadows relative to light source
+- [x] Story 18b: Visual foundation reset
 - [ ] Story 19: Realistic stacking z-order
 
 ## Epic: Workspace
@@ -49,15 +50,25 @@
 ---
 
 ## Current Session
-Last completed: Story 17 — Workspace background (dark charcoal felt)
-Next: Story 18 — Soft shadows relative to light source
+Last completed: Story 18b — Visual foundation reset + bug fixes (off-white bg, subtle bevel, 1° drag rotation, Container wrapper architecture)
+Next: Story 19 — Realistic stacking z-order
 
-### Story 17 notes
-- Background is a `Graphics` rect (`0x2a2a2a`, dark charcoal) filling world bounds at `zIndex = -2`
-- `SimplexNoiseFilter({ strength: 0.04 })` applied — breaks up flat colour at close zoom, invisible at normal zoom
-- Both a real wood JPG (AmbientCG Wood054) and a procedural WASM approach were prototyped and scrapped before settling on this
-- `pixi-filters` exports `SimplexNoiseFilter`, not `NoiseFilter` — check exports before importing by assumed name
-- Layer order: background (`zIndex=-2`) → board (`zIndex=-1`) → pieces (`zIndex=0..n-1`)
+### Story 18b final state
+- **Background**: WebGL clear color `#f5f5f3` only (no Graphics rect — retina triangle-seam artifact). `index.html` body background also `#f5f5f3`.
+- **Board**: `board.ts` rewritten to return `Container` with white fill + DropShadowFilter, but NOT added to stage (too visually intrusive on off-white).
+- **Piece shadows**: DropShadowFilter on Container wrappers implemented with 3-state system (resting/dragging/placed), persistent filter mutation, drag callbacks. **Disabled** — too subtle at low alpha, retina seam at `resolution: DPR`, `resolution: 1` imperceptible. Container wrapper architecture retained.
+- **BevelFilter**: `thickness:2`, `lightAlpha:0.2`, `shadowAlpha:0.2` on sprites (subtle edge lighting).
+- **1° rotation tween**: `tweenRotation()` on pointerdown (lift) and pointerup (snap-back to nearest 90°). 80ms ease-in-out quad via `app.ticker`. `tweenId` counter cancels stale tweens (prevents snap-back from clobbering double-tap rotate).
+- **Container wrapper**: Each sprite wrapped in a one-child `Container` on stage. Container owns `zIndex` and `filters`; sprite owns position, rotation, scale, anchor, mask. `(s.parent ?? s).zIndex` pattern in drag.ts.
+- **Hit layer**: `hitArea = new Rectangle(...)` instead of transparent-fill rect (no rendered geometry at zIndex 1000).
+- **Drag zIndex**: `stage.sortChildren()` called explicitly after bulk zIndex mutation in pointerdown/pointerup.
+- **Drag callbacks**: `setDragStartCallback` / `setDragEndCallback` exported from drag.ts, wired in scene.ts for shadow state (currently no-op since shadows disabled).
+
+### Story 18/18a notes (superseded by 18b)
+- Story 18: DropShadowFilter on Container wrapper pattern established (see gotchas.md for stencil mask + filter incompatibility)
+- Story 18a: BevelFilter strengthened + piece outline stroke — reverted in 18b
+- Story 17: Dark charcoal background with SimplexNoiseFilter — replaced in 18b by off-white WebGL clear color
+- All visual changes from 17/18/18a are superseded by 18b's visual foundation reset
 
 ### Story 16 notes
 - Uses `pixi-filters` v6 `BevelFilter` — no custom GLSL or distance field required for v1

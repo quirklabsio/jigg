@@ -1,10 +1,18 @@
-import { Application, Assets, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
-import { BevelFilter, SimplexNoiseFilter } from 'pixi-filters';
+import { Application, Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
+import { BevelFilter, DropShadowFilter } from 'pixi-filters';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
 import { scatterPieces } from '../puzzle/scatter';
-import { createHitLayer, initDragListeners, setRotateCallback, setSnapCallback, setBoardSnapCallback } from '../puzzle/drag';
+import {
+  createHitLayer,
+  initDragListeners,
+  setRotateCallback,
+  setSnapCallback,
+  setBoardSnapCallback,
+  setDragStartCallback,
+  setDragEndCallback,
+} from '../puzzle/drag';
 import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
@@ -14,7 +22,50 @@ import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 const COLS = 4;
 const ROWS = 4;
 
-function buildGridSprites(app: Application, texture: Texture, scale: number): Sprite[] {
+// ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
+
+// resolution: devicePixelRatio ensures the filter renders at device resolution,
+// preventing pixelated piece edges on retina/HiDPI displays.
+const DPR = window.devicePixelRatio ?? 1;
+
+function makeShadow(): DropShadowFilter {
+  const f = new DropShadowFilter({
+    offset:     { x: 0, y: 3 },
+    blur:       8,
+    alpha:      0.06,
+    color:      0x000000,
+    quality:    3,
+    resolution: 1, // DPR causes a thin vertical seam artifact on retina — shadows are blurry by nature so 1x is fine
+  });
+  f.padding = 24; // use dragging padding (largest) to avoid clipping in any state
+  return f;
+}
+
+function applyShadowResting(f: DropShadowFilter): void {
+  f.offset = { x: 0, y: 3 };
+  f.blur   = 8;
+  f.alpha  = 0.06;
+}
+
+function applyShadowDragging(f: DropShadowFilter): void {
+  f.offset = { x: 0, y: 6 };
+  f.blur   = 14;
+  f.alpha  = 0.10;
+}
+
+function applyShadowPlaced(f: DropShadowFilter): void {
+  f.offset = { x: 0, y: 2 };
+  f.blur   = 4;
+  f.alpha  = 0.04;
+}
+
+// ─── Sprite builder ───────────────────────────────────────────────────────────
+
+function buildGridSprites(
+  app: Application,
+  texture: Texture,
+  scale: number,
+): { sprites: Sprite[]; containers: Container[] } {
   // Expand each piece's texture frame so tab protrusions have pixel data.
   // Tab height = pieceH * 0.25 ± 15%, so 0.4 * max(pw,ph) covers worst case.
   const tabPad = Math.ceil(Math.max(
@@ -30,11 +81,13 @@ function buildGridSprites(app: Application, texture: Texture, scale: number): Sp
   usePuzzleStore.getState().setGroups(groups);
   usePuzzleStore.getState().setGridIndex(gridIndex);
 
-  return pieces.map((piece) => {
+  const sprites: Sprite[] = [];
+  const containers: Container[] = [];
+
+  for (const piece of pieces) {
     const { col, row } = piece.gridCoord;
     const pw = piece.textureRegion.w;
     const ph = piece.textureRegion.h;
-    // Clamp padding so we never request pixels outside the source image.
     const leftPad   = Math.min(tabPad, col * pw);
     const topPad    = Math.min(tabPad, row * ph);
     const rightPad  = Math.min(tabPad, (COLS - col - 1) * pw);
@@ -56,9 +109,16 @@ function buildGridSprites(app: Application, texture: Texture, scale: number): Sp
       (leftPad + pw / 2) / expandedW,
       (topPad + ph / 2) / expandedH,
     );
-    app.stage.addChild(sprite);
-    return sprite;
-  });
+    // Wrap sprite in a Container so filters on the container see the correctly
+    // masked jigsaw-shaped sprite rather than the full rectangle. (See gotchas.md)
+    const container = new Container();
+    container.addChild(sprite);
+    app.stage.addChild(container);
+    sprites.push(sprite);
+    containers.push(container);
+  }
+
+  return { sprites, containers };
 }
 
 function applyScatterToSprites(sprites: Sprite[]): void {
@@ -75,6 +135,8 @@ function applyScatterToSprites(sprites: Sprite[]): void {
   });
 }
 
+// ─── Scene entry point ────────────────────────────────────────────────────────
+
 export async function loadScene(app: Application, imageUrl: string): Promise<void> {
   const texture = await Assets.load<Texture>(imageUrl);
 
@@ -85,25 +147,21 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
 
-  const bg = new Graphics();
-  bg.rect(0, 0, app.screen.width, app.screen.height);
-  bg.fill({ color: 0x2a2a2a });
-  bg.filters = [new SimplexNoiseFilter({ strength: 0.04 })];
-  bg.zIndex = -2; // below board (zIndex=-1) and all piece sprites
-  app.stage.addChild(bg);
+  // Background: handled entirely by the WebGL clear colour in app.ts
+  // (background: '#f5f5f3'). A Graphics rect produced a thin triangle-seam
+  // artifact on retina/HiDPI displays — removing it eliminates the line.
 
-  const board = createBoard(texture.width, texture.height, COLS, ROWS, scale, app.screen.width, app.screen.height);
-  app.stage.addChild(board);
+  // Board card disabled — too visually intrusive on off-white background.
+  // Not added to stage at all to avoid any filter/rendering side effects.
+  // const board = createBoard(...);
 
-  const sprites = buildGridSprites(app, texture, scale);
+  // ── Piece sprites + containers ─────────────────────────────────────────────
+  const { sprites, containers } = buildGridSprites(app, texture, scale);
 
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
 
   // Convert correctPositions from image-pixel space → world-screen space.
-  // Board is centred: left = (screenW - imageW*scale) / 2, top = (screenH - imageH*scale) / 2.
-  // Piece sprites have anchor(0.5), so the correct world centre of each slot is:
-  //   boardLeft + correctPosition.x * scale + pieceScreenW / 2
   const boardLeft = (app.screen.width  - texture.width  * scale) / 2;
   const boardTop  = (app.screen.height - texture.height * scale) / 2;
   {
@@ -124,25 +182,56 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const spriteMap = new Map<string, Sprite>();
   sprites.forEach((sprite, i) => spriteMap.set(pieces[i].id, sprite));
 
-  sprites.forEach((sprite, i) => {
-    sprite.zIndex = i; // unique per piece so topmost selection works before any drag
-    sprite.eventMode = 'none'; // permanently non-interactive — hitLayer handles all pointer events
+  const containerMap = new Map<string, Container>();
+  containers.forEach((container, i) => containerMap.set(pieces[i].id, container));
+
+  sprites.forEach((sprite) => {
+    sprite.eventMode = 'none';
+  });
+  containers.forEach((container, i) => {
+    container.zIndex = i;
   });
 
+  // ── Drag system ────────────────────────────────────────────────────────────
   const hitLayer = createHitLayer(app);
   initDragListeners(hitLayer, app, spriteMap);
   setRotateCallback((groupId) => rotateGroup(groupId, spriteMap));
   setSnapCallback((groupId) => checkAndApplySnap(groupId, spriteMap));
+
+  // Persistent shadow filter per container — mutated in place (never replaced).
+  // Replacing `c.filters = [new DropShadowFilter()]` each state change caused
+  // some pieces to disappear mid-drag (PixiJS filter teardown/setup rendering gap).
+  const shadowMap = new Map<string, DropShadowFilter>();
+
+  // Shadow state: dragging
+  setDragStartCallback((groupId) => {
+    const group = usePuzzleStore.getState().groupsById[groupId];
+    if (!group) return;
+    for (const pid of group.pieceIds) {
+      const f = shadowMap.get(pid);
+      if (f) applyShadowDragging(f);
+    }
+  });
+
+  // Shadow state: resting (reverted on drop; board-snap overrides to placed)
+  setDragEndCallback((groupId) => {
+    const group = usePuzzleStore.getState().groupsById[groupId];
+    if (!group) return;
+    for (const pid of group.pieceIds) {
+      const f = shadowMap.get(pid);
+      if (f) applyShadowResting(f);
+    }
+  });
+
   setBoardSnapCallback((groupId) => {
     const result = checkAndApplyBoardSnap(groupId, spriteMap);
     if (result) {
-      // 150ms scale pulse (1.0 → 1.05 → 1.0) + brightness tint (0xffffff → 0xeeeeff → 0xffffff)
+      // Scale pulse + tint flash
       const startTime = performance.now();
       const DURATION_MS = 150;
       const tickerFn = () => {
         const t = Math.min((performance.now() - startTime) / DURATION_MS, 1);
         const pulseFactor = 1 + 0.05 * Math.sin(t * Math.PI);
-        // G channel: 255 → 238 → 255 (R and B stay at 255)
         const gChannel = Math.round(255 - 17 * Math.sin(t * Math.PI));
         const tint = (0xff << 16) | (gChannel << 8) | 0xff;
         for (const pid of result.pieceIds) {
@@ -155,15 +244,18 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         if (t >= 1) {
           for (const pid of result.pieceIds) {
             const s = spriteMap.get(pid);
-            if (s) {
-              s.scale.set(scale);
-              s.tint = 0xffffff;
-            }
+            if (s) { s.scale.set(scale); s.tint = 0xffffff; }
           }
           app.ticker.remove(tickerFn);
         }
       };
       app.ticker.add(tickerFn);
+
+      // Shadow state: placed (small, tight)
+      for (const pid of result.pieceIds) {
+        const f = shadowMap.get(pid);
+        if (f) applyShadowPlaced(f);
+      }
 
       if (usePuzzleStore.getState().puzzleComplete) {
         onComplete(app, hitLayer, usePuzzleStore.getState().pieces.length);
@@ -172,6 +264,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     return result;
   });
 
+  // ── Image analysis + cut generation ───────────────────────────────────────
   const { width, height } = texture;
   const offscreen = new OffscreenCanvas(width, height);
   const ctx = offscreen.getContext('2d')!;
@@ -187,13 +280,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 
-  // Piece pixel dimensions (before scale)
   const piecePixelW = Math.floor(texture.width  / COLS);
   const piecePixelH = Math.floor(texture.height / ROWS);
 
   const worker = new AnalysisWorker();
 
-  // Send both jobs immediately
   worker.postMessage({
     type: 'ANALYZE_IMAGE',
     payload: { pixels, width, height },
@@ -204,12 +295,12 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     payload: {
       cols: COLS,
       rows: ROWS,
-      pieceWidth: piecePixelW,
-      pieceHeight: piecePixelH,
-      seed: 0x4a_49_47_47, // "JIGG" as u32
+      pieceWidth:   piecePixelW,
+      pieceHeight:  piecePixelH,
+      seed:         0x4a_49_47_47,
       edgeInfluence: EDGE_INFLUENCE,
-      imageWidth: width,
-      imageHeight: height,
+      imageWidth:   width,
+      imageHeight:  height,
     },
   } satisfies WorkerMessage<{
     cols: number; rows: number; pieceWidth: number; pieceHeight: number;
@@ -222,7 +313,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (type === 'ANALYSIS_COMPLETE') {
       const { edgeMap } = payload as { edgeMap: Uint8Array; width: number; height: number };
 
-      // Build RGBA pixel data: edge pixels → cyan, non-edge → transparent
       const rgba = new Uint8ClampedArray(width * height * 4);
       for (let i = 0; i < width * height; i++) {
         if (edgeMap[i] === 255) {
@@ -234,7 +324,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       }
 
       const overlayCanvas = document.createElement('canvas');
-      overlayCanvas.width = width;
+      overlayCanvas.width  = width;
       overlayCanvas.height = height;
       const overlayCtx = overlayCanvas.getContext('2d')!;
       overlayCtx.putImageData(new ImageData(rgba, width, height), 0, 0);
@@ -244,8 +334,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       edgeOverlay.scale.set(scale);
       edgeOverlay.position.set(boardLeft, boardTop);
       edgeOverlay.anchor.set(0, 0);
-      edgeOverlay.alpha = 0.6;
-      edgeOverlay.zIndex = 999;
+      edgeOverlay.alpha   = 0.6;
+      edgeOverlay.zIndex  = 999;
       edgeOverlay.visible = false;
       app.stage.addChild(edgeOverlay);
 
@@ -261,7 +351,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         const sprite = spriteMap.get(piece.id);
         if (!sprite) continue;
 
-        // Clear any existing mask before applying the new one.
         if (sprite.mask) {
           const old = sprite.mask as Graphics;
           sprite.removeChild(old);
@@ -270,20 +359,28 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         }
 
         const mask = buildPieceMask(piece, cuts, COLS, ROWS, piecePixelW, piecePixelH);
-        // roundPixels = true: snaps stencil geometry to integer device pixels,
-        // eliminating the sub-pixel fringe gap at shared mask boundaries.
         mask.roundPixels = true;
         sprite.addChild(mask);
         sprite.mask = mask;
 
+        // BevelFilter on sprite: subtle edge lighting.
         sprite.filters = [new BevelFilter({
-          rotation:    225, // top-left light, universal jigsaw convention
+          rotation:    225,
           thickness:   2,
           lightColor:  0xffffff,
-          lightAlpha:  0.3,
+          lightAlpha:  0.2,
           shadowColor: 0x000000,
-          shadowAlpha: 0.3,
+          shadowAlpha: 0.2,
         })];
+
+        // DropShadowFilter disabled — too subtle to notice, and resolution:DPR
+        // causes a retina texture seam artifact. Revisit if we want stronger shadows.
+        // const container = containerMap.get(piece.id);
+        // if (container) {
+        //   const shadow = makeShadow();
+        //   shadowMap.set(piece.id, shadow);
+        //   container.filters = [shadow];
+        // }
       }
 
       console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);

@@ -85,6 +85,12 @@
 - **Fix**: Replace `currentEdgeInfluence` with the canonical constant `EDGE_INFLUENCE` imported from `cutter.ts`. The debug bindings were the only thing that ever diverged from it.
 - **Rule**: When removing a debug variable that shadows a module constant, grep for every use of the debug variable before deleting the declaration — don't assume only one call site exists.
 
+## DropShadowFilter + stencil mask: must apply filter to parent Container, not the masked Sprite
+- **Symptom**: Shadow is cast from the full rectangular sprite bounds instead of the jigsaw piece shape. Black rectangular blobs appear around each piece.
+- **Root cause**: PixiJS filters on a Sprite operate on the sprite's texture before the stencil mask is applied. The filter sees a fully-opaque rectangle, not the masked jigsaw shape.
+- **Fix**: Wrap each sprite in a one-child `Container`. Apply `DropShadowFilter` to the Container. PixiJS renders the Container's subtree (including the stencil-masked sprite) to an intermediate `RenderTexture` first; the filter then receives the correctly-shaped alpha and casts the right shadow.
+- **Rule**: Any filter that needs to respect a stencil mask (drop shadow, glow, outline) must be placed on a parent Container, not on the masked sprite itself.
+
 ## PixiJS Sprite.addChild deprecation (v8)
 - `sprite.addChild(graphics)` works in v8 (Sprite extends Container) but logs a deprecation warning: "Only Containers will be allowed to add children in v8.0.0". This will break in v9. Current workaround: accept the warning for now; future fix is to wrap sprite+mask in a parent Container. The mask still moves with the sprite because it is a child.
 
@@ -101,6 +107,30 @@
 - **Symptom**: `error TS2769: No overload matches this call` when passing `new Uint8ClampedArray(uint8arr.buffer)` to `new ImageData(...)`.
 - **Root cause**: `TypedArray.buffer` is typed as `ArrayBufferLike` in TypeScript's DOM lib, which is a union of `ArrayBuffer | SharedArrayBuffer`. `ImageData`'s constructor only accepts `ArrayBuffer` (not `SharedArrayBuffer`), so the union doesn't satisfy the parameter type.
 - **Fix**: Cast to `ArrayBuffer`: `new Uint8ClampedArray(rgba.buffer as ArrayBuffer)`. In practice the buffer is always a regular `ArrayBuffer` from WASM; the cast is safe.
+
+## PixiJS v8: `sortChildren()` not called automatically within the same frame
+- **Symptom**: Pieces disappear under other pieces when dragged — they render at their old z-position during the first frame(s) of the drag.
+- **Root cause**: The `zIndex` setter correctly sets `parent.sortDirty = true`, but `sortChildren()` is only called lazily during the render pass. If other operations (filter swaps, scale changes) trigger a render before the sort runs, the old z-order is used.
+- **Fix**: Call `app.stage.sortChildren()` explicitly after mutating `zIndex` on stage children in the same event handler (pointerdown, pointerup). This forces the sort immediately so the next render uses the correct order.
+- **Rule**: After bulk `zIndex` mutation on stage children, always call `stage.sortChildren()` before the handler returns.
+
+## DropShadowFilter `resolution: DPR` causes thin vertical seam on retina displays
+- **Symptom**: A thin fixed vertical line appears on the canvas, visible on retina displays (Brave, Safari) but not at DPR=1. The line overlays pieces and moves with the viewport.
+- **Root cause**: `DropShadowFilter` with `resolution: window.devicePixelRatio` (e.g. 2) creates internal Kawase blur textures at 2x resolution. A texture boundary/seam artifact appears at a specific x position on retina GPUs (macOS WebGL).
+- **Fix**: Use `resolution: 1` for DropShadowFilter. Shadows are intentionally blurry, so 1x resolution has no perceptible quality loss.
+- **Rule**: Never use `resolution: DPR` on `DropShadowFilter`. Unlike sprite content, shadow blur does not benefit from retina resolution, and the retina texture sizing causes rendering artifacts.
+
+## Replacing `container.filters` array during drag causes rendering gaps
+- **Symptom**: Pieces flicker or momentarily disappear when transitioning between shadow states (resting → dragging → resting).
+- **Root cause**: `c.filters = [new DropShadowFilter(...)]` replaces the entire filters array, triggering PixiJS `FilterEffect` teardown/setup. The old filter is destroyed (`FilterEffect.destroy()` calls `filter.destroy()` on each), and a new filter effect is created. During this transition, there can be a rendering gap.
+- **Fix**: Keep one persistent `DropShadowFilter` per container and mutate its properties in place (`f.offset`, `f.blur`, `f.alpha`). Never reassign the `filters` array after initial setup.
+- **Rule**: For state-driven filter changes (resting/dragging/placed), mutate existing filter properties — never replace the `filters` array.
+
+## Background Graphics rect produces triangle-seam artifacts on retina
+- **Symptom**: A thin line artifact on retina displays from a full-screen `Graphics` rect used as background.
+- **Root cause**: WebGL renders rectangles as two triangles. On retina displays with `antialias: true`, the diagonal seam between triangles can produce a sub-pixel rendering artifact.
+- **Fix**: Use the WebGL clear color (`app.init({ background: '#f5f5f3' })`) instead of a `Graphics` rect. The clear color fills the entire canvas uniformly with no geometry, so no triangle seams.
+- **Rule**: For solid-color full-screen backgrounds, always use the WebGL clear color, not a Graphics rect.
 
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks

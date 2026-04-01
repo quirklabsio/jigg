@@ -1,5 +1,5 @@
 import type { Application, Sprite } from 'pixi.js';
-import { FederatedPointerEvent, Graphics, Point } from 'pixi.js';
+import { FederatedPointerEvent, Graphics, Point, Rectangle } from 'pixi.js';
 import type { Piece, PieceGroup } from '../puzzle/types';
 import { usePuzzleStore } from '../store/puzzleStore';
 
@@ -7,9 +7,56 @@ const DRAG_SCALE = 1.03;
 const Z_IDLE = 0;
 // Monotonically increasing settle counter — each drop gets a unique zIndex so
 // the most-recently-placed piece is always the topmost when pieces overlap.
-// Z_SETTLED/Z_DRAGGING constants removed: both are now derived from this counter.
 let settleCounter = 0;
 const CELL_SIZE = 128;
+
+// ─── Drag lift rotation ────────────────────────────────────────────────────────
+
+const LIFT_ROT   = 0.0175; // 1° in radians
+const TWEEN_MS   = 80;
+
+/** Ease-in-out quad: smooth over [0,1] */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
+/** Snap a rotation to the nearest 90° increment. */
+function nearestQuarter(r: number): number {
+  return Math.round(r / (Math.PI / 2)) * (Math.PI / 2);
+}
+
+/**
+ * Monotonically increasing tween ID. Each tweenRotation call increments this,
+ * making any previously-running tween's ticker function a no-op on the next
+ * tick. This prevents a snap-back tween from clobbering a rotateGroup call
+ * that fires while the tween is still running (e.g. double-tap within 80ms of
+ * the first tap's pointerup).
+ */
+let tweenId = 0;
+
+/**
+ * Tween the rotation of every sprite in `entries` from `from` to `to`
+ * over TWEEN_MS using the app ticker.
+ * Cancels any previously-started rotation tween automatically.
+ */
+function tweenRotation(
+  app: Application,
+  entries: GroupEntry[],
+  from: number,
+  to: number,
+): void {
+  if (Math.abs(to - from) < 1e-6) return;
+  const myId = ++tweenId; // cancel any previous tween
+  const start = performance.now();
+  const tickerFn = () => {
+    if (tweenId !== myId) { app.ticker.remove(tickerFn); return; } // stale — cancelled
+    const t = Math.min((performance.now() - start) / TWEEN_MS, 1);
+    const rot = from + (to - from) * easeInOut(t);
+    for (const { sprite: s } of entries) s.rotation = rot;
+    if (t >= 1) app.ticker.remove(tickerFn);
+  };
+  app.ticker.add(tickerFn);
+}
 
 // ─── Spatial hash ─────────────────────────────────────────────────────────────
 
@@ -76,6 +123,7 @@ let anchorLocalX = 0;
 let anchorLocalY = 0;
 let anchorSprite: Sprite | null = null;
 let baseScale = 1;
+let preDragRotation = 0; // rotation of the group before lift tween
 let groupEntries: GroupEntry[] = [];
 
 const _pos = new Point();
@@ -84,6 +132,8 @@ const spatialHash = new SpatialHash();
 // ─── Callbacks wired by scene.ts ──────────────────────────────────────────────
 let _spriteMap: Map<string, Sprite> | null = null;
 let _rotateCallback: ((groupId: string) => void) | null = null;
+let _dragStartCallback: ((groupId: string) => void) | null = null;
+let _dragEndCallback: ((groupId: string) => void) | null = null;
 let _lastTapMs = 0;
 let _lastTapGroupId = '';
 const DOUBLE_TAP_MS = 300;
@@ -96,8 +146,6 @@ let _boardSnapCallback: ((groupId: string) => BoardSnapResult | null) | null = n
 
 // ─── AABB helpers ─────────────────────────────────────────────────────────────
 
-// AABB from current groupEntries and a known group origin.
-// Uses rotation-corrected half-extents so rotated pieces are fully covered.
 function aabbFromEntries(
   gox: number, goy: number,
 ): { x: number; y: number; w: number; h: number } | null {
@@ -119,8 +167,6 @@ function aabbFromEntries(
   return minX === Infinity ? null : { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-// AABB for initial spatial hash population (from store positions + sprite sizes).
-// Uses rotation-corrected half-extents so rotated pieces are fully covered.
 function initAABB(
   group: PieceGroup,
   piecesById: Record<string, Piece>,
@@ -149,10 +195,6 @@ function initAABB(
 
 // ─── Group origin ─────────────────────────────────────────────────────────────
 
-/**
- * Recover the world-space group origin from any anchor sprite + its localPosition.
- * Works correctly when localPositions have been baked (rotated groups included).
- */
 function getVisualGroupOrigin(
   sprite: Sprite,
   localX: number,
@@ -161,7 +203,7 @@ function getVisualGroupOrigin(
   return { x: sprite.x - localX, y: sprite.y - localY };
 }
 
-// ─── Move / Up (module-level, no per-sprite closures) ─────────────────────────
+// ─── Move / Up ────────────────────────────────────────────────────────────────
 
 function onMove(e: FederatedPointerEvent): void {
   if (!dragging || e.pointerId !== activePointerId || !_app) return;
@@ -172,7 +214,6 @@ function onMove(e: FederatedPointerEvent): void {
     s.x = gx + localX;
     s.y = gy + localY;
   }
-  // Keep hash current during drag (correctness if pointer lock is ever relaxed)
   const aabb = aabbFromEntries(gx, gy);
   if (aabb) spatialHash.update(activeGroupId, aabb.x, aabb.y, aabb.w, aabb.h);
 }
@@ -182,7 +223,6 @@ function onUp(e?: FederatedPointerEvent): void {
   dragging = false;
   activePointerId = null;
 
-  // Reset drag scale — zIndex assigned after snap check below
   for (const { sprite: s } of groupEntries) s.scale.set(baseScale);
   if (_hitLayer) _hitLayer.cursor = 'grab';
 
@@ -191,13 +231,23 @@ function onUp(e?: FederatedPointerEvent): void {
 
   const { x: gox, y: goy } = getVisualGroupOrigin(as, anchorLocalX, anchorLocalY);
 
-  // Final hash update — covers the case where pointer was never moved
   const aabb = aabbFromEntries(gox, goy);
   if (aabb) spatialHash.update(activeGroupId, aabb.x, aabb.y, aabb.w, aabb.h);
 
   usePuzzleStore.getState().moveGroup(activeGroupId, { x: gox, y: goy });
 
-  // Piece-to-piece snap check — may reposition sprites and merge groups
+  // ── Tween rotation back to nearest 90° ──────────────────────────────────
+  if (_app) {
+    const snapRot = nearestQuarter(preDragRotation);
+    // Snapshot current entries before async snap below mutates groupEntries
+    const entriesSnapshot = [...groupEntries];
+    tweenRotation(_app, entriesSnapshot, as.rotation, snapRot);
+  }
+
+  // ── Shadow: revert to resting ────────────────────────────────────────────
+  _dragEndCallback?.(activeGroupId);
+
+  // ── Piece-to-piece snap ──────────────────────────────────────────────────
   let finalGroupId = activeGroupId;
   if (_snapCallback && _spriteMap) {
     const result = _snapCallback(activeGroupId);
@@ -213,7 +263,7 @@ function onUp(e?: FederatedPointerEvent): void {
     }
   }
 
-  // Board snap check — after piece-to-piece snap
+  // ── Board snap ───────────────────────────────────────────────────────────
   if (_boardSnapCallback && _spriteMap) {
     const boardResult = _boardSnapCallback(finalGroupId);
     if (boardResult) {
@@ -221,18 +271,19 @@ function onUp(e?: FederatedPointerEvent): void {
     }
   }
 
-  // Assign unified settle zIndex to the dropped (or merged) group
+  // ── Assign settle zIndex on container (parent) ───────────────────────────
   const zIdx = ++settleCounter;
   const finalState = usePuzzleStore.getState();
   const finalGroup = finalState.groupsById[finalGroupId];
   if (finalGroup && _spriteMap) {
     for (const pid of finalGroup.pieceIds) {
       const s = _spriteMap.get(pid);
-      if (s) s.zIndex = zIdx;
+      if (s) (s.parent ?? s).zIndex = zIdx;
     }
   } else {
-    for (const { sprite: s } of groupEntries) s.zIndex = zIdx;
+    for (const { sprite: s } of groupEntries) (s.parent ?? s).zIndex = zIdx;
   }
+  _app?.stage.sortChildren(); // force z-sort so settle order takes effect immediately
 
   activeGroupId = '';
   groupEntries = [];
@@ -243,15 +294,11 @@ function onUp(e?: FederatedPointerEvent): void {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Create the full-canvas transparent hit layer.
- * Must be added to stage and passed to initDragListeners.
- * eventMode stays 'none' until activateDrag() is called.
- */
 export function createHitLayer(app: Application): Graphics {
   const g = new Graphics();
-  g.rect(0, 0, app.screen.width, app.screen.height);
-  g.fill({ color: 0x000000, alpha: 0 });
+  // Use hitArea instead of drawing a filled rect — a transparent fill at zIndex 1000
+  // can produce sub-pixel edge artifacts on some GPUs.
+  g.hitArea = new Rectangle(0, 0, app.screen.width, app.screen.height);
   g.zIndex = 1000;
   g.eventMode = 'none';
   g.cursor = 'grab';
@@ -259,10 +306,6 @@ export function createHitLayer(app: Application): Graphics {
   return g;
 }
 
-/**
- * Wire up all drag event handling. Call once from scene.ts after sprites are
- * positioned and spriteMap is built. Populates the spatial hash from store state.
- */
 export function initDragListeners(
   hl: Graphics,
   app: Application,
@@ -271,22 +314,19 @@ export function initDragListeners(
   _app = app;
   _hitLayer = hl;
   _spriteMap = spriteMap;
-  settleCounter = spriteMap.size; // first drop gets zIndex > all initial per-sprite values
+  settleCounter = spriteMap.size;
 
-  // Populate spatial hash from scattered positions
   const state = usePuzzleStore.getState();
   for (const group of state.groups) {
     const aabb = initAABB(group, state.piecesById, spriteMap);
     if (aabb) spatialHash.insert(group.id, aabb.x, aabb.y, aabb.w, aabb.h);
   }
 
-  // Stage handles move/up — catches pointer anywhere on canvas
   app.stage.on('pointermove', onMove);
-  app.stage.on('pointerup', (e) => onUp(e));
-  app.stage.on('pointercancel', (e) => onUp(e));
-  app.stage.on('pointerupoutside', (e) => onUp(e));
+  app.stage.on('pointerup',       (e) => onUp(e));
+  app.stage.on('pointercancel',   (e) => onUp(e));
+  app.stage.on('pointerupoutside',(e) => onUp(e));
 
-  // Hit layer handles pointerdown via spatial query → find topmost group
   hl.on('pointerdown', (e: FederatedPointerEvent) => {
     if (activePointerId !== null) return;
 
@@ -297,8 +337,6 @@ export function initDragListeners(
     const st = usePuzzleStore.getState();
     const candidates = spatialHash.query(px, py);
 
-    // Pick the candidate group whose piece bounds contain the pointer,
-    // selecting the topmost by zIndex when pieces overlap
     let bestGroupId: string | null = null;
     let bestZ = -Infinity;
 
@@ -309,36 +347,33 @@ export function initDragListeners(
         const s = spriteMap.get(pid);
         const piece = st.piecesById[pid];
         if (!s || !piece) continue;
-        // Rotation-aware hit test: transform pointer into sprite local space.
-        // sprite.x/y is the piece centre (anchor is set to piece centre within
-        // the expanded texture frame), so lx/ly are relative to piece centre.
         const dx = px - s.x;
         const dy = py - s.y;
         const cos = Math.cos(-s.rotation);
         const sin = Math.sin(-s.rotation);
         const lx = (cos * dx - sin * dy) / s.scale.x;
         const ly = (sin * dx + cos * dy) / s.scale.y;
-        // Use original piece dimensions — not the expanded frame — so the hit
-        // area matches the visible piece rectangle, not the tab-padding region.
         const hw = piece.textureRegion.w / 2;
         const hh = piece.textureRegion.h / 2;
         if (Math.abs(lx) <= hw && Math.abs(ly) <= hh) {
-          if (s.zIndex > bestZ) { bestZ = s.zIndex; bestGroupId = groupId; }
-          break; // pointer is inside this group — no need to check more pieces
+          // Use parent container's zIndex for correct topmost selection
+          const z = s.parent?.zIndex ?? s.zIndex;
+          if (z > bestZ) { bestZ = z; bestGroupId = groupId; }
+          break;
         }
       }
     }
 
     if (!bestGroupId) return;
 
-    // ── Double-tap detection ──────────────────────────────────────────────────
+    // ── Double-tap detection ──────────────────────────────────────────────
     const now = performance.now();
     if (
       _rotateCallback &&
       bestGroupId === _lastTapGroupId &&
       now - _lastTapMs < DOUBLE_TAP_MS
     ) {
-      // Double-tap: rotate, update hash, reset tap state, do not start drag
+      tweenId++; // cancel any pending snap-back tween so it doesn't clobber rotateGroup
       _rotateCallback(bestGroupId);
       const rst = usePuzzleStore.getState();
       const rg = rst.groupsById[bestGroupId];
@@ -371,63 +406,63 @@ export function initDragListeners(
     anchorLocalX = anchorPiece.localPosition.x;
     anchorLocalY = anchorPiece.localPosition.y;
     anchorSprite = anchorRef;
+    preDragRotation = anchorRef.rotation; // store before tween
 
     activePointerId = e.pointerId;
     dragging = true;
     activeGroupId = bestGroupId;
 
-    // Only scale up solo pieces — multi-piece groups scale around individual
-    // centers which pulls inner edges apart and looks broken
+    // Scale lift (solo pieces only)
     const liftScale = group.pieceIds.length === 1 ? baseScale * DRAG_SCALE : baseScale;
     for (const { sprite: s } of groupEntries) {
       s.scale.set(liftScale);
-      s.zIndex = settleCounter + 1; // above all currently settled pieces
+      (s.parent ?? s).zIndex = settleCounter + 1;
     }
+    app.stage.sortChildren(); // force z-sort so dragged piece renders on top immediately
     hl.cursor = 'grabbing';
 
     const origin = getVisualGroupOrigin(anchorRef, anchorPiece.localPosition.x, anchorPiece.localPosition.y);
     dragOffsetX = origin.x - px;
     dragOffsetY = origin.y - py;
 
+    // 1° rotation tween on pickup
+    tweenRotation(app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+
+    // Shadow: dragging state
+    _dragStartCallback?.(bestGroupId);
+
     e.stopPropagation();
   });
 }
 
-/**
- * Register the rotation handler. Called once from scene.ts.
- * When a double-tap is detected, drag.ts calls this with the groupId.
- */
 export function setRotateCallback(cb: (groupId: string) => void): void {
   _rotateCallback = cb;
 }
 
-/**
- * Register the snap handler. Called once from scene.ts.
- * Invoked on every drag drop; returns snap result or null.
- */
+export function setDragStartCallback(cb: (groupId: string) => void): void {
+  _dragStartCallback = cb;
+}
+
+export function setDragEndCallback(cb: (groupId: string) => void): void {
+  _dragEndCallback = cb;
+}
+
 export function setSnapCallback(
   cb: (groupId: string) => SnapResult | null,
 ): void {
   _snapCallback = cb;
 }
 
-/**
- * Register the board snap handler. Called once from scene.ts.
- * Invoked after piece-to-piece snap on every drag drop.
- * On snap: removes group from spatial hash (pieces become non-interactive).
- */
 export function setBoardSnapCallback(
   cb: (groupId: string) => BoardSnapResult | null,
 ): void {
   _boardSnapCallback = cb;
 }
 
-/** Enable the hit layer. Call from main.ts after the full load chain resolves. */
 export function activateDrag(): void {
   if (_hitLayer) _hitLayer.eventMode = 'static';
 }
 
-/** Reset all drag state and clear the spatial hash. Call before puzzle reinitialisation. */
 export function resetDrag(): void {
   spatialHash.clear();
   dragging = false;
@@ -437,6 +472,8 @@ export function resetDrag(): void {
   groupEntries = [];
   settleCounter = 0;
   _rotateCallback = null;
+  _dragStartCallback = null;
+  _dragEndCallback = null;
   _snapCallback = null;
   _boardSnapCallback = null;
   _spriteMap = null;

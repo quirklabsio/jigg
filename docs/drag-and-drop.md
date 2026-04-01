@@ -3,7 +3,7 @@
 ## Architecture
 
 ### Hit Layer Pattern
-- One transparent `Graphics` overlay (zIndex=1000) sits over the entire stage
+- One `Graphics` overlay (zIndex=1000) sits over the entire stage — uses `hitArea = new Rectangle(...)` with no drawn geometry (avoids retina rendering artifacts from a transparent-fill rect)
 - `eventMode='none'` at rest; `activateDrag()` sets it to `'static'` after load completes
 - All sprites permanently `eventMode='none'` — they never participate in hit testing
 - Eliminates per-sprite event listener accumulation and toggling overhead
@@ -22,9 +22,19 @@
 
 ### Z-Index
 - Monotonic `settleCounter` — module-level, incremented on every drop
-- Each drop: `zIdx = ++settleCounter`, assigned to all sprites in the group
-- Initialised to `spriteMap.size` in `initDragListeners` so first drop's index is above all initial per-sprite values (sprites start at zIndex=`i`)
+- Each drop: `zIdx = ++settleCounter`, assigned to all containers in the group via `(s.parent ?? s).zIndex`
+- On drag start: `(s.parent ?? s).zIndex = settleCounter + 1` lifts piece above all settled pieces
+- `app.stage.sortChildren()` called explicitly after bulk zIndex mutation — PixiJS `sortDirty` flag only triggers during the render pass, which can miss the first frame
+- Initialised to `spriteMap.size` in `initDragListeners` so first drop's index is above all initial per-sprite values (containers start at zIndex=`i`)
 - No constants, no cycling — most-recently-placed group always wins
+
+### Drag Lift Rotation
+- 1° (`0.0175 rad`) tilt on pointerdown, tween back to nearest 90° on pointerup
+- 80ms ease-in-out quad tween via `app.ticker`
+- `tweenId` counter: each `tweenRotation()` call increments it; stale ticker functions check `tweenId !== myId` and bail. Prevents snap-back tween from clobbering `rotateGroup()` on double-tap
+
+### Drag Callbacks
+- `setDragStartCallback(cb)` / `setDragEndCallback(cb)` — called in pointerdown/pointerup, wired by scene.ts for shadow state changes (currently disabled)
 
 ---
 
