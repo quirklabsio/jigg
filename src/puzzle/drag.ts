@@ -1,4 +1,4 @@
-import type { Application, Sprite } from 'pixi.js';
+import type { Application, Container, Sprite } from 'pixi.js';
 import { FederatedPointerEvent, Graphics, Point, Rectangle } from 'pixi.js';
 import type { Piece, PieceGroup } from '../puzzle/types';
 import { usePuzzleStore } from '../store/puzzleStore';
@@ -113,6 +113,7 @@ class SpatialHash {
 type GroupEntry = { sprite: Sprite; localX: number; localY: number };
 
 let _app: Application | null = null;
+let _worldContainer: Container | null = null;
 let _hitLayer: Graphics | null = null;
 let activePointerId: number | null = null;
 let dragging = false;
@@ -206,8 +207,8 @@ function getVisualGroupOrigin(
 // ─── Move / Up ────────────────────────────────────────────────────────────────
 
 function onMove(e: FederatedPointerEvent): void {
-  if (!dragging || e.pointerId !== activePointerId || !_app) return;
-  _app.stage.toLocal(e.global, undefined, _pos);
+  if (!dragging || e.pointerId !== activePointerId || !_worldContainer) return;
+  _worldContainer.toLocal(e.global, undefined, _pos);
   const gx = _pos.x + dragOffsetX;
   const gy = _pos.y + dragOffsetY;
   for (const { sprite: s, localX, localY } of groupEntries) {
@@ -283,7 +284,7 @@ function onUp(e?: FederatedPointerEvent): void {
   } else {
     for (const { sprite: s } of groupEntries) (s.parent ?? s).zIndex = zIdx;
   }
-  _app?.stage.sortChildren(); // force z-sort so settle order takes effect immediately
+  _worldContainer?.sortChildren(); // force z-sort so settle order takes effect immediately
 
   activeGroupId = '';
   groupEntries = [];
@@ -294,15 +295,17 @@ function onUp(e?: FederatedPointerEvent): void {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function createHitLayer(app: Application): Graphics {
+export function createHitLayer(worldContainer: Container, _worldW: number, _worldH: number): Graphics {
   const g = new Graphics();
-  // Use hitArea instead of drawing a filled rect — a transparent fill at zIndex 1000
-  // can produce sub-pixel edge artifacts on some GPUs.
-  g.hitArea = new Rectangle(0, 0, app.screen.width, app.screen.height);
+  // Hit layer must catch events at any zoom/pan level. The world-space Rectangle
+  // approach breaks when the pointer's world coord exceeds the rectangle (e.g.
+  // zoomed far out). Use an infinite hitArea instead — actual piece hit-testing
+  // is done manually in the pointerdown handler, so this is correct.
+  g.hitArea = { contains: () => true };
   g.zIndex = 1000;
   g.eventMode = 'none';
   g.cursor = 'grab';
-  app.stage.addChild(g);
+  worldContainer.addChild(g);
   return g;
 }
 
@@ -310,8 +313,10 @@ export function initDragListeners(
   hl: Graphics,
   app: Application,
   spriteMap: Map<string, Sprite>,
+  worldContainer?: Container,
 ): void {
   _app = app;
+  _worldContainer = worldContainer ?? app.stage;
   _hitLayer = hl;
   _spriteMap = spriteMap;
   settleCounter = spriteMap.size;
@@ -330,7 +335,7 @@ export function initDragListeners(
   hl.on('pointerdown', (e: FederatedPointerEvent) => {
     if (activePointerId !== null) return;
 
-    app.stage.toLocal(e.global, undefined, _pos);
+    _worldContainer!.toLocal(e.global, undefined, _pos);
     const px = _pos.x;
     const py = _pos.y;
 
@@ -480,6 +485,7 @@ export function resetDrag(): void {
   _lastTapMs = 0;
   _lastTapGroupId = '';
   if (_hitLayer) { _hitLayer.eventMode = 'none'; _hitLayer = null; }
+  _worldContainer = null;
   _app = null;
 }
 
