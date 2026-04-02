@@ -1,4 +1,4 @@
-import { Application, Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
 import { BevelFilter, DropShadowFilter } from 'pixi-filters';
 import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
@@ -300,7 +300,30 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   let edgeOverlay: Sprite | null = null;
 
+  // ── FPS counter — press F to toggle ───────────────────────────────────────
+  let fpsText: Text | null = null;
+  let fpsTicker: (() => void) | null = null;
+
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'f' || e.key === 'F') {
+      if (fpsText) {
+        app.ticker.remove(fpsTicker!);
+        app.stage.removeChild(fpsText);
+        fpsText.destroy();
+        fpsText = null;
+        fpsTicker = null;
+      } else {
+        fpsText = new Text({
+          text: 'FPS: --',
+          style: { fontSize: 14, fill: 0xff0000, fontFamily: 'monospace' },
+        });
+        fpsText.position.set(10, 10);
+        fpsText.zIndex = 99999;
+        app.stage.addChild(fpsText);
+        fpsTicker = () => { fpsText!.text = `FPS: ${Math.round(app.ticker.FPS)}`; };
+        app.ticker.add(fpsTicker);
+      }
+    }
     if ((e.key === 'e' || e.key === 'E') && edgeOverlay) {
       edgeOverlay.visible = !edgeOverlay.visible;
     }

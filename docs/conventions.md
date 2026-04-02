@@ -12,6 +12,10 @@
 - Planned: `useWorkspaceStore` (Stories 20–23), `useUIStore` (Stories 20+)
 - Always use `getState()` / `setState()` — never import React hooks
 
+## Debug tools
+- `F` key: toggles FPS counter (red, top-left — permanent, `scene.ts`)
+- `/perf-audit`: full performance audit slash command (`.claude/commands/perf-audit.md`)
+
 ## Commands
 ```bash
 npm run dev          # dev server

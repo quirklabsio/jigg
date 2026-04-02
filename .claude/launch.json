@@ -3,10 +3,9 @@
   "configurations": [
     {
       "name": "jigg",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "$PORT"],
-      "port": 5173,
-      "autoPort": true
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/Users/patrickbeggan/Repositories/jigg/node_modules/.bin/vite", "--port", "5173", "--host"],
+      "port": 5173
     }
   ]
 }

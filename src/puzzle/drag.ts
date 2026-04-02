@@ -208,6 +208,7 @@ function getVisualGroupOrigin(
 
 function onMove(e: FederatedPointerEvent): void {
   if (!dragging || e.pointerId !== activePointerId || !_worldContainer) return;
+  const t0 = performance.now();
   _worldContainer.toLocal(e.global, undefined, _pos);
   const gx = _pos.x + dragOffsetX;
   const gy = _pos.y + dragOffsetY;
@@ -217,6 +218,8 @@ function onMove(e: FederatedPointerEvent): void {
   }
   const aabb = aabbFromEntries(gx, gy);
   if (aabb) spatialHash.update(activeGroupId, aabb.x, aabb.y, aabb.w, aabb.h);
+  const t1 = performance.now();
+  if (t1 - t0 > 2) console.warn('slow onMove:', (t1 - t0).toFixed(2), 'ms');
 }
 
 function onUp(e?: FederatedPointerEvent): void {
