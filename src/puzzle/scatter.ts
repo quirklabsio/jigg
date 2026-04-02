@@ -46,7 +46,10 @@ export function scatterPieces(
 
   const scatteredPieces = pieces.map((piece) => ({
     ...piece,
-    rotation: groupRotation.get(piece.groupId) ?? 0,
+    actual: {
+      ...piece.actual,
+      rotation: (piece.groupId != null ? groupRotation.get(piece.groupId) : undefined) ?? 0,
+    },
   }));
 
   usePuzzleStore.getState().setGroups(scatteredGroups);

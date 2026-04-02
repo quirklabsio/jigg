@@ -78,7 +78,7 @@ export function checkAndApplySnap(
       if (!nId) continue; // no piece at that grid coord (edge of puzzle)
 
       const nPiece = state.piecesById[nId];
-      if (!nPiece || nPiece.groupId === draggedGroupId) continue; // same group
+      if (!nPiece || nPiece.groupId == null || nPiece.groupId === draggedGroupId) continue; // same group
 
       const nGroup = state.groupsById[nPiece.groupId];
       if (!nGroup) continue;
@@ -129,8 +129,8 @@ export function checkAndApplySnap(
         const dp = state.piecesById[dpid];
         const ds = spriteMap.get(dpid);
         if (!dp || !ds) continue;
-        ds.x = newGroupPos.x + dp.localPosition.x;
-        ds.y = newGroupPos.y + dp.localPosition.y;
+        ds.x = newGroupPos.x + dp.actual.x;
+        ds.y = newGroupPos.y + dp.actual.y;
       }
 
       // Commit snapped position then merge
@@ -152,8 +152,8 @@ export function checkAndApplySnap(
           const sp = updState.piecesById[spid];
           const ss = spriteMap.get(spid);
           if (sp && ss) {
-            ss.x = survivor.position.x + sp.localPosition.x;
-            ss.y = survivor.position.y + sp.localPosition.y;
+            ss.x = survivor.position.x + sp.actual.x;
+            ss.y = survivor.position.y + sp.actual.y;
           }
         }
         console.log('MERGED:', absorbedId, '→', survivorId, 'new piece count:', survivor.pieceIds.length);
@@ -170,12 +170,12 @@ export function checkAndApplySnap(
 
 /**
  * After a drag drop (and after piece-to-piece snap), check if any piece in
- * the group is close enough to its correctPosition to board-snap the whole group.
+ * the group is close enough to its canonical position to board-snap the whole group.
  *
  * Only fires when group rotation is ≈ 0 — rotated groups cannot land in a slot.
  *
  * On snap:
- *   1. Computes offset from the triggering piece's worldPos → correctPosition
+ *   1. Computes offset from the triggering piece's worldPos → canonical position
  *   2. Applies offset to group.position and all sprites immediately
  *   3. Commits position + markGroupPlaced to Zustand
  *
@@ -200,17 +200,17 @@ export function checkAndApplyBoardSnap(
   for (const pid of group.pieceIds) {
     const piece = state.piecesById[pid];
     if (!piece) continue;
-    const wx = group.position.x + piece.localPosition.x;
-    const wy = group.position.y + piece.localPosition.y;
+    const wx = group.position.x + piece.actual.x;
+    const wy = group.position.y + piece.actual.y;
     const dSq =
-      (wx - piece.correctPosition.x) ** 2 + (wy - piece.correctPosition.y) ** 2;
+      (wx - piece.canonical.x) ** 2 + (wy - piece.canonical.y) ** 2;
     const snaps = dSq < BOARD_SNAP_THRESHOLD_SQ;
     console.log(
       'piece:', pid,
       'worldPos:', { x: Math.round(wx), y: Math.round(wy) },
       'correctPos:', {
-        x: Math.round(piece.correctPosition.x),
-        y: Math.round(piece.correctPosition.y),
+        x: Math.round(piece.canonical.x),
+        y: Math.round(piece.canonical.y),
       },
       'distSq:', Math.round(dSq),
       'threshold:', BOARD_SNAP_THRESHOLD_SQ,
@@ -220,10 +220,10 @@ export function checkAndApplyBoardSnap(
   }
 
   if (snapPiece) {
-    const wx = group.position.x + snapPiece.localPosition.x;
-    const wy = group.position.y + snapPiece.localPosition.y;
-    const offsetX = snapPiece.correctPosition.x - wx;
-    const offsetY = snapPiece.correctPosition.y - wy;
+    const wx = group.position.x + snapPiece.actual.x;
+    const wy = group.position.y + snapPiece.actual.y;
+    const offsetX = snapPiece.canonical.x - wx;
+    const offsetY = snapPiece.canonical.y - wy;
     const newGroupPos = {
       x: group.position.x + offsetX,
       y: group.position.y + offsetY,
@@ -234,8 +234,8 @@ export function checkAndApplyBoardSnap(
       const p = state.piecesById[pid];
       const s = spriteMap.get(pid);
       if (!p || !s) continue;
-      s.x = newGroupPos.x + p.localPosition.x;
-      s.y = newGroupPos.y + p.localPosition.y;
+      s.x = newGroupPos.x + p.actual.x;
+      s.y = newGroupPos.y + p.actual.y;
     }
 
     usePuzzleStore.getState().moveGroup(groupId, newGroupPos);

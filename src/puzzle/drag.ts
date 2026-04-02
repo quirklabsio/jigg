@@ -184,8 +184,8 @@ function initAABB(
     const th = s.texture.frame.height * s.scale.y;
     const hw = (tw * ac + th * as) / 2;
     const hh = (tw * as + th * ac) / 2;
-    const cx = group.position.x + piece.localPosition.x;
-    const cy = group.position.y + piece.localPosition.y;
+    const cx = group.position.x + piece.actual.x;
+    const cy = group.position.y + piece.actual.y;
     if (cx - hw < minX) minX = cx - hw;
     if (cy - hh < minY) minY = cy - hh;
     if (cx + hw > maxX) maxX = cx + hw;
@@ -407,12 +407,12 @@ export function initDragListeners(
     for (const pid of group.pieceIds) {
       const s = spriteMap.get(pid);
       const p = st.piecesById[pid];
-      if (s && p) groupEntries.push({ sprite: s, localX: p.localPosition.x, localY: p.localPosition.y });
+      if (s && p) groupEntries.push({ sprite: s, localX: p.actual.x, localY: p.actual.y });
     }
 
     baseScale = anchorRef.scale.x;
-    anchorLocalX = anchorPiece.localPosition.x;
-    anchorLocalY = anchorPiece.localPosition.y;
+    anchorLocalX = anchorPiece.actual.x;
+    anchorLocalY = anchorPiece.actual.y;
     anchorSprite = anchorRef;
     preDragRotation = anchorRef.rotation; // store before tween
 
@@ -429,7 +429,7 @@ export function initDragListeners(
     app.stage.sortChildren(); // force z-sort so dragged piece renders on top immediately
     hl.cursor = 'grabbing';
 
-    const origin = getVisualGroupOrigin(anchorRef, anchorPiece.localPosition.x, anchorPiece.localPosition.y);
+    const origin = getVisualGroupOrigin(anchorRef, anchorPiece.actual.x, anchorPiece.actual.y);
     dragOffsetX = origin.x - px;
     dragOffsetY = origin.y - py;
 

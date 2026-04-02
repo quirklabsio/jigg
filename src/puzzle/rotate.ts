@@ -3,7 +3,7 @@ import { usePuzzleStore } from '../store/puzzleStore';
 
 /**
  * Rotate a group 90° clockwise in place.
- * - Bakes the new localPositions and piece.rotation into the store
+ * - Bakes the new actual positions and actual.rotation into the store
  * - Syncs sprite positions and rotations to match the updated store state
  * - Group origin (group.position) is unchanged — pieces orbit around it
  */
@@ -19,8 +19,8 @@ export function rotateGroup(groupId: string, spriteMap: Map<string, Sprite>): vo
     const piece = piecesById[pid];
     const sprite = spriteMap.get(pid);
     if (!piece || !sprite) continue;
-    sprite.x = group.position.x + piece.localPosition.x;
-    sprite.y = group.position.y + piece.localPosition.y;
-    sprite.rotation = piece.rotation;
+    sprite.x = group.position.x + piece.actual.x;
+    sprite.y = group.position.y + piece.actual.y;
+    sprite.rotation = piece.actual.rotation;
   }
 }

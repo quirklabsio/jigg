@@ -1,14 +1,26 @@
+export interface Transform {
+  x: number;
+  y: number;
+  rotation: number; // radians internally; degrees in .jigg files (convert at boundary)
+  scale: number;    // 1.0 = native size
+}
+
 export interface Piece {
   id: string;
-  groupId: string;
-  localPosition: { x: number; y: number };
-  correctPosition: { x: number; y: number };
+  metadata?: Record<string, unknown>;
+
+  canonical: Readonly<Transform>; // image space, immutable, set once on creation
+  actual: Transform & {
+    z: number;                    // layering in play space
+  };
+
+  groupId: string | null;         // topology, not geometry
+
+  // retained from current implementation
   gridCoord: { col: number; row: number };
-  rotation: number;
+  textureRegion: { x: number; y: number; w: number; h: number };
   placed: boolean;
   touched: boolean;
-  stackIndex: number;
-  textureRegion: { x: number; y: number; w: number; h: number };
 }
 
 export interface PieceGroup {

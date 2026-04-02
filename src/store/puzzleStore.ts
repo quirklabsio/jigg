@@ -38,7 +38,9 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   setGridIndex: (gridIndex) => set({ gridIndex }),
   updatePieceRotation: (id, rotation) =>
     set((state) => {
-      const pieces = state.pieces.map((p) => (p.id === id ? { ...p, rotation } : p));
+      const pieces = state.pieces.map((p) =>
+        p.id === id ? { ...p, actual: { ...p.actual, rotation } } : p,
+      );
       return { pieces, piecesById: toRecord(pieces) };
     }),
   moveGroup: (groupId, position) =>
@@ -52,12 +54,12 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const targetGroup = state.groupsById[groupId];
       if (!targetGroup) return state;
       const pieceIdSet = new Set(targetGroup.pieceIds);
-      // Bake 90° CW into localPosition: newLocalX = -localY, newLocalY = localX
-      // Also increment piece.rotation so sprites rebuild correctly from store state
+      // Bake 90° CW into actual position: newX = -y, newY = x
+      // Also increment actual.rotation so sprites rebuild correctly from store state
       const pieces = state.pieces.map((p) => {
         if (!pieceIdSet.has(p.id)) return p;
-        const { x: lx, y: ly } = p.localPosition;
-        return { ...p, localPosition: { x: -ly, y: lx }, rotation: p.rotation + HALF_PI };
+        const { x: lx, y: ly } = p.actual;
+        return { ...p, actual: { ...p.actual, x: -ly, y: lx, rotation: p.actual.rotation + HALF_PI } };
       });
       const groups = state.groups.map((g) =>
         g.id === groupId ? { ...g, rotation: g.rotation + HALF_PI } : g,
@@ -87,15 +89,16 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const survivor = state.groupsById[survivorId];
       const absorbed = state.groupsById[absorbedId];
       if (!survivor || !absorbed) return state;
-      // Re-express absorbed pieces' localPositions relative to survivor's origin
+      // Re-express absorbed pieces' actual positions relative to survivor's origin
       const pieces = state.pieces.map((p) => {
         if (p.groupId !== absorbedId) return p;
         return {
           ...p,
           groupId: survivorId,
-          localPosition: {
-            x: absorbed.position.x + p.localPosition.x - survivor.position.x,
-            y: absorbed.position.y + p.localPosition.y - survivor.position.y,
+          actual: {
+            ...p.actual,
+            x: absorbed.position.x + p.actual.x - survivor.position.x,
+            y: absorbed.position.y + p.actual.y - survivor.position.y,
           },
         };
       });

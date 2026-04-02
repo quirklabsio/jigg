@@ -128,12 +128,12 @@ function applyScatterToSprites(sprites: Sprite[]): void {
   const groupById = new Map(groups.map((g) => [g.id, g]));
   sprites.forEach((sprite, i) => {
     const piece = pieces[i];
-    const group = groupById.get(piece.groupId)!;
+    const group = groupById.get(piece.groupId!)!;
     sprite.position.set(
-      group.position.x + piece.localPosition.x,
-      group.position.y + piece.localPosition.y,
+      group.position.x + piece.actual.x,
+      group.position.y + piece.actual.y,
     );
-    sprite.rotation = piece.rotation;
+    sprite.rotation = piece.actual.rotation;
   });
 }
 
@@ -187,16 +187,17 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
   applyScatterToSprites(sprites);
 
-  // Convert correctPositions from image-pixel space → world-screen space.
+  // Convert canonical positions from image-pixel space → world-screen space.
   const boardLeft = (app.screen.width  - texture.width  * scale) / 2;
   const boardTop  = (app.screen.height - texture.height * scale) / 2;
   {
     const { pieces: currentPieces } = usePuzzleStore.getState();
     const worldPieces = currentPieces.map((p) => ({
       ...p,
-      correctPosition: {
-        x: boardLeft + p.correctPosition.x * scale + pieceScreenW / 2,
-        y: boardTop  + p.correctPosition.y * scale + pieceScreenH / 2,
+      canonical: {
+        ...p.canonical,
+        x: boardLeft + p.canonical.x * scale + pieceScreenW / 2,
+        y: boardTop  + p.canonical.y * scale + pieceScreenH / 2,
       },
     }));
     usePuzzleStore.getState().setPieces(worldPieces);

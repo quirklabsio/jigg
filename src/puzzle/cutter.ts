@@ -31,14 +31,12 @@ export function gridCut(
       pieces.push({
         id,
         groupId,
-        localPosition: { x: 0, y: 0 },
-        correctPosition: { x, y },
+        canonical: { x, y, rotation: 0, scale: 1.0 },
+        actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
         gridCoord: { col, row },
         textureRegion: { x, y, w: pieceW, h: pieceH },
-        rotation: 0,
         placed: false,
         touched: false,
-        stackIndex: 0,
       });
 
       groups.push({
