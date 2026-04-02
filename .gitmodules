@@ -1,0 +1,3 @@
+[submodule "jigg-spec"]
+	path = jigg-spec
+	url = https://github.com/quirklabsio/jigg-spec
