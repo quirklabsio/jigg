@@ -19,6 +19,14 @@ Create the following to-do list immediately.
 # END OF SESSION
 Run `/refine` when task is complete or context is getting large.
 
+## jigg-spec
+File format spec lives at /jigg-spec (git submodule, public repo).
+When implementing anything that touches save, load, or export:
+- Read jigg-spec/draft/ docs first
+- If implementation requires a spec change, update jigg-spec first,
+  commit and push there, then update implementation
+- Spec version lives in jigg-spec/CHANGELOG.md
+
 # NEVER CREATE MEMORY FILES
 Use `docs/` only. No `project_*.md`, `MEMORY.md`, or any other note files.
 

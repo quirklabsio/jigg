@@ -299,8 +299,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = new Uint8Array(imageData.data.buffer);
 
-  let edgeOverlay: Sprite | null = null;
-
   // ── FPS counter — press F to toggle ───────────────────────────────────────
   let fpsText: Text | null = null;
   let fpsTicker: (() => void) | null = null;
@@ -324,9 +322,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         fpsTicker = () => { fpsText!.text = `FPS: ${Math.round(app.ticker.FPS)}`; };
         app.ticker.add(fpsTicker);
       }
-    }
-    if ((e.key === 'e' || e.key === 'E') && edgeOverlay) {
-      edgeOverlay.visible = !edgeOverlay.visible;
     }
   });
 
@@ -359,39 +354,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
     const { type, payload } = event.data;
-
-    if (type === 'ANALYSIS_COMPLETE') {
-      const { edgeMap } = payload as { edgeMap: Uint8Array; width: number; height: number };
-
-      const rgba = new Uint8ClampedArray(width * height * 4);
-      for (let i = 0; i < width * height; i++) {
-        if (edgeMap[i] === 255) {
-          rgba[i * 4 + 0] = 0;
-          rgba[i * 4 + 1] = 255;
-          rgba[i * 4 + 2] = 255;
-          rgba[i * 4 + 3] = 255;
-        }
-      }
-
-      const overlayCanvas = document.createElement('canvas');
-      overlayCanvas.width  = width;
-      overlayCanvas.height = height;
-      const overlayCtx = overlayCanvas.getContext('2d')!;
-      overlayCtx.putImageData(new ImageData(rgba, width, height), 0, 0);
-
-      const overlayTexture = Texture.from(overlayCanvas);
-      edgeOverlay = new Sprite(overlayTexture);
-      edgeOverlay.scale.set(scale);
-      edgeOverlay.position.set(boardLeft, boardTop);
-      edgeOverlay.anchor.set(0, 0);
-      edgeOverlay.alpha   = 0.6;
-      edgeOverlay.zIndex  = 999;
-      edgeOverlay.visible = false;
-      viewport.addChild(edgeOverlay);
-
-      console.log(`Edge map ready: ${width}x${height}, press E to toggle overlay`);
-      return;
-    }
 
     if (type === 'CUTS_COMPLETE') {
       const { cuts } = payload as { cuts: CutPath[] };

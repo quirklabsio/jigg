@@ -1,11 +1,13 @@
 # Stories
 
-## Epic: Core Pipeline (de-risk first)
+## Completed
+
+### Epic: Core Pipeline
 - [x] Story 1: WASM pipeline proof of life
 - [x] Story 2: PixiJS canvas init + image load
 - [x] Story 3: Connect WASM output to PixiJS canvas
 
-## Epic: Core Puzzle Loop
+### Epic: Core Puzzle Loop
 - [x] Story 4: Grid cut — divide image into NxN sprites
 - [x] Story 5: Scatter pieces on load
 - [x] Story 6: Drag and drop a piece
@@ -16,42 +18,189 @@
 - [x] Story 11: Board snap (group snaps to correct world position)
 - [x] Story 12: Detect puzzle completion
 
-## Epic: Smart Cutting
+### Epic: Smart Cutting
 - [x] Story 13: Edge detection in WASM → visualize overlay
 - [x] Story 14: Bezier cut generation from edge map
 - [x] Story 15: Content-aware cut routing (follows contours)
 
-## Epic: Piece Fidelity
+### Epic: Piece Fidelity
 - [x] Story 16: Bevel shader on cut edges
 - [x] Story 17: Surface texture variants (matte/glossy/canvas/wood)
 - [x] Story 18: Soft shadows relative to light source
 - [x] Story 18b: Visual foundation reset
-- [ ] Story 19: Realistic stacking z-order
 
-## Epic: Workspace
+### Epic: Workspace
 - [x] Story 20: Infinite canvas + zoom with inertia
-- [ ] Story 21: Pan with momentum
-- [ ] Story 22: Zoom-locked reference image panel
-- [ ] Story 23: Ghost image underlay with opacity control
 
-## Epic: Sorting Tools
-- [ ] Story 24: Edge piece detection + filter
-- [ ] Story 25: Color clustering (k-means in worker)
-- [ ] Story 26: Touched-but-unplaced dot marker
-
-## Epic: Persistence
-- [ ] Story 27: Save piece and group state to IndexedDB via Dexie
-- [ ] Story 28: Restore full puzzle state on load
-- [ ] Story 29: Export completed image as download
-
-## Epic: Completion Sequence
-- [ ] Story 30: GSAP timeline — pull-back, sharpen, fuse, glow
+**Story 19 — deferred.** Z-order revisited post-launch, informed by tray layering.
 
 ---
 
-## Current Session
-Last completed: Story 20 — Infinite canvas + zoom with inertia
-Next: Story 21 — Pan with momentum
+## Roadmap
+
+### Pre-Epic Cleanup
+- [x] **Story 29** — Remove edge overlay debug scaffolding; strip visual overlay + `E` key binding from `scene.ts`, retain edge map data for `edgeInfluence` in cut generation. Gate any future dev tooling behind `?debug=true`
+
+---
+
+### Epic: Piece Tray
+*Tray-first model. All pieces load into tray on puzzle start. Canvas starts empty. User pulls pieces out as they work. Staging only — no manipulation in tray.*
+
+**Design decisions locked:**
+- Piece state machine: `in-tray` → `on-canvas` → `placed`
+- Return path to tray (including group behaviour) fully deferred pending user feedback — no architectural constraints added that prevent it later
+- Filters: single-select, mutually exclusive (corner / edge / interior / color zone)
+- Filter metadata computed at cut time, cached on piece — not derived on filter change
+- Rotation On: pieces arrive in tray pre-rotated, double-tap enabled. Rotation Off: pieces arrive upright, double-tap handler explicitly disabled
+- **Piece extraction — drag:** follows cursor from tray exit, lands on release. Drop shadow appears and opacity normalises on tray exit
+- **Piece extraction — click:** Archimedean spiral from viewport center. Spiral origin locked at first click in sequence, resets on pan. Step spacing computed from max piece diagonal (`imageWidth / N * √2 * 1.3`) — 1.3 buffer accounts for Bezier tab protrusion. If exact coordinates occupied, skip to next spiral step.
+- **Keyboard extraction (Enter on tray piece):** triggers same spiral logic as click
+
+- [ ] **Story 30** — Spike: tray rendering model; prototype all three approaches (separate PixiJS stage / DOM thumbnails / canvas viewport region), pick one, document the decision. Explicitly assess how each model handles a future return path to tray — PixiJS-managed tray wins on animation smoothness, DOM-to-canvas handoff is rough. Unblocks all subsequent tray stories.
+- [ ] **Story 31** — Spec: tray impact on `jigg-spec`; piece state (`in-tray` / `on-canvas` / `placed`), filter metadata (edge type, dominant color vector), tray-first load behaviour, rotation session property (`session.rotationEnabled`, `piece.initialRotation`), piece extraction UX (drag + spiral click + keyboard Enter all specced above), deferred return-to-tray logged as conscious omission
+- [ ] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button)
+- [ ] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
+- [ ] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
+- [ ] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region
+- [ ] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
+- [ ] **Story 37** — Accessibility modes; high contrast toggle, piece number label overlay, reduced motion (disables inertia + snap animations)
+
+---
+
+### Epic: Keyboard Accessibility
+*Scoped as its own epic. Parallel focus system on WebGL canvas is non-trivial — spike before committing to estimates.*
+
+**Approach locked:** Virtual cursor model — hidden DOM accessibility tree mirrors canvas state. Tabbing moves through invisible DOM buttons. Visual focus ring rendered on PixiJS stage. Browser-native tab order, canvas visual response.
+
+- [ ] **Story 38** — Spike: keyboard focus model; implement virtual cursor approach, assess ARIA tree structure, produce realistic estimates for Stories 40–42 before they are scheduled
+- [ ] **Story 39** — Spec: keyboard nav impact on `jigg-spec`; focus state, interaction model, ARIA landmark structure
+- [ ] **Story 40** — Tray keyboard nav; tab through tray pieces via hidden DOM buttons, focus ring rendered on PixiJS stage
+- [ ] **Story 41** — Canvas keyboard interaction; arrow keys to move focused piece, Enter to place. Enter on tray piece triggers spiral extraction identical to click behaviour
+- [ ] **Story 42** — Focus coordination; tray ↔ canvas focus handoff, no dead ends in tab order
+
+---
+
+### Epic: Image Ingestion
+*File picker immediately after Tray — unblocks real playtesting against user images.*
+
+- [ ] **Story 43** — Spec: image ingestion impact on `jigg-spec`; image source, dimensions, library metadata
+- [ ] **Story 44** — File picker + drag-drop own image onto canvas; replace hardcoded dev image
+- [ ] **Story 45** — Static curated library (10–15 CC0 images); `metadata.json` drives picker UI
+- [ ] **Story 46** — Image of the day; deterministic rotation (`dayOfYear % count`), featured on load
+
+---
+
+### Epic: App Shell
+*Chrome shaped around the proven tray mechanic and real image input.*
+
+- [ ] **Story 47** — Spec: app shell impact on `jigg-spec`; session init, grid size, difficulty
+- [ ] **Story 48** — New puzzle flow; image source picker → grid size selector → launch
+- [ ] **Story 49** — HUD; piece counter + elapsed timer, togglable
+- [ ] **Story 50** — Reference image panel; draggable DOM overlay, snaps to nearest corner on release, resizable, fullscreen option, hotkey toggle (`R`), collapsed by default, ARIA landmark, meaningful `alt` text
+- [ ] **Story 50b** — Ghost underlay mode; opt-in semi-transparent overlay on canvas, opacity slider 0–100%, `pointer-events: none`. Continuous coordinate transform synced to viewport pan and zoom via event listener — DOM position updates on every viewport move event. Gated on Story 50.
+- [ ] **Story 50c** — High contrast integration; when Story 37 high contrast active, reference panel offers edge-only view toggle. Gated on Stories 50 and 50b.
+- [ ] **Story 51** — Completion animation; payoff moment on solve
+- [ ] **Story 52** — Settings panel; texture variant, snap sensitivity, rotation On/Off, accessibility toggles from Story 37
+
+---
+
+### Epic: Persistence
+*IndexedDB-first. Flat + serializable for future Supabase sync.*
+
+Note: Story 53 (spec) runs in parallel with App Shell. Stories 54–55 explicitly gated on Story 48 — no session model exists until then.
+
+- [ ] **Story 53** — Spec: persistence model; canonical vs actual transforms per piece, session schema (including `rotationEnabled`), session reset trigger (destructive settings change e.g. grid size mid-puzzle prompts "Starting a new puzzle will lose your current progress. Continue?"), sync extension points
+- [ ] **Story 54** — Auto-save to IndexedDB; debounced ~2s on snap, place, rotate, tray interaction. Gated on Story 48.
+- [ ] **Story 55** — Resume on load; detect in-progress session, offer Continue or New Game. Gated on Story 48.
+
+---
+
+### Epic: Usage Tracking
+*Anonymous only, no accounts. Pull into launch window — want data from user one.*
+
+- [ ] **Story 56** — Spec: tracking impact on `jigg-spec`; conscious call, likely no changes needed
+- [ ] **Story 57** — Anonymous device UUID; generate on first load, persist in IndexedDB
+- [ ] **Story 58** — Supabase event logging; fire-and-forget on `puzzle_started`, `puzzle_completed`, `puzzle_abandoned`
+- [ ] **Story 59** — Umami integration; standard snippet, configure goals for start/complete events
+- [ ] **Story 60** — Privacy notice; minimal inline copy, no consent wall needed for anonymous data
+
+---
+
+### Epic: PWA
+*Low effort given the stack. Last mile before launch.*
+
+- [ ] **Story 61** — Spec: PWA impact on `jigg-spec`; asset manifest, cache strategy — likely no changes, conscious call
+- [ ] **Story 62** — `vite-plugin-pwa`; manifest, service worker, precache app shell + WASM binary
+- [ ] **Story 63** — Curated image cache strategy; lazy-cache on first access, not upfront precache
+
+---
+
+### Epic: Spec Doc
+*Co-deliverable. Chapters written after each epic ships.*
+
+- [ ] **Story 64** — Spec chapter: rendering pipeline (PixiJS, WebGL, shader decisions)
+- [ ] **Story 65** — Spec chapter: cut algorithm (WASM, Canny, Bezier, content-aware routing)
+- [ ] **Story 66** — Spec chapter: persistence model + sync extension points
+- [ ] **Story 67** — Resolve Bezier geometry representation + spec chapter: cut algorithm math. Pulled forward — resolved during this chapter. **Public repo risk, do not defer past Story 66.**
+- [ ] **Story 68** — Spec chapter: tray system + accessibility rationale
+- [ ] **Story 69** — Spec chapter: what Jigg proves as a reference application
+
+---
+
+### Launch Sequence
+```
+NOW      Story 29         (Cleanup — before anything else)          ✓
+         Story 30         (Tray spike — unblocks tray epic)
+         Story 38         (Keyboard spike — parallel, get estimate early)
+NEXT     Stories 31–37    (Tray epic — mechanic first)
+         Stories 39–42    (Keyboard — informed by spike estimate)
+         Story 44         (File picker — unblocks real playtesting immediately)
+THEN     Stories 43–52    (Ingestion + Shell — content + chrome)
+           50 → 50b → 50c (Reference image panel — sequential dependency)
+         Story 53         (Persistence spec — parallel with Shell)
+         Stories 54–55    (Persistence impl — gated on Story 48)
+         Stories 56–60    (Tracking — pull into launch window)
+         Stories 61–63    (PWA — last mile)
+LAUNCH
+POST     Story 19         (Z-order, informed by tray layering)
+         Stories 64–69    (Spec — after each epic, Story 67 resolved at Story 66)
+```
+
+---
+
+### Open / Deferred
+- **Return-to-tray mechanic** — deferred pending user feedback post-launch. No architectural constraints added that prevent it later.
+- **Stories 40–42 estimates** — not schedulable until Story 38 spike closes.
+
+---
+
+## Session Notes
+
+### Story 29
+- Removed `edgeOverlay` Sprite and all overlay construction from `ANALYSIS_COMPLETE` handler in `scene.ts`
+- Removed `E` key binding from `keydown` listener
+- `edgeMap` data path untouched — stored in worker scope, flows into `GENERATE_CUTS` → `edgeInfluence` as before
+- Future dev tooling gated behind `?debug=true` per roadmap decision
+
+### Roadmap revision (2026-04-03)
+- Full roadmap reset. Stories 21–30 (old Workspace/Sorting/Persistence/Completion epics) replaced.
+- New roadmap: Stories 29–69 across Pre-Epic Cleanup, Piece Tray, Keyboard Accessibility, Image Ingestion, App Shell, Persistence, Usage Tracking, PWA, Spec Doc.
+- Key decisions: tray-first model, piece state machine (`in-tray` → `on-canvas` → `placed`), extraction UX (drag + Archimedean spiral click + keyboard Enter), virtual cursor keyboard model, Story 50 split into 50/50b/50c, Story 67 Bezier geometry public repo risk flagged.
+
+### jigg-spec + Piece type refactor
+- Created `jigg-spec` public repo (`quirklabsio/jigg-spec`) with full v0.1 draft scaffold
+- Added as git submodule at `/jigg-spec`
+- `pieces.md` now defines canonical/actual Transform model (v0.1.2)
+- `src/puzzle/types.ts`: added `Transform` interface; replaced `Piece` fields:
+  - `localPosition` → `actual.x / actual.y`
+  - `correctPosition` → `canonical.x / canonical.y`
+  - `rotation` → `actual.rotation`
+  - `stackIndex` → `actual.z`
+  - `groupId` typed as `string | null` per spec
+- All call sites updated: cutter, scatter, rotate, snap, drag, scene, puzzleStore
+- `groupId == null` null guard added in snap.ts; `groupId!` assertion in scene.ts
+  (all pieces always have a groupId in practice — null is a spec-level concept only)
+- `typecheck` passes clean
 
 ### Story 20 notes
 - **pixi-viewport**: `Viewport` from `pixi-viewport` replaces manual camera. Added to `app.stage` as the sole world-space parent.
@@ -76,12 +225,6 @@ Next: Story 21 — Pan with momentum
 - **Drag zIndex**: `stage.sortChildren()` called explicitly after bulk zIndex mutation in pointerdown/pointerup.
 - **Drag callbacks**: `setDragStartCallback` / `setDragEndCallback` exported from drag.ts, wired in scene.ts for shadow state (currently no-op since shadows disabled).
 
-### Story 18/18a notes (superseded by 18b)
-- Story 18: DropShadowFilter on Container wrapper pattern established (see gotchas.md for stencil mask + filter incompatibility)
-- Story 18a: BevelFilter strengthened + piece outline stroke — reverted in 18b
-- Story 17: Dark charcoal background with SimplexNoiseFilter — replaced in 18b by off-white WebGL clear color
-- All visual changes from 17/18/18a are superseded by 18b's visual foundation reset
-
 ### Story 16 notes
 - Uses `pixi-filters` v6 `BevelFilter` — no custom GLSL or distance field required for v1
 - Applied per sprite in `CUTS_COMPLETE` after mask is set: `sprite.filters = [new BevelFilter({ rotation, thickness, lightAlpha, shadowAlpha })]`
@@ -98,7 +241,6 @@ Next: Story 21 — Pan with momentum
 - `analysis.worker.ts`: stores `edgeMap.slice()` in module scope after `ANALYZE_IMAGE` (before buffer transfer); GENERATE_CUTS reads `edgeInfluence` from payload and passes stored map to WASM
 - `cutter.ts`: exports `EDGE_INFLUENCE = 0.5` — single partition point for cut style config
 - `scene.ts`: imports `EDGE_INFLUENCE`; passes it + `imageWidth`/`imageHeight` in GENERATE_CUTS payload; worker is no longer terminated (stays alive for debug re-runs); CUTS_COMPLETE handler clears old masks before applying new ones
-- Debug key bindings in `scene.ts`: 1→0.0, 2→0.5, 3→1.0 — rebuilds cuts without page reload; remove after story is verified
 - `Graphics` added to PixiJS import in `scene.ts` (needed for mask cast in rebuild path)
 
 ### Story 15 critical fix — sliver gaps between adjacent pieces
@@ -139,7 +281,7 @@ Rule: **never call drawCutSegments without first lineTo to pts[0]** — the curs
 ### Story 13 notes
 - Full Canny in `lib.rs`: greyscale → Gaussian blur → Sobel → NMS → double threshold → hysteresis BFS — see `wasm-pipeline.md` for detail
 - Worker message protocol updated: posts `{ edgeMap, width, height }`, transfers buffer — see `wasm-pipeline.md`
-- Edge overlay in `scene.ts`: cyan RGBA canvas → `Texture.from(canvas)` → Sprite at board position, `alpha=0.6`, `zIndex=999`, starts hidden, `E` toggles
+- Edge overlay in `scene.ts`: cyan RGBA canvas → `Texture.from(canvas)` → Sprite at board position, `alpha=0.6`, `zIndex=999`, starts hidden, `E` toggles — **removed in Story 29**
 - `wasm-pack: command not found` on first run — `~/.cargo/bin` not on PATH; fix in `gotchas.md`
 - `Vec<u8>` return maps to `Uint8Array` after wasm-pack build — no manual cast needed
 
