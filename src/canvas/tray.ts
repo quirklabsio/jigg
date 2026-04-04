@@ -171,7 +171,41 @@ function visibleInTray(): string[] {
   const { piecesById, activeFilter } = usePuzzleStore.getState();
   const all = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
   if (activeFilter === 'all') return all;
+  if (activeFilter.startsWith('zone-')) {
+    const zone = parseInt(activeFilter.slice(5), 10);
+    return all.filter((id) => piecesById[id]?.colorZone === zone);
+  }
   return all.filter((id) => piecesById[id]?.edgeType === activeFilter);
+}
+
+// Color swatch constants
+const SWATCH_RADIUS  = 10; // px — filled circle radius
+const SWATCH_SPACING = 28; // px — centre-to-centre horizontal spacing
+const NUM_ZONES      = 5;
+const SWATCH_AREA_W  = NUM_ZONES * SWATCH_SPACING + 8; // right-side reserved width
+
+/**
+ * Compute the mean colorVector of all pieces (all states) in each zone.
+ * Used as the swatch fill colour — stable regardless of tray state.
+ */
+function zoneMeanColors(): [number, number, number][] {
+  const { pieces } = usePuzzleStore.getState();
+  const sums: [number, number, number][] = Array.from({ length: NUM_ZONES }, () => [0, 0, 0]);
+  const counts = new Array<number>(NUM_ZONES).fill(0);
+  for (const p of pieces) {
+    const z = p.colorZone;
+    if (z >= 0 && z < NUM_ZONES) {
+      sums[z][0] += p.colorVector[0];
+      sums[z][1] += p.colorVector[1];
+      sums[z][2] += p.colorVector[2];
+      counts[z]++;
+    }
+  }
+  return sums.map((s, z) =>
+    counts[z] > 0
+      ? [Math.round(s[0] / counts[z]), Math.round(s[1] / counts[z]), Math.round(s[2] / counts[z])]
+      : [128, 128, 128],
+  ) as [number, number, number][];
 }
 
 /**
@@ -185,23 +219,31 @@ function renderFilterStrip(): void {
 
   const { piecesById, activeFilter } = usePuzzleStore.getState();
   const w    = screenW();
-  const btnW = Math.floor(w / FILTER_OPTIONS.length);
   const btnH = 26;
   const btnY = (FILTER_STRIP_HEIGHT - btnH) / 2;
 
+  // Text buttons occupy space left of the swatch area
+  const textAreaW = w - SWATCH_AREA_W;
+  const btnW = Math.floor(textAreaW / FILTER_OPTIONS.length);
+
   // Count in-tray pieces per edge type
-  const counts: Record<TrayFilter, number> = { all: 0, corner: 0, edge: 0, interior: 0 };
+  const edgeCounts: Record<'all' | 'corner' | 'edge' | 'interior', number> =
+    { all: 0, corner: 0, edge: 0, interior: 0 };
+  const zoneCounts = new Array<number>(NUM_ZONES).fill(0);
   for (const id of _trayDisplayOrder) {
     const p = piecesById[id];
     if (!p || p.state !== 'in-tray') continue;
-    counts.all++;
-    counts[p.edgeType]++;
+    edgeCounts.all++;
+    edgeCounts[p.edgeType]++;
+    const z = p.colorZone;
+    if (z >= 0 && z < NUM_ZONES) zoneCounts[z]++;
   }
 
+  // ── Edge type buttons ────────────────────────────────────────────────────
   for (let i = 0; i < FILTER_OPTIONS.length; i++) {
     const { key, label } = FILTER_OPTIONS[i];
     const isActive = activeFilter === key;
-    const count    = counts[key];
+    const count    = edgeCounts[key as keyof typeof edgeCounts];
     const dimmed   = count === 0;
 
     const btn = new Container();
@@ -237,6 +279,48 @@ function renderFilterStrip(): void {
     });
 
     _filterContainer.addChild(btn);
+  }
+
+  // ── Color zone swatches ──────────────────────────────────────────────────
+  const meanColors = zoneMeanColors();
+  const swatchCY   = FILTER_STRIP_HEIGHT / 2;
+  // Place swatches starting from right of text area, centred in strip
+  const swatchStartX = textAreaW + (SWATCH_AREA_W - NUM_ZONES * SWATCH_SPACING) / 2 + SWATCH_RADIUS;
+
+  for (let z = 0; z < NUM_ZONES; z++) {
+    const filterKey = `zone-${z}` as TrayFilter;
+    const isActive  = activeFilter === filterKey;
+    const inTrayCount = zoneCounts[z];
+    const dimmed    = inTrayCount === 0;
+    const [mr, mg, mb] = meanColors[z];
+    const fillColor = (mr << 16) | (mg << 8) | mb;
+
+    const cx = swatchStartX + z * SWATCH_SPACING;
+
+    const swatch = new Container();
+    swatch.eventMode = 'static';
+    swatch.cursor    = 'pointer';
+
+    const g = new Graphics();
+    // Active ring (drawn first, behind fill)
+    if (isActive) {
+      g.circle(cx, swatchCY, SWATCH_RADIUS + 3).stroke({ color: 0xffffff, width: 2 });
+    }
+    // Filled swatch circle
+    g.circle(cx, swatchCY, SWATCH_RADIUS).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
+
+    swatch.addChild(g);
+
+    const capturedZ = z;
+    swatch.on('pointerdown', (e: FederatedPointerEvent) => {
+      e.stopPropagation();
+      usePuzzleStore.getState().setActiveFilter(`zone-${capturedZ}` as TrayFilter);
+      _scrollX = 0;
+      if (_gridContainer) _gridContainer.x = 0;
+      layoutTrayPieces();
+    });
+
+    _filterContainer.addChild(swatch);
   }
 }
 

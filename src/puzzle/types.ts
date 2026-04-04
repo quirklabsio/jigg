@@ -11,6 +11,8 @@ export interface Piece {
   id: string;
   metadata?: Record<string, unknown>;
   edgeType: EdgeType;
+  colorVector: [number, number, number]; // dominant RGB, computed at cut time
+  colorZone: number;                      // 0–4, assigned after k-means clustering
 
   canonical: Readonly<Transform>; // image space, immutable, set once on creation
   actual: Transform & {

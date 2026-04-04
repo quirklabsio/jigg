@@ -164,6 +164,26 @@
 - **Fix**: `(_piecesContainer ?? _trayContainer!).removeChild(container)` everywhere that removes a piece from the tray. Or always use `container.parent.removeChild(container)` to be parent-agnostic.
 - **Rule**: Use `container.parent?.removeChild(container)` when the parent container may have changed since initial setup.
 
+## Color Zones (Story 35)
+
+### `Record<TrayFilter, number>` breaks when TrayFilter union is extended
+- **Symptom**: TypeScript error — `Record<TrayFilter, number>` required all 9 keys (`all`, `corner`, `edge`, `interior`, `zone-0`…`zone-4`) to be present, but the old `counts` object only initialised 4.
+- **Root cause**: A `Record<K, V>` type requires every member of `K` to be present. When `TrayFilter` was extended with 5 zone keys, the `const counts: Record<TrayFilter, number> = { all:0, corner:0, edge:0, interior:0 }` initialiser became incomplete and TypeScript correctly rejected it.
+- **Fix**: Replace the single `counts` object with two narrower ones: `const edgeCounts: Record<'all' | 'corner' | 'edge' | 'interior', number>` for edge buttons, and `const zoneCounts: number[]` for the zone swatches. Each typed only for what it actually holds.
+- **Rule**: If a `Record<UnionType, V>` exists and the union will grow, either use `Partial<Record<...>>` or split into separate objects typed over each sub-union.
+
+### `preview_eval` variables persist across calls — always use IIFE
+- **Symptom**: `SyntaxError: Identifier 'canvas' has already been declared` on the second `preview_eval` call in the same session.
+- **Root cause**: `preview_eval` runs in the same JS scope as previous calls. Variables declared with `const`/`let` at the top level collide on re-declaration.
+- **Fix**: Always wrap multi-step eval logic in an IIFE: `(() => { const c = ...; return result; })()`. Self-contained scope, no collision.
+- **Rule**: Never use bare `const`/`let` at the top level of a `preview_eval` expression. Always IIFE.
+
+### PixiJS canvas hit testing: compute coordinates from actual viewport dimensions, not guesses
+- **Symptom**: Dispatching a synthetic `pointerdown` at a hardcoded position (e.g. `{x:630, y:404}`) missed the target PixiJS element entirely. The filter state didn't change.
+- **Root cause**: PixiJS element positions are derived from `app.screen.width/height` at runtime. The preview viewport was 554×442, but the hardcoded coordinates assumed a much larger screen.
+- **Fix**: Query `window.innerWidth`/`window.innerHeight` in a first `preview_eval` call, then compute the correct screen coordinates from those values before dispatching. For the tray: swatch screen-y = `windowH - TRAY_HEIGHT_OPEN + TRAY_HEIGHT_CLOSED + FILTER_STRIP_HEIGHT/2`.
+- **Rule**: Never hardcode PixiJS canvas coordinates for testing. Always derive from `window.innerWidth/Height` in the same or a prior eval.
+
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks
 

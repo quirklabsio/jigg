@@ -69,12 +69,13 @@ function buildGridSprites(
   trayParent: Container,
   texture: Texture,
   scale: number,
+  pixelData?: Uint8ClampedArray,
 ): { sprites: Sprite[]; containers: Container[] } {
   const tabPad = Math.ceil(Math.max(
     Math.floor(texture.width  / COLS),
     Math.floor(texture.height / ROWS),
   ) * 0.4);
-  const { pieces } = gridCut(texture.width, texture.height, COLS, ROWS);
+  const { pieces } = gridCut(texture.width, texture.height, COLS, ROWS, pixelData);
 
   const gridIndex = new Map<string, string>();
   pieces.forEach((p) => gridIndex.set(`${p.gridCoord.col},${p.gridCoord.row}`, p.id));
@@ -128,6 +129,14 @@ function buildGridSprites(
 export async function loadScene(app: Application, imageUrl: string): Promise<void> {
   const texture = await Assets.load<Texture>(imageUrl);
 
+  // Extract pixel data once — used for both color zone computation and WASM worker
+  const { width, height } = texture;
+  const offscreen = new OffscreenCanvas(width, height);
+  const ctx = offscreen.getContext('2d')!;
+  ctx.drawImage(texture.source.resource as CanvasImageSource, 0, 0);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const pixels = new Uint8Array(imageData.data.buffer);
+
   const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
   const piecePixelW = Math.floor(texture.width  / COLS);
   const piecePixelH = Math.floor(texture.height / ROWS);
@@ -162,7 +171,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // buildGridSprites needs a parent — we use a temporary throw-away container.
   // initTray will move the containers into the real tray container.
   const tempParent = new Container();
-  const { sprites, containers } = buildGridSprites(tempParent, texture, scale);
+  const { sprites, containers } = buildGridSprites(tempParent, texture, scale, imageData.data);
 
   // Convert canonical positions from image-pixel space → world-screen space.
   // Pieces start in tray, but canonical positions are always world-space
@@ -320,13 +329,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   });
 
   // ── Image analysis + cut generation ───────────────────────────────────────
-  const { width, height } = texture;
-  const offscreen = new OffscreenCanvas(width, height);
-  const ctx = offscreen.getContext('2d')!;
-  ctx.drawImage(texture.source.resource as CanvasImageSource, 0, 0);
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const pixels = new Uint8Array(imageData.data.buffer);
-
+  // `pixels` extracted from texture at load time (see top of loadScene) — reused here.
   const worker = new AnalysisWorker();
 
   worker.postMessage({

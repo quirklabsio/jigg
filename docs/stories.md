@@ -61,8 +61,9 @@
 - [x] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button). Bug-fix round: tray width on resize, open/close hit area, 2-row wrap, piece randomisation, drag extraction jump, board shadow retina artifact, tray scale vs expanded sprite frames.
 - [x] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
 - [x] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
-- [ ] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region
+- [x] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region. `colorVector` computed per piece in `gridCut()` (dominantColor, sample every 4th pixel). k-means k=5 runs synchronously in `gridCut()` after all pieces created, assigns `colorZone 0–4`. Five filled-circle swatches appended to filter strip; fill = mean colorVector of zone; active swatch has white ring; zero-piece swatches dimmed. Pixel data extracted once in `loadScene` and reused for the WASM worker (eliminated duplicate OffscreenCanvas). Mutually exclusive with edge type filter. Filter resets to `all` on new puzzle load (via `setPieces`).
 - [ ] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
+- [ ] **Story 36b** — Content-aware edge type; `edgeType` currently derived from grid position only. For shaped images (circular crop, vignette, alpha-masked source), corner/edge grid pieces may be mostly transparent — not real puzzle edges. Compute average alpha of border pixels per piece at cut time; if a nominally-flat side sits over transparent pixels, don't count it as a flat side. Re-derive `edgeType` from content-aware flat-side count. Affects filter strip counts and future snap logic.
 - [ ] **Story 37** — Accessibility modes; high contrast toggle, piece number label overlay, reduced motion (disables inertia + snap animations)
 
 ---

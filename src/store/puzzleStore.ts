@@ -1,7 +1,7 @@
 import { createStore } from 'zustand/vanilla';
 import type { EdgeType, Piece, PieceGroup } from '../puzzle/types';
 
-export type TrayFilter = 'all' | EdgeType;
+export type TrayFilter = 'all' | EdgeType | 'zone-0' | 'zone-1' | 'zone-2' | 'zone-3' | 'zone-4';
 
 type PieceState = Piece['state'];
 

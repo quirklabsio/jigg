@@ -10,11 +10,100 @@ import type { CutPath, CutPoint, EdgeType, Piece } from './types';
  */
 export const EDGE_INFLUENCE = 0.5;
 
+// ─── Color zone helpers ───────────────────────────────────────────────────────
+
+/**
+ * Compute the dominant color of a rectangular pixel region by averaging a
+ * sample of pixels (every 4th pixel in each axis for performance).
+ */
+function dominantColor(
+  data: Uint8ClampedArray,
+  rx: number,
+  ry: number,
+  rw: number,
+  rh: number,
+  stride: number,
+): [number, number, number] {
+  let r = 0, g = 0, b = 0, count = 0;
+  for (let y = ry; y < ry + rh; y += 4) {
+    for (let x = rx; x < rx + rw; x += 4) {
+      const i = (y * stride + x) * 4;
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      count++;
+    }
+  }
+  if (count === 0) return [128, 128, 128];
+  return [Math.round(r / count), Math.round(g / count), Math.round(b / count)];
+}
+
+/**
+ * K-means clustering on piece colorVectors.
+ * Returns a zone index (0–k-1) for each piece.
+ * Max 20 iterations, random initialisation.
+ */
+function clusterPieces(pieces: Piece[], k: number): number[] {
+  const n = pieces.length;
+  if (n === 0) return [];
+
+  // Random init — pick k random pieces as initial centroids
+  const shuffled = Array.from({ length: n }, (_, i) => i);
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const centroids: [number, number, number][] = [];
+  for (let i = 0; i < k; i++) {
+    const src = pieces[shuffled[i % n]].colorVector;
+    centroids.push([src[0], src[1], src[2]]);
+  }
+
+  const zones = new Array<number>(n).fill(0);
+
+  for (let iter = 0; iter < 20; iter++) {
+    let changed = false;
+
+    // Assignment step
+    for (let i = 0; i < n; i++) {
+      const [pr, pg, pb] = pieces[i].colorVector;
+      let bestDist = Infinity;
+      let bestZone = 0;
+      for (let z = 0; z < k; z++) {
+        const [cr, cg, cb] = centroids[z];
+        const d = (pr - cr) ** 2 + (pg - cg) ** 2 + (pb - cb) ** 2;
+        if (d < bestDist) { bestDist = d; bestZone = z; }
+      }
+      if (zones[i] !== bestZone) { zones[i] = bestZone; changed = true; }
+    }
+
+    if (!changed) break;
+
+    // Update step — recompute centroids as mean of assigned pieces
+    for (let z = 0; z < k; z++) {
+      let sr = 0, sg = 0, sb = 0, count = 0;
+      for (let i = 0; i < n; i++) {
+        if (zones[i] !== z) continue;
+        sr += pieces[i].colorVector[0];
+        sg += pieces[i].colorVector[1];
+        sb += pieces[i].colorVector[2];
+        count++;
+      }
+      if (count > 0) centroids[z] = [Math.round(sr / count), Math.round(sg / count), Math.round(sb / count)];
+    }
+  }
+
+  return zones;
+}
+
+// ─── Grid cut ─────────────────────────────────────────────────────────────────
+
 export function gridCut(
   imageWidth: number,
   imageHeight: number,
   cols: number,
   rows: number,
+  pixelData?: Uint8ClampedArray,
 ): { pieces: Piece[] } {
   const pieceW = Math.floor(imageWidth / cols);
   const pieceH = Math.floor(imageHeight / rows);
@@ -35,6 +124,10 @@ export function gridCut(
       const edgeType: EdgeType =
         flatSides >= 2 ? 'corner' : flatSides === 1 ? 'edge' : 'interior';
 
+      const colorVector: [number, number, number] = pixelData
+        ? dominantColor(pixelData, x, y, pieceW, pieceH, imageWidth)
+        : [128, 128, 128];
+
       // PieceGroup creation is deferred to extraction time (Story 32).
       // groupId is null until the piece is pulled out of the tray.
       pieces.push({
@@ -42,6 +135,8 @@ export function gridCut(
         groupId: null,
         state: 'in-tray',
         edgeType,
+        colorVector,
+        colorZone: 0,
         canonical: { x, y, rotation: 0, scale: 1.0 },
         actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
         gridCoord: { col, row },
@@ -49,6 +144,14 @@ export function gridCut(
         placed: false,
         touched: false,
       });
+    }
+  }
+
+  // Assign color zones via k-means (k=5) when pixel data is available
+  if (pixelData && pieces.length > 0) {
+    const zones = clusterPieces(pieces, 5);
+    for (let i = 0; i < pieces.length; i++) {
+      pieces[i].colorZone = zones[i];
     }
   }
 
