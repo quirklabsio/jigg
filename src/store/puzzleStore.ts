@@ -22,6 +22,7 @@ interface PuzzleState {
   puzzleComplete: boolean;
   trayOpen: boolean;
   activeFilter: TrayFilter;
+  zoomToPlace: boolean;
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
@@ -32,6 +33,7 @@ interface PuzzleState {
   markGroupPlaced: (groupId: string) => void;
   setTrayOpen: (open: boolean) => void;
   setActiveFilter: (filter: TrayFilter) => void;
+  setZoomToPlace: (value: boolean) => void;
   /** Move a piece from tray to canvas: sets state, assigns groupId, adds PieceGroup. */
   extractPieceToCanvas: (
     pieceId: string,
@@ -49,6 +51,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   puzzleComplete: false,
   trayOpen: true,
   activeFilter: 'all',
+  zoomToPlace: false,
   setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces), activeFilter: 'all' }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
@@ -102,6 +105,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
     }),
   setTrayOpen: (open) => set({ trayOpen: open }),
   setActiveFilter: (filter) => set({ activeFilter: filter }),
+  setZoomToPlace: (value) => set({ zoomToPlace: value }),
   extractPieceToCanvas: (pieceId, groupId, groupPosition) =>
     set((state) => {
       const pieces = state.pieces.map((p) =>

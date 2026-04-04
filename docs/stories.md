@@ -62,7 +62,7 @@
 - [x] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
 - [x] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
 - [x] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region. `colorVector` computed per piece in `gridCut()` (dominantColor, sample every 4th pixel). k-means k=5 runs synchronously in `gridCut()` after all pieces created, assigns `colorZone 0–4`. Five filled-circle swatches appended to filter strip; fill = mean colorVector of zone; active swatch has white ring; zero-piece swatches dimmed. Pixel data extracted once in `loadScene` and reused for the WASM worker (eliminated duplicate OffscreenCanvas). Mutually exclusive with edge type filter. Filter resets to `all` on new puzzle load (via `setPieces`).
-- [ ] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
+- [x] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
 - [ ] **Story 36b** — Content-aware edge type; `edgeType` currently derived from grid position only. For shaped images (circular crop, vignette, alpha-masked source), corner/edge grid pieces may be mostly transparent — not real puzzle edges. Compute average alpha of border pixels per piece at cut time; if a nominally-flat side sits over transparent pixels, don't count it as a flat side. Re-derive `edgeType` from content-aware flat-side count. Affects filter strip counts and future snap logic.
 - [ ] **Story 37** — Accessibility modes; high contrast toggle, piece number label overlay, reduced motion (disables inertia + snap animations)
 
@@ -176,6 +176,20 @@ POST     Story 19         (Z-order, informed by tray layering)
 ---
 
 ## Session Notes
+
+### Story 36
+
+- **`src/store/puzzleStore.ts`**: Added `zoomToPlace: boolean` (default `false`) and `setZoomToPlace` action to `PuzzleState`.
+- **`src/canvas/tray.ts`**: All changes isolated here.
+  - **Dev checkbox** (DOM element, `position: fixed`, right-aligned in tray strip): wired to `zoomToPlace` Zustand flag; updates bottom position in `applyTrayLayout()` to track tray animation. Removed on reinit. `TODO` comment for Story 52.
+  - **4px movement threshold**: `trayPointerDownX/Y` recorded on `pointerdown`; `trayPointerMovedFar` set in `onStagePointerMove` when squared distance > 16. Cleared when boundary crossed. On release: if `movedFar` → ignore (drag stayed in tray); if `≤4px` → dispatch to zoom or spiral.
+  - **`cancelZoomAnimation()`**: removes viewport `'animate'` plugin, removes ticker tween, reparents in-flight sprite back to `_gridContainer`, clears filters, reflows tray.
+  - **`completeZoomAnimation()`**: stops ticker tween, reparents sprite from `app.stage` to `viewport`, sets world-space landing position, calls `extractPieceToCanvas` + `insertGroupAABB`, reflows tray.
+  - **`zoomToPlacePiece()`**: captures tray screen position; reparents to `app.stage`; restores filters and canvas scale; computes `clampedScale = min((screen.height × 0.30) / (piecePixelH × canvasScale), 8.0)`; randomised `LANDING_OFFSET = 35px` angle offset from canonical center (within 60px board snap radius); launches `viewport.animate()` (600ms, easeInOutQuad) + parallel ticker tween for visual tether (sprite flies from tray → screen center); reduced motion: `viewport.moveCenter()` + `viewport.scale.set()` + immediate complete (uses OS `prefers-reduced-motion` until Story 37 Zustand flag ships).
+  - **Rapid click handling**: `onStagePointerUp` calls `cancelZoomAnimation()` before `zoomToPlacePiece()` if `_zoomInFlight`.
+  - **`easeInOutQuad(t)`** helper added.
+  - **No changes to `scene.ts`**: `viewport.animate()` is a built-in pixi-viewport plugin, no pre-registration required; typecheck confirmed availability.
+- `npm run typecheck` passes clean.
 
 ### Story 34
 

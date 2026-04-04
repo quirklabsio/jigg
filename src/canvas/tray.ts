@@ -72,7 +72,14 @@ let targetTrayHeight  = TRAY_HEIGHT_OPEN;
 // Tray pointer state (piece drag)
 let trayPointerDownId: number | null = null;
 let trayPointerDownPieceId: string | null = null;
+let trayPointerDownX = 0;
+let trayPointerDownY = 0;
+let trayPointerMovedFar = false; // true if pointer moved >4px from down position
 let trayPointerDidCross = false;
+// Screen-space offset from pointer to sprite center at press time — used to
+// keep the grab point tight when the piece is extracted into world-space.
+let trayPointerDownSpriteDX = 0;
+let trayPointerDownSpriteDY = 0;
 
 // Scroll drag state
 let _scrollDragActive = false;
@@ -89,6 +96,14 @@ let spiralIndex = 0;
 let spiralOriginX = 0;
 let spiralOriginY = 0;
 let spiralOriginLocked = false;
+
+// Zoom-to-place animation state (Story 36)
+let _zoomInFlight = false;
+let _zoomFlightPieceId: string | null = null;
+let _zoomTickerFn: (() => void) | null = null;
+
+// DOM element for zoom toggle — removed when Story 52 ships
+let _zoomLabel: HTMLLabelElement | null = null;
 
 // ─── Fisher-Yates shuffle ─────────────────────────────────────────────────────
 
@@ -439,6 +454,17 @@ function applyTrayLayout(): void {
   _trayContainer.y = _app.screen.height - currentTrayHeight;
   _viewport.resize(w, _app.screen.height - currentTrayHeight);
   redrawBackground();
+
+  // Keep DOM checkbox aligned to tray strip (strip sits at top of tray container)
+  if (_zoomLabel) {
+    _zoomLabel.style.bottom = `${currentTrayHeight - TRAY_HEIGHT_CLOSED}px`;
+  }
+}
+
+// ─── Easing ───────────────────────────────────────────────────────────────────
+
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
 // ─── Spiral placement ─────────────────────────────────────────────────────────
@@ -568,8 +594,6 @@ function hitTestTrayPiece(screenX: number, screenY: number): string | null {
 
 // ─── Extraction from tray (drag) ─────────────────────────────────────────────
 
-const _tmpPoint = new Point();
-
 /**
  * Reparent the piece sprite from the tray into the viewport at world-space
  * coordinates, then hand the active pointer off to drag.ts.
@@ -593,10 +617,6 @@ function extractToCanvas(
   const container = _containerMap.get(pieceId);
   if (!sprite || !container) return;
 
-  // Snapshot sprite's screen position BEFORE reparenting
-  sprite.getGlobalPosition(_tmpPoint);
-  const spriteWorld = _viewport.toLocal(_tmpPoint);
-
   // Reparent from grid container into viewport
   (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
   _viewport.addChild(container);
@@ -606,17 +626,22 @@ function extractToCanvas(
   // Restore original filters now that the piece is on the canvas
   sprite.filters = _originalFilters.get(pieceId) ?? [];
 
-  // Restore canvas scale and world position
-  sprite.position.set(spriteWorld.x, spriteWorld.y);
+  // Place sprite so the cursor sits at the same relative position on the piece
+  // as when the user pressed down (trayPointerDownSpriteDX/Y are the screen-space
+  // offset from pointer to sprite center at press time).
+  const vs      = _viewport.scale.x; // uniform zoom factor
+  const worldX  = pointerWorldX - trayPointerDownSpriteDX / vs;
+  const worldY  = pointerWorldY - trayPointerDownSpriteDY / vs;
+  sprite.position.set(worldX, worldY);
   sprite.scale.set(_canvasScale);
   sprite.eventMode = 'none';
 
   const groupId = `group-${pieceId}`;
-  usePuzzleStore.getState().extractPieceToCanvas(pieceId, groupId, { x: spriteWorld.x, y: spriteWorld.y });
+  usePuzzleStore.getState().extractPieceToCanvas(pieceId, groupId, { x: worldX, y: worldY });
 
   const hw = piece.textureRegion.w / 2;
   const hh = piece.textureRegion.h / 2;
-  insertGroupAABB(groupId, spriteWorld.x - hw, spriteWorld.y - hh, piece.textureRegion.w, piece.textureRegion.h);
+  insertGroupAABB(groupId, worldX - hw, worldY - hh, piece.textureRegion.w, piece.textureRegion.h);
 
   // Hand off to drag.ts using POINTER world position (not sprite centre)
   startDragForPiece(pieceId, pointerId, pointerWorldX, pointerWorldY);
@@ -624,6 +649,168 @@ function extractToCanvas(
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
   layoutTrayPieces();
+}
+
+// ─── Zoom-to-place (Story 36) ─────────────────────────────────────────────────
+
+const LANDING_OFFSET = 35; // px world-space — within board snap radius (60px)
+
+/** Cancel an in-flight zoom animation and return the sprite to the tray. */
+function cancelZoomAnimation(): void {
+  if (!_zoomInFlight) return;
+
+  // Cancel viewport animate plugin
+  _viewport?.plugins.remove('animate');
+
+  // Cancel sprite tween
+  if (_zoomTickerFn && _app) {
+    _app.ticker.remove(_zoomTickerFn);
+    _zoomTickerFn = null;
+  }
+
+  // Return in-flight sprite to tray grid container
+  const pieceId = _zoomFlightPieceId;
+  if (pieceId && _app && _spriteMap && _containerMap && _gridContainer) {
+    const sprite    = _spriteMap.get(pieceId);
+    const container = _containerMap.get(pieceId);
+    if (sprite && container) {
+      _app.stage.removeChild(container);
+      _gridContainer.addChild(container);
+      // Clear restored filters — tray thumbnails have no filters
+      sprite.filters = [];
+    }
+  }
+
+  _zoomInFlight      = false;
+  _zoomFlightPieceId = null;
+
+  layoutTrayPieces(); // reposition piece in grid
+}
+
+/** Finish zoom animation: reparent sprite to viewport and set on-canvas state. */
+function completeZoomAnimation(
+  pieceId: string,
+  sprite: Sprite,
+  container: Container,
+  landX: number,
+  landY: number,
+): void {
+  if (!_app || !_viewport) return;
+
+  // Stop sprite tween
+  if (_zoomTickerFn) {
+    _app.ticker.remove(_zoomTickerFn);
+    _zoomTickerFn = null;
+  }
+
+  // Reparent from app.stage → viewport (world-space)
+  _app.stage.removeChild(container);
+  _viewport.addChild(container);
+  container.x = 0;
+  container.y = 0;
+
+  // Land at randomised offset from canonical — preserves snap payoff moment
+  sprite.position.set(landX, landY);
+  sprite.scale.set(_canvasScale);
+  sprite.eventMode = 'none';
+
+  // Register in store + spatial hash
+  const groupId = `group-${pieceId}`;
+  usePuzzleStore.getState().extractPieceToCanvas(pieceId, groupId, { x: landX, y: landY });
+
+  const piece = usePuzzleStore.getState().piecesById[pieceId];
+  const hw    = piece ? piece.textureRegion.w / 2 : 0;
+  const hh    = piece ? piece.textureRegion.h / 2 : 0;
+  insertGroupAABB(groupId, landX - hw, landY - hh, piece?.textureRegion.w ?? 0, piece?.textureRegion.h ?? 0);
+
+  // Remove from display order and reflow
+  _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  layoutTrayPieces();
+
+  _zoomInFlight      = false;
+  _zoomFlightPieceId = null;
+}
+
+/**
+ * Zoom viewport to canonical position of `pieceId`, animate piece from tray
+ * toward viewport center (visual tether), then land at randomised offset.
+ *
+ * Called from onStagePointerUp when zoomToPlace is enabled and movement < 4px.
+ */
+function zoomToPlacePiece(pieceId: string): void {
+  if (!_app || !_viewport || !_spriteMap || !_containerMap || !_gridContainer) return;
+
+  const piece     = usePuzzleStore.getState().piecesById[pieceId];
+  const sprite    = _spriteMap.get(pieceId);
+  const container = _containerMap.get(pieceId);
+  if (!piece || !sprite || !container) return;
+
+  // Capture tray screen position before reparenting
+  const spriteScreen = sprite.getGlobalPosition();
+  const startScreenX = spriteScreen.x;
+  const startScreenY = spriteScreen.y;
+
+  // Reparent from tray grid → app.stage (screen-space, above viewport)
+  _gridContainer.removeChild(container);
+  _app.stage.addChild(container);
+  container.x = 0;
+  container.y = 0;
+
+  // Restore filters and switch to canvas scale
+  sprite.filters   = _originalFilters.get(pieceId) ?? [];
+  sprite.scale.set(_canvasScale);
+  sprite.position.set(startScreenX, startScreenY);
+  sprite.eventMode = 'none';
+
+  // Zoom level: piece occupies ~30% of viewport height
+  const pieceWorldH  = _piecePixelH * _canvasScale;
+  const targetScale  = (_app.screen.height * 0.30) / pieceWorldH;
+  const clampedScale = Math.min(targetScale, 8.0);
+
+  // Landing offset — randomised angle, within board snap radius (60px)
+  const angle = Math.random() * Math.PI * 2;
+  const landX = piece.canonical.x + Math.cos(angle) * LANDING_OFFSET;
+  const landY = piece.canonical.y + Math.sin(angle) * LANDING_OFFSET;
+
+  _zoomInFlight      = true;
+  _zoomFlightPieceId = pieceId;
+
+  // Reduced motion: skip animations, jump directly
+  // TODO: replace matchMedia check with Story 37 reducedMotion Zustand flag when it ships
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    _viewport.moveCenter(piece.canonical.x, piece.canonical.y);
+    _viewport.scale.set(clampedScale);
+    completeZoomAnimation(pieceId, sprite, container, landX, landY);
+    return;
+  }
+
+  const ANIM_DURATION = 600; // ms
+  const endScreenX    = _app.screen.width / 2;
+  const endScreenY    = _app.screen.height / 2;
+  const startTime     = performance.now();
+
+  // Visual tether: animate sprite from tray position toward screen center
+  const tickerFn = () => {
+    const t     = Math.min((performance.now() - startTime) / ANIM_DURATION, 1);
+    const eased = easeInOutQuad(t);
+    sprite.position.set(
+      startScreenX + (endScreenX - startScreenX) * eased,
+      startScreenY + (endScreenY - startScreenY) * eased,
+    );
+  };
+  _zoomTickerFn = tickerFn;
+  _app.ticker.add(tickerFn);
+
+  // Animate viewport to canonical position at piece-size-derived zoom
+  _viewport.animate({
+    time:               ANIM_DURATION,
+    position:           new Point(piece.canonical.x, piece.canonical.y),
+    scale:              clampedScale,
+    ease:               'easeInOutQuad',
+    callbackOnComplete: () => {
+      completeZoomAnimation(pieceId, sprite, container, landX, landY);
+    },
+  });
 }
 
 // ─── App-stage pointer handlers ───────────────────────────────────────────────
@@ -642,6 +829,13 @@ function onStagePointerMove(e: FederatedPointerEvent): void {
   if (trayPointerDidCross) return;
   if (!_viewport || !_app) return;
 
+  // 4px movement threshold — same principle as drag.ts click threshold
+  if (!trayPointerMovedFar) {
+    const dx = e.global.x - trayPointerDownX;
+    const dy = e.global.y - trayPointerDownY;
+    if (dx * dx + dy * dy > 16) trayPointerMovedFar = true; // 4² = 16
+  }
+
   const trayTop = _app.screen.height - currentTrayHeight;
   if (e.global.y < trayTop && trayPointerDownPieceId !== null) {
     trayPointerDidCross = true;
@@ -649,6 +843,7 @@ function onStagePointerMove(e: FederatedPointerEvent): void {
     const pid = e.pointerId;
     trayPointerDownId      = null;
     trayPointerDownPieceId = null;
+    trayPointerMovedFar    = false;
 
     const pointerWorld = _viewport.toLocal(e.global);
     extractToCanvas(id, pid, pointerWorld.x, pointerWorld.y);
@@ -666,18 +861,30 @@ function onStagePointerUp(e: FederatedPointerEvent): void {
   if (trayPointerDownId === null || e.pointerId !== trayPointerDownId) return;
   if (isDraggingCanvas()) return;
 
-  const id = trayPointerDownPieceId;
+  const id        = trayPointerDownPieceId;
+  const movedFar  = trayPointerMovedFar;
   trayPointerDownId      = null;
   trayPointerDownPieceId = null;
   trayPointerDidCross    = false;
+  trayPointerMovedFar    = false;
 
   if (id === null) return;
+
+  // If pointer moved >4px but didn't cross tray boundary: drag stayed in tray — ignore
+  if (movedFar) return;
 
   const sprite    = _spriteMap?.get(id);
   const container = _containerMap?.get(id);
   if (!sprite || !container) return;
 
-  spiralPlace(id, sprite, container);
+  // Dispatch: zoom-to-place or spiral extraction
+  if (usePuzzleStore.getState().zoomToPlace) {
+    // Rapid click: cancel in-flight animation before starting a new one
+    if (_zoomInFlight) cancelZoomAnimation();
+    zoomToPlacePiece(id);
+  } else {
+    spiralPlace(id, sprite, container);
+  }
 }
 
 // ─── Zustand subscription — real-time state sync ──────────────────────────────
@@ -826,7 +1033,21 @@ export function initTray(
       // Piece drag — track this pointer
       trayPointerDownId      = e.pointerId;
       trayPointerDownPieceId = pieceId;
+      trayPointerDownX       = e.global.x;
+      trayPointerDownY       = e.global.y;
+      trayPointerMovedFar    = false;
       trayPointerDidCross    = false;
+      // Record offset from pointer to sprite center in screen-space so drag
+      // extraction can position the piece under the original grab point.
+      const grabSprite = _spriteMap?.get(pieceId);
+      if (grabSprite) {
+        const sc = grabSprite.getGlobalPosition();
+        trayPointerDownSpriteDX = e.global.x - sc.x;
+        trayPointerDownSpriteDY = e.global.y - sc.y;
+      } else {
+        trayPointerDownSpriteDX = 0;
+        trayPointerDownSpriteDY = 0;
+      }
       e.stopPropagation();
     } else if (!pieceId && !_scrollDragActive) {
       // Background drag — scroll the tray
@@ -862,6 +1083,39 @@ export function initTray(
 
   // Subscribe for real-time piece state sync
   subscribeToStore();
+
+  // ── Zoom-to-place dev toggle (DOM element) ──────────────────────────────────
+  // TODO: remove this checkbox when Story 52 ships — expose via settings panel instead
+  if (_zoomLabel) _zoomLabel.remove();
+  const zoomLabel = document.createElement('label');
+  zoomLabel.style.cssText = [
+    'position:fixed',
+    'right:12px',
+    `height:${TRAY_HEIGHT_CLOSED}px`,
+    'display:flex',
+    'align-items:center',
+    'gap:4px',
+    'font-size:11px',
+    'font-family:sans-serif',
+    'color:#aaaacc',
+    'z-index:501',
+    'pointer-events:auto',
+    'user-select:none',
+    'cursor:pointer',
+  ].join(';');
+  const zoomCheckbox = document.createElement('input');
+  zoomCheckbox.type    = 'checkbox';
+  zoomCheckbox.checked = usePuzzleStore.getState().zoomToPlace;
+  zoomCheckbox.style.margin = '0';
+  zoomCheckbox.addEventListener('change', () => {
+    usePuzzleStore.getState().setZoomToPlace(zoomCheckbox.checked);
+  });
+  zoomLabel.appendChild(zoomCheckbox);
+  zoomLabel.appendChild(document.createTextNode('\u00a0Click to zoom'));
+  document.body.appendChild(zoomLabel);
+  _zoomLabel = zoomLabel;
+  // Set initial bottom position
+  zoomLabel.style.bottom = `${TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED}px`;
 
   redrawBackground();
   layoutTrayPieces();
