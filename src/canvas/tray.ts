@@ -1,4 +1,14 @@
-import { Application, Container, FederatedPointerEvent, Graphics, Point, Sprite } from 'pixi.js';
+import {
+  Application,
+  Container,
+  FederatedPointerEvent,
+  FederatedWheelEvent,
+  Filter,
+  Graphics,
+  Point,
+  Sprite,
+  Text,
+} from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
 import { usePuzzleStore } from '../store/puzzleStore';
 import {
@@ -15,8 +25,10 @@ export const TRAY_HEIGHT_CLOSED =  40; // collapsed strip height
 const TRAY_BG_COLOR     = 0x1a1a2e;
 const TRAY_STRIP_COLOR  = 0x16213e;
 const TRAY_HANDLE_COLOR = 0x888899;
-const PAD               = 10; // piece spacing in tray
-const TRAY_ROWS         = 2;  // wrap into two rows; Story 33 owns proper layout
+
+// Grid layout constants — Story 33
+const THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
+const PADDING        = 8;                       // px between thumbnails
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -25,15 +37,19 @@ let _viewport: Viewport | null = null;
 let _trayContainer: Container | null = null;
 let _bg: Graphics | null = null;
 let _handle: Graphics | null = null;
-let _stripHitArea: Graphics | null = null; // stored ref for resize
-let _piecesContainer: Container | null = null; // clips piece overflow
+let _stripHitArea: Graphics | null = null;
+let _piecesContainer: Container | null = null; // clips piece overflow (mask applied)
 let _piecesMask: Graphics | null = null;        // mask on _piecesContainer
+let _gridContainer: Container | null = null;    // scrollable inner container
+let _emptyText: Text | null = null;
 let _spriteMap: Map<string, Sprite> | null = null;
 let _containerMap: Map<string, Container> | null = null;
 let _canvasScale = 1;
-let _trayScale = 1;
 let _piecePixelW = 0;
 let _piecePixelH = 0;
+
+// Per-piece original filters — cleared in tray, restored on extraction
+const _originalFilters = new Map<string, Filter[]>();
 
 // Shuffled display order — randomised once on init, updated as pieces extract
 let _trayDisplayOrder: string[] = [];
@@ -42,10 +58,20 @@ let _trayDisplayOrder: string[] = [];
 let currentTrayHeight = TRAY_HEIGHT_OPEN;
 let targetTrayHeight  = TRAY_HEIGHT_OPEN;
 
-// Tray pointer state
+// Tray pointer state (piece drag)
 let trayPointerDownId: number | null = null;
 let trayPointerDownPieceId: string | null = null;
 let trayPointerDidCross = false;
+
+// Scroll drag state
+let _scrollDragActive = false;
+let _scrollDragPointerId: number | null = null;
+let _scrollDragStartX = 0;
+let _scrollDragStartScrollX = 0;
+
+// Scroll position
+let _scrollX = 0;
+let _totalGridWidth = 0;
 
 // Spiral placement state
 let spiralIndex = 0;
@@ -64,13 +90,43 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// ─── Background + handle drawing ──────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function screenW(): number {
-  // Use window.innerWidth as the source of truth — app.screen.width can lag
-  // one frame behind when the renderer resize event fires before the DOM reports.
   return _app ? Math.max(_app.screen.width, window.innerWidth) : window.innerWidth;
 }
+
+function maxScroll(): number {
+  return Math.max(0, _totalGridWidth - screenW());
+}
+
+function clampScroll(v: number): number {
+  return Math.max(0, Math.min(v, maxScroll()));
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+function updateEmptyState(isEmpty: boolean): void {
+  if (!_piecesContainer) return;
+  if (isEmpty) {
+    if (!_emptyText) {
+      _emptyText = new Text({
+        text: 'All pieces placed',
+        style: { fill: 0x888899, fontSize: 16, fontFamily: 'sans-serif' },
+      });
+      _emptyText.anchor.set(0.5);
+      _piecesContainer.addChild(_emptyText);
+    }
+    const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED;
+    _emptyText.x = screenW() / 2;
+    _emptyText.y = availH / 2;
+    _emptyText.visible = true;
+  } else if (_emptyText) {
+    _emptyText.visible = false;
+  }
+}
+
+// ─── Background + handle drawing ──────────────────────────────────────────────
 
 function redrawBackground(): void {
   if (!_bg || !_handle) return;
@@ -82,7 +138,7 @@ function redrawBackground(): void {
   _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_COLOR });
   _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_STRIP_COLOR });
 
-  // Chevron — purely decorative; the strip hit area handles interaction
+  // Chevron — purely decorative; strip hit area handles interaction
   _handle.clear();
   const cx = w / 2;
   const cy = TRAY_HEIGHT_CLOSED / 2;
@@ -91,60 +147,94 @@ function redrawBackground(): void {
          .lineTo(cx + 14, cy + (open ? 5 : -5));
   _handle.stroke({ color: TRAY_HANDLE_COLOR, width: 2 });
 
-  // Resize the strip hit area to match new width
   if (_stripHitArea) {
     _stripHitArea.clear();
     _stripHitArea.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: 0x000000, alpha: 0 });
   }
 }
 
-// ─── Piece layout (2-row wrap, shuffled) ──────────────────────────────────────
+// ─── Grid layout ──────────────────────────────────────────────────────────────
 
 /**
- * Position in-tray pieces in a two-row wrap layout using _trayDisplayOrder.
- * Story 33 owns proper scrollable grid layout — this is the placeholder.
+ * Calculate scale to fit an expanded sprite frame (piece + tab padding)
+ * uniformly within THUMBNAIL_SIZE.
+ */
+function thumbScale(): number {
+  const tabPad   = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
+  const expandedW = _piecePixelW + 2 * tabPad;
+  const expandedH = _piecePixelH + 2 * tabPad;
+  return Math.min(THUMBNAIL_SIZE / expandedW, THUMBNAIL_SIZE / expandedH);
+}
+
+/**
+ * Lay out in-tray pieces in a responsive grid.
+ *
+ * Layout is column-first: pieces fill top-to-bottom within each column, then
+ * expand right. This naturally produces a horizontally-scrollable band.
+ *
+ * The number of rows that fit is derived from the fixed tray height. The total
+ * grid width (all columns × THUMBNAIL_SIZE + PADDING) is computed and stored in
+ * _totalGridWidth for scroll clamping.
+ *
+ * Reflow happens within the same call — no deferred updates.
  */
 function layoutTrayPieces(): void {
-  if (!_spriteMap || !_containerMap) return;
+  if (!_spriteMap || !_containerMap || !_gridContainer || !_piecesContainer) return;
   const { piecesById } = usePuzzleStore.getState();
 
-  // Only keep IDs still in tray
+  // In-tray pieces in display order
   const inTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
 
-  // Use expanded frame dimensions (piece + tab padding) for slot spacing.
-  // This matches the scale calculation in initTray so pieces don't overlap.
-  const tabPad   = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
-  const scaledW  = (_piecePixelW + 2 * tabPad) * _trayScale;
-  const scaledH  = (_piecePixelH + 2 * tabPad) * _trayScale;
-  const slotW    = scaledW + PAD;
+  // Rows that fit in the available tray height
+  const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - PADDING;
+  const rows   = Math.max(1, Math.floor(availH / (THUMBNAIL_SIZE + PADDING)));
+  const scale  = thumbScale();
 
-  // Wrap based on available width so layout adapts to any viewport width
-  const w = screenW();
-  const piecesPerRow = Math.max(1, Math.floor((w - PAD) / slotW));
-  const rowH = (TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - PAD * (TRAY_ROWS + 1)) / TRAY_ROWS;
+  const tabPad   = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
+  const expandedW = _piecePixelW + 2 * tabPad;
+  const expandedH = _piecePixelH + 2 * tabPad;
+  const scaledW   = expandedW * scale;
+  const scaledH   = expandedH * scale;
 
   inTray.forEach((id, i) => {
-    const sprite = _spriteMap!.get(id);
+    const sprite    = _spriteMap!.get(id);
     const container = _containerMap!.get(id);
     if (!sprite || !container) return;
 
-    const col = i % piecesPerRow;
-    const row = Math.floor(i / piecesPerRow);
-    const x = PAD + col * slotW + scaledW / 2;
-    const y = PAD + row * (scaledH + PAD) + scaledH / 2; // local to _piecesContainer
+    const col   = Math.floor(i / rows);
+    const row   = i % rows;
+    const cellX = PADDING + col * (THUMBNAIL_SIZE + PADDING);
+    const cellY = PADDING + row * (THUMBNAIL_SIZE + PADDING);
 
-    sprite.x = x;
-    sprite.y = y;
+    // Uniform scale — maintain aspect ratio
+    sprite.scale.set(scale);
+
+    // Center within THUMBNAIL_SIZE cell
+    sprite.x = cellX + (THUMBNAIL_SIZE - scaledW) / 2 + scaledW / 2;
+    sprite.y = cellY + (THUMBNAIL_SIZE - scaledH) / 2 + scaledH / 2;
+
     container.x = 0;
     container.y = 0;
     container.visible = true;
   });
 
-  // Refresh clip mask width
+  // Total grid dimensions
+  const totalCols  = inTray.length > 0 ? Math.ceil(inTray.length / rows) : 0;
+  _totalGridWidth  = totalCols > 0 ? PADDING + totalCols * (THUMBNAIL_SIZE + PADDING) : 0;
+
+  // Clamp scroll and apply
+  _scrollX = clampScroll(_scrollX);
+  _gridContainer.x = -_scrollX;
+
+  // Refresh clip mask — covers the visible tray area in _piecesContainer local space
+  const w = screenW();
   if (_piecesMask) {
     _piecesMask.clear();
     _piecesMask.rect(0, 0, w, TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED).fill({ color: 0xffffff });
   }
+
+  // Empty state label
+  updateEmptyState(inTray.length === 0);
 }
 
 // ─── Tray open / close ────────────────────────────────────────────────────────
@@ -190,7 +280,7 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
   }
 
   const N = usePuzzleStore.getState().pieces.length;
-  const maxDim = Math.max(_piecePixelW, _piecePixelH);
+  const maxDim  = Math.max(_piecePixelW, _piecePixelH);
   const stepSize = maxDim * Math.SQRT2 * 1.3;
   const b = stepSize / (2 * Math.PI);
 
@@ -200,13 +290,13 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   let worldX = spiralOriginX;
   let worldY = spiralOriginY;
-  let found = false;
+  let found  = false;
 
   for (let attempt = 0; attempt < N * 4 + 20; attempt++) {
     const theta = spiralIndex * 1.5;
-    const r = b * theta;
-    const cx = spiralOriginX + r * Math.cos(theta);
-    const cy = spiralOriginY + r * Math.sin(theta);
+    const r     = b * theta;
+    const cx    = spiralOriginX + r * Math.cos(theta);
+    const cy    = spiralOriginY + r * Math.sin(theta);
 
     let occupied = false;
     for (const group of Object.values(groupsById)) {
@@ -228,7 +318,7 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
     if (!occupied) {
       worldX = cx;
       worldY = cy;
-      found = true;
+      found  = true;
       break;
     }
   }
@@ -241,10 +331,13 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   const groupId = `group-${pieceId}`;
 
-  (_piecesContainer ?? _trayContainer!).removeChild(container);
+  (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
   _viewport.addChild(container);
   container.x = 0;
   container.y = 0;
+
+  // Restore original filters now that the piece is on the canvas
+  sprite.filters = _originalFilters.get(pieceId) ?? [];
 
   sprite.position.set(worldX, worldY);
   sprite.scale.set(_canvasScale);
@@ -253,29 +346,32 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
   usePuzzleStore.getState().extractPieceToCanvas(pieceId, groupId, { x: worldX, y: worldY });
   insertGroupAABB(groupId, worldX - hw, worldY - hh, piece.textureRegion.w, piece.textureRegion.h);
 
-  // Remove from display order
+  // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  layoutTrayPieces();
 }
 
 // ─── Pointer hit test ─────────────────────────────────────────────────────────
 
+/**
+ * Convert screen coords to grid-container local coords and find the piece at
+ * that position. Hit bounds are THUMBNAIL_SIZE × THUMBNAIL_SIZE per cell.
+ */
 function hitTestTrayPiece(screenX: number, screenY: number): string | null {
   if (!_spriteMap || !_trayContainer || !_piecesContainer) return null;
   const { piecesById } = usePuzzleStore.getState();
   const inTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
 
-  const tabPad = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
-  const hw = ((_piecePixelW + 2 * tabPad) / 2) * _trayScale;
-  const hh = ((_piecePixelH + 2 * tabPad) / 2) * _trayScale;
-
-  // Convert screen coords to _piecesContainer local space
-  const pcLocalX = screenX - _trayContainer.x; // tray.x is always 0
-  const pcLocalY = screenY - _trayContainer.y - _piecesContainer.y;
+  // Screen → gridContainer local: tray.x = 0, piecesContainer.x = 0, gridContainer.x = -scrollX
+  const gridLocalX = screenX + _scrollX;
+  const gridLocalY = screenY - _trayContainer.y - (_piecesContainer?.y ?? TRAY_HEIGHT_CLOSED);
+  const half       = THUMBNAIL_SIZE / 2;
 
   for (let i = inTray.length - 1; i >= 0; i--) {
     const sprite = _spriteMap.get(inTray[i]);
     if (!sprite) continue;
-    if (Math.abs(pcLocalX - sprite.x) <= hw && Math.abs(pcLocalY - sprite.y) <= hh) {
+    if (Math.abs(gridLocalX - sprite.x) <= half &&
+        Math.abs(gridLocalY - sprite.y) <= half) {
       return inTray[i];
     }
   }
@@ -305,7 +401,7 @@ function extractToCanvas(
   const piece = usePuzzleStore.getState().piecesById[pieceId];
   if (!piece) return;
 
-  const sprite = _spriteMap.get(pieceId);
+  const sprite    = _spriteMap.get(pieceId);
   const container = _containerMap.get(pieceId);
   if (!sprite || !container) return;
 
@@ -313,11 +409,14 @@ function extractToCanvas(
   sprite.getGlobalPosition(_tmpPoint);
   const spriteWorld = _viewport.toLocal(_tmpPoint);
 
-  // Reparent container from pieces container into viewport (sprite is never destroyed)
-  (_piecesContainer ?? _trayContainer!).removeChild(container);
+  // Reparent from grid container into viewport
+  (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
   _viewport.addChild(container);
   container.x = 0;
   container.y = 0;
+
+  // Restore original filters now that the piece is on the canvas
+  sprite.filters = _originalFilters.get(pieceId) ?? [];
 
   // Restore canvas scale and world position
   sprite.position.set(spriteWorld.x, spriteWorld.y);
@@ -331,18 +430,25 @@ function extractToCanvas(
   const hh = piece.textureRegion.h / 2;
   insertGroupAABB(groupId, spriteWorld.x - hw, spriteWorld.y - hh, piece.textureRegion.w, piece.textureRegion.h);
 
-  // Hand off to drag.ts using the POINTER world position (not sprite centre).
-  // drag.ts computes dragOffset = spritePos - pointerPos, preserving the finger's
-  // position on the piece rather than snapping the piece centre to the cursor.
+  // Hand off to drag.ts using POINTER world position (not sprite centre)
   startDragForPiece(pieceId, pointerId, pointerWorldX, pointerWorldY);
 
-  // Remove from tray display order
+  // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  layoutTrayPieces();
 }
 
 // ─── App-stage pointer handlers ───────────────────────────────────────────────
 
 function onStagePointerMove(e: FederatedPointerEvent): void {
+  // Scroll drag
+  if (_scrollDragActive && e.pointerId === _scrollDragPointerId) {
+    const dx = _scrollDragStartX - e.global.x;
+    _scrollX = clampScroll(_scrollDragStartScrollX + dx);
+    if (_gridContainer) _gridContainer.x = -_scrollX;
+    return;
+  }
+
   if (trayPointerDownId === null || e.pointerId !== trayPointerDownId) return;
   if (isDraggingCanvas()) return;
   if (trayPointerDidCross) return;
@@ -351,33 +457,63 @@ function onStagePointerMove(e: FederatedPointerEvent): void {
   const trayTop = _app.screen.height - currentTrayHeight;
   if (e.global.y < trayTop && trayPointerDownPieceId !== null) {
     trayPointerDidCross = true;
-    const id = trayPointerDownPieceId;
+    const id  = trayPointerDownPieceId;
     const pid = e.pointerId;
-    trayPointerDownId = null;
+    trayPointerDownId      = null;
     trayPointerDownPieceId = null;
 
-    // Convert pointer screen position → viewport world position for drag offset
     const pointerWorld = _viewport.toLocal(e.global);
     extractToCanvas(id, pid, pointerWorld.x, pointerWorld.y);
   }
 }
 
 function onStagePointerUp(e: FederatedPointerEvent): void {
+  // Scroll drag end
+  if (_scrollDragActive && e.pointerId === _scrollDragPointerId) {
+    _scrollDragActive    = false;
+    _scrollDragPointerId = null;
+    return;
+  }
+
   if (trayPointerDownId === null || e.pointerId !== trayPointerDownId) return;
   if (isDraggingCanvas()) return;
 
   const id = trayPointerDownPieceId;
-  trayPointerDownId = null;
+  trayPointerDownId      = null;
   trayPointerDownPieceId = null;
-  trayPointerDidCross = false;
+  trayPointerDidCross    = false;
 
   if (id === null) return;
 
-  const sprite = _spriteMap?.get(id);
+  const sprite    = _spriteMap?.get(id);
   const container = _containerMap?.get(id);
   if (!sprite || !container) return;
 
   spiralPlace(id, sprite, container);
+}
+
+// ─── Zustand subscription — real-time state sync ──────────────────────────────
+
+/**
+ * Watch for pieces transitioning to 'on-canvas' or 'placed'.
+ * Removes them from the display order and reflows the grid.
+ * This handles cases where state changes originate outside tray.ts
+ * (e.g. board snap triggers 'placed' transition).
+ */
+function subscribeToStore(): void {
+  usePuzzleStore.subscribe((state, prevState) => {
+    let changed = false;
+    for (const piece of state.pieces) {
+      const prev = prevState.piecesById[piece.id];
+      if (!prev || prev.state === piece.state) continue;
+      if (piece.state === 'on-canvas' || piece.state === 'placed') {
+        const before = _trayDisplayOrder.length;
+        _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== piece.id);
+        if (_trayDisplayOrder.length !== before) changed = true;
+      }
+    }
+    if (changed) layoutTrayPieces();
+  });
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -398,56 +534,50 @@ export function initTray(
   _canvasScale  = canvasScale;
   _piecePixelW  = piecePixelW;
   _piecePixelH  = piecePixelH;
-
-  // Tray scale: fit pieces into two rows within the open tray area.
-  // Sprites have expanded frames that include tab-protrusion padding (40% of
-  // piece size each side), so scale against the full expanded dimension — not
-  // just the grid-cell size — to prevent overflow out of the tray.
-  const tabPad     = Math.ceil(Math.max(piecePixelW, piecePixelH) * 0.4);
-  const expandedW  = piecePixelW + 2 * tabPad;
-  const expandedH  = piecePixelH + 2 * tabPad;
-  const availH     = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - PAD * (TRAY_ROWS + 1);
-  const rowH       = availH / TRAY_ROWS;
-  _trayScale = Math.min(rowH / expandedH, rowH / expandedW, canvasScale);
+  _scrollX      = 0;
 
   const { pieces } = usePuzzleStore.getState();
 
   // Randomise display order for the tray
   _trayDisplayOrder = shuffle(pieces.filter((p) => p.state === 'in-tray').map((p) => p.id));
 
-  // Apply tray scale + eventMode to all in-tray sprites
+  // Set up in-tray sprites: clear filters, set eventMode.
+  // Scale is set in layoutTrayPieces() — no need to set here.
   for (const piece of pieces) {
     if (piece.state !== 'in-tray') continue;
     const sprite = spriteMap.get(piece.id);
-    if (sprite) {
-      sprite.scale.set(_trayScale);
-      sprite.eventMode = 'static';
-    }
+    if (!sprite) continue;
+    // Save existing filters (e.g. BevelFilter applied by scene.ts) and clear them
+    // for the tray thumbnail view — restored on extraction to canvas.
+    _originalFilters.set(piece.id, (sprite.filters as Filter[] | null) ?? []);
+    sprite.filters   = [];
+    sprite.eventMode = 'static';
   }
 
   // ── Tray container ──────────────────────────────────────────────────────────
   const tray = new Container();
-  tray.zIndex = 500;
+  tray.zIndex    = 500;
   tray.eventMode = 'static';
   tray.y = app.screen.height - TRAY_HEIGHT_OPEN;
   app.stage.addChild(tray);
   _trayContainer = tray;
 
   // ── Background (drawn below pieces) ────────────────────────────────────────
-  _bg = new Graphics();
+  _bg        = new Graphics();
   _bg.zIndex = 0;
+  _bg.eventMode = 'static'; // receive wheel events
   tray.addChild(_bg);
 
   // ── Chevron handle (decorative only — strip handles interaction) ────────────
-  _handle = new Graphics();
+  _handle        = new Graphics();
   _handle.zIndex = 5;
   tray.addChild(_handle);
 
   // ── Clipped pieces container — sits below the strip ─────────────────────────
-  // Pieces live inside _piecesContainer so a Graphics mask clips overflow cleanly.
-  _piecesContainer = new Container();
-  _piecesContainer.y = TRAY_HEIGHT_CLOSED; // offset below strip
+  _piecesContainer        = new Container();
+  _piecesContainer.y      = TRAY_HEIGHT_CLOSED;
   _piecesContainer.zIndex = 10;
+  _piecesContainer.eventMode = 'static';
   tray.addChild(_piecesContainer);
 
   _piecesMask = new Graphics();
@@ -455,41 +585,61 @@ export function initTray(
   _piecesContainer.addChild(_piecesMask);
   _piecesContainer.mask = _piecesMask;
 
-  // Move in-tray piece containers into _piecesContainer (in display order)
+  // ── Scrollable grid container — child of _piecesContainer ──────────────────
+  _gridContainer = new Container();
+  _piecesContainer.addChild(_gridContainer);
+
+  // Move in-tray piece containers into _gridContainer (in display order)
   for (const id of _trayDisplayOrder) {
     const container = containerMap.get(id);
-    if (container) _piecesContainer.addChild(container);
+    if (container) _gridContainer.addChild(container);
   }
 
   // ── Strip hit area — toggles open/close ─────────────────────────────────────
-  _stripHitArea = new Graphics();
+  _stripHitArea           = new Graphics();
   _stripHitArea.rect(0, 0, app.screen.width, TRAY_HEIGHT_CLOSED).fill({ color: 0x000000, alpha: 0 });
   _stripHitArea.eventMode = 'static';
-  _stripHitArea.zIndex = 20;
+  _stripHitArea.zIndex    = 20;
   tray.addChild(_stripHitArea);
 
   _stripHitArea.on('pointerdown', (e: FederatedPointerEvent) => {
     e.stopPropagation();
-    // Strip click toggles open/closed in both directions
     setTrayOpen(!usePuzzleStore.getState().trayOpen);
   });
 
-  // ── Piece pointerdown in tray ───────────────────────────────────────────────
+  // ── Wheel scroll — horizontal scroll, no viewport propagation ───────────────
+  tray.on('wheel', (e: FederatedWheelEvent) => {
+    if (!usePuzzleStore.getState().trayOpen) return;
+    e.stopPropagation();
+    // Use horizontal delta if present, otherwise vertical
+    const delta = Math.abs(e.deltaX) > 0 ? e.deltaX : e.deltaY;
+    _scrollX = clampScroll(_scrollX + delta);
+    if (_gridContainer) _gridContainer.x = -_scrollX;
+  });
+
+  // ── Piece pointerdown + scroll drag ────────────────────────────────────────
   tray.on('pointerdown', (e: FederatedPointerEvent) => {
     if (isDraggingCanvas()) return;
-    if (trayPointerDownId !== null) return;
     if (!usePuzzleStore.getState().trayOpen) return;
 
     const localY = e.global.y - tray.y;
     if (localY < TRAY_HEIGHT_CLOSED) return; // strip toggles — handled above
 
     const pieceId = hitTestTrayPiece(e.global.x, e.global.y);
-    if (!pieceId) return;
-
-    trayPointerDownId = e.pointerId;
-    trayPointerDownPieceId = pieceId;
-    trayPointerDidCross = false;
-    e.stopPropagation();
+    if (pieceId && trayPointerDownId === null) {
+      // Piece drag — track this pointer
+      trayPointerDownId      = e.pointerId;
+      trayPointerDownPieceId = pieceId;
+      trayPointerDidCross    = false;
+      e.stopPropagation();
+    } else if (!pieceId && !_scrollDragActive) {
+      // Background drag — scroll the tray
+      _scrollDragActive        = true;
+      _scrollDragPointerId     = e.pointerId;
+      _scrollDragStartX        = e.global.x;
+      _scrollDragStartScrollX  = _scrollX;
+      e.stopPropagation();
+    }
   });
 
   // ── App-stage move / up ─────────────────────────────────────────────────────
@@ -514,6 +664,9 @@ export function initTray(
   // Reset spiral origin when viewport pans
   viewport.on('moved', resetSpiralOnPan);
 
+  // Subscribe for real-time piece state sync
+  subscribeToStore();
+
   redrawBackground();
   layoutTrayPieces();
 
@@ -524,7 +677,7 @@ export function initTray(
 }
 
 /** Call from both window resize and renderer resize events in scene.ts. */
-export function onTrayResize(app: Application): void {
+export function onTrayResize(_app: Application): void {
   if (!_trayContainer) return;
   applyTrayLayout();
   layoutTrayPieces();

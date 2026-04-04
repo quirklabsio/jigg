@@ -59,7 +59,7 @@
 - [x] **Story 30** — Spike: tray rendering model; prototype all three approaches (separate PixiJS stage / DOM thumbnails / canvas viewport region), pick one, document the decision. Explicitly assess how each model handles a future return path to tray — PixiJS-managed tray wins on animation smoothness, DOM-to-canvas handoff is rough. Unblocks all subsequent tray stories. **Decision: Approach C (reserved canvas region). See `docs/spike-tray-rendering.md`.**
 - [ ] **Story 31** — Spec: tray impact on `jigg-spec`; piece state (`in-tray` / `on-canvas` / `placed`), filter metadata (edge type, dominant color vector), tray-first load behaviour, rotation session property (`session.rotationEnabled`, `piece.initialRotation`), piece extraction UX (drag + spiral click + keyboard Enter all specced above), deferred return-to-tray logged as conscious omission
 - [x] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button). Bug-fix round: tray width on resize, open/close hit area, 2-row wrap, piece randomisation, drag extraction jump, board shadow retina artifact, tray scale vs expanded sprite frames.
-- [ ] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
+- [x] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
 - [ ] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
 - [ ] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region
 - [ ] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
@@ -175,6 +175,23 @@ POST     Story 19         (Z-order, informed by tray layering)
 ---
 
 ## Session Notes
+
+### Story 33
+
+- **`src/canvas/tray.ts`** (only file touched):
+- Replaced `TRAY_ROWS = 2` / `PAD = 10` with `THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN * 0.7` (~154px) and `PADDING = 8`
+- Added `_gridContainer` as scrollable child of `_piecesContainer` (`x = -_scrollX`). Mask stays on `_piecesContainer` so clip rect is stable; scrolling moves `_gridContainer` only
+- Grid is column-first (top-to-bottom within each column, expanding right). With default constants only 1 row fits → natural horizontal scroll band
+- Sprite scale computed per-layout as `Math.min(THUMBNAIL_SIZE/expandedW, THUMBNAIL_SIZE/expandedH)` (uniform, aspect-preserving). Sprite centered within THUMBNAIL_SIZE cell
+- `_totalGridWidth` tracked; `_scrollX` clamped on every reflow via `clampScroll()`
+- Wheel listener on `tray` container: `e.stopPropagation()` + horizontal scroll (uses `deltaX` if nonzero, else `deltaY`)
+- Scroll drag: pointer down on background (no piece hit) → `_scrollDragActive` / `_scrollDragPointerId`. Handled in `onStagePointerMove` / `onStagePointerUp` alongside existing piece drag
+- `usePuzzleStore.subscribe()` watches for `on-canvas` / `placed` transitions → prunes `_trayDisplayOrder`, calls `layoutTrayPieces()` same frame
+- `_originalFilters` map: clears BevelFilter from sprites when entering tray, restores on `extractToCanvas()` and `spiralPlace()`
+- `updateEmptyState()`: lazily creates a `Text` "All pieces placed" centered in pieces area; shown when `inTray.length === 0`
+- `hitTestTrayPiece()` updated: uses `THUMBNAIL_SIZE / 2` hit bounds; accounts for `_scrollX` in coord conversion
+- `onTrayResize()` calls `layoutTrayPieces()` which recalculates cols, clamps scroll, redraws mask
+- `npm run typecheck` passes clean
 
 ### Story 32
 

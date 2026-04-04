@@ -52,16 +52,6 @@ export function checkAndApplySnap(
   const cos = Math.cos(draggedGroup.rotation);
   const sin = Math.sin(draggedGroup.rotation);
 
-  console.group('Snap check');
-  console.log(
-    'dragged group:', draggedGroupId,
-    '| rotation:', draggedGroup.rotation.toFixed(3),
-    '| pieces:', draggedGroup.pieceIds.map((id) => {
-      const p = state.piecesById[id];
-      return p ? `${id}(${p.gridCoord.col},${p.gridCoord.row})` : id;
-    }),
-  );
-
   let result: { survivorId: string; absorbedId: string } | null = null;
 
   outer:
@@ -69,8 +59,6 @@ export function checkAndApplySnap(
     const piece = state.piecesById[pid];
     const pSprite = spriteMap.get(pid);
     if (!piece || !pSprite) continue;
-
-    console.log('checking piece:', pid, 'gridCoord:', piece.gridCoord);
 
     for (const [dc, dr, ldx, ldy] of NEIGHBOURS) {
       const nKey = `${piece.gridCoord.col + dc},${piece.gridCoord.row + dr}`;
@@ -98,20 +86,6 @@ export function checkAndApplySnap(
       const ex = pSprite.x + worldDx;
       const ey = pSprite.y + worldDy;
       const dSq = (nSprite.x - ex) ** 2 + (nSprite.y - ey) ** 2;
-
-      const nGroupPieces = nGroup.pieceIds.map((id) => {
-        const p = state.piecesById[id];
-        return p ? `${id}(${p.gridCoord.col},${p.gridCoord.row})` : id;
-      });
-      console.log(
-        '  neighbour:', nId,
-        `| group: ${nPiece.groupId}[${nGroupPieces.join(', ')}]`,
-        '| neighbour rotation:', nGroup.rotation.toFixed(3),
-        '| rotation match:', rotMatch,
-        '| distSq:', Math.round(dSq),
-        '| threshold:', SNAP_THRESHOLD_SQ,
-        '| snap:', rotMatch && dSq <= SNAP_THRESHOLD_SQ,
-      );
 
       if (!rotMatch || dSq > SNAP_THRESHOLD_SQ) continue;
 
@@ -164,7 +138,6 @@ export function checkAndApplySnap(
     }
   }
 
-  console.groupEnd();
   return result;
 }
 
@@ -193,8 +166,6 @@ export function checkAndApplyBoardSnap(
   const rot = normRot(group.rotation);
   if (rot > 0.01 && rot < TWO_PI - 0.01) return null;
 
-  console.group('Board snap check');
-
   let snapPiece: Piece | null = null;
 
   for (const pid of group.pieceIds) {
@@ -202,21 +173,8 @@ export function checkAndApplyBoardSnap(
     if (!piece) continue;
     const wx = group.position.x + piece.actual.x;
     const wy = group.position.y + piece.actual.y;
-    const dSq =
-      (wx - piece.canonical.x) ** 2 + (wy - piece.canonical.y) ** 2;
-    const snaps = dSq < BOARD_SNAP_THRESHOLD_SQ;
-    console.log(
-      'piece:', pid,
-      'worldPos:', { x: Math.round(wx), y: Math.round(wy) },
-      'correctPos:', {
-        x: Math.round(piece.canonical.x),
-        y: Math.round(piece.canonical.y),
-      },
-      'distSq:', Math.round(dSq),
-      'threshold:', BOARD_SNAP_THRESHOLD_SQ,
-      'snap:', snaps,
-    );
-    if (snaps && !snapPiece) snapPiece = piece;
+    const dSq = (wx - piece.canonical.x) ** 2 + (wy - piece.canonical.y) ** 2;
+    if (dSq < BOARD_SNAP_THRESHOLD_SQ && !snapPiece) snapPiece = piece;
   }
 
   if (snapPiece) {
@@ -242,13 +200,8 @@ export function checkAndApplyBoardSnap(
     usePuzzleStore.getState().markGroupPlaced(groupId);
 
     const totalPlaced = usePuzzleStore.getState().pieces.filter((p) => p.placed).length;
-    console.log(
-      'BOARD SNAP:', groupId,
-      'pieces placed:', group.pieceIds.length,
-      'total placed:', totalPlaced,
-    );
+    console.log('BOARD SNAP:', groupId, '| pieces placed:', group.pieceIds.length, '| total:', totalPlaced);
   }
 
-  console.groupEnd();
   return snapPiece ? { groupId, pieceIds: [...group.pieceIds] } : null;
 }
