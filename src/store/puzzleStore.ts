@@ -1,6 +1,8 @@
 import { createStore } from 'zustand/vanilla';
 import type { Piece, PieceGroup } from '../puzzle/types';
 
+type PieceState = Piece['state'];
+
 function toRecord<T extends { id: string }>(arr: T[]): Record<string, T> {
   const rec: Record<string, T> = {};
   for (const item of arr) rec[item.id] = item;
@@ -16,6 +18,7 @@ interface PuzzleState {
   groupsById: Record<string, PieceGroup>;
   gridIndex: Map<string, string>;
   puzzleComplete: boolean;
+  trayOpen: boolean;
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
@@ -24,6 +27,13 @@ interface PuzzleState {
   rotateGroup: (groupId: string) => void;
   mergeGroups: (survivorId: string, absorbedId: string) => void;
   markGroupPlaced: (groupId: string) => void;
+  setTrayOpen: (open: boolean) => void;
+  /** Move a piece from tray to canvas: sets state, assigns groupId, adds PieceGroup. */
+  extractPieceToCanvas: (
+    pieceId: string,
+    groupId: string,
+    groupPosition: { x: number; y: number },
+  ) => void;
 }
 
 export const usePuzzleStore = createStore<PuzzleState>((set) => ({
@@ -33,6 +43,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   groupsById: {},
   gridIndex: new Map(),
   puzzleComplete: false,
+  trayOpen: true,
   setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces) }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
@@ -72,7 +83,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       if (!group) return state;
       const pieceIdSet = new Set(group.pieceIds);
       const pieces = state.pieces.map((p) =>
-        pieceIdSet.has(p.id) ? { ...p, placed: true } : p,
+        pieceIdSet.has(p.id) ? { ...p, placed: true, state: 'placed' as PieceState } : p,
       );
       const piecesById = toRecord(pieces);
       let puzzleComplete = false;
@@ -83,6 +94,28 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
         }
       }
       return { pieces, piecesById, puzzleComplete: state.puzzleComplete || puzzleComplete };
+    }),
+  setTrayOpen: (open) => set({ trayOpen: open }),
+  extractPieceToCanvas: (pieceId, groupId, groupPosition) =>
+    set((state) => {
+      const pieces = state.pieces.map((p) =>
+        p.id === pieceId
+          ? { ...p, groupId, state: 'on-canvas' as PieceState }
+          : p,
+      );
+      const newGroup: PieceGroup = {
+        id: groupId,
+        pieceIds: [pieceId],
+        position: groupPosition,
+        rotation: 0,
+      };
+      const groups = [...state.groups, newGroup];
+      return {
+        pieces,
+        piecesById: toRecord(pieces),
+        groups,
+        groupsById: toRecord(groups),
+      };
     }),
   mergeGroups: (survivorId, absorbedId) =>
     set((state) => {

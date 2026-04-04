@@ -132,6 +132,38 @@
 - **Fix**: Use the WebGL clear color (`app.init({ background: '#f5f5f3' })`) instead of a `Graphics` rect. The clear color fills the entire canvas uniformly with no geometry, so no triangle seams.
 - **Rule**: For solid-color full-screen backgrounds, always use the WebGL clear color, not a Graphics rect.
 
+## Tray system (Story 32)
+
+### PixiJS Graphics stroke-only path has no hit area
+- **Symptom**: Clicking the chevron decoration on the tray strip does nothing; `containsPoint()` always returns false.
+- **Root cause**: A `Graphics` object with only `moveTo` / `lineTo` / `stroke()` (no `fill()`) produces no filled geometry. PixiJS hit testing uses the fill bounding area — stroke-only paths have no hittable surface.
+- **Fix**: Move the chevron to a purely decorative role. Create a separate transparent `Graphics` fill rect (`_stripHitArea`) that covers the strip and handles open/close toggling. Never rely on stroke-only Graphics for pointer events.
+- **Rule**: If a Graphics shape must receive pointer events, it needs a fill (can be `alpha: 0`). Stroke-only Graphics are invisible to the hit system.
+
+### `app.screen.width` lags one frame after window resize
+- **Symptom**: Tray background doesn't extend full width in certain fullscreen / resize transitions. Width is correct on the second resize event but not the first.
+- **Root cause**: `window.addEventListener('resize')` fires before the PixiJS renderer has processed the new dimensions. `app.screen.width` still holds the previous value at that moment.
+- **Fix**: Use `screenW() = Math.max(app.screen.width, window.innerWidth)` — whichever is larger is always the correct target width. Also add a second listener `app.renderer.on('resize', ...)` which fires after the renderer updates `screen.width`. Belt-and-suspenders: whichever fires with accurate dimensions wins.
+- **Rule**: Never use `app.screen.width` alone in resize handlers. Use `Math.max(app.screen.width, window.innerWidth)`.
+
+### Tray scale must account for expanded sprite frames (tab padding), not raw piece pixel size
+- **Symptom**: Pieces overflow the tray height; pieces are much larger than the tray rows.
+- **Root cause**: `_trayScale = rowH / piecePixelH` used the raw grid cell height (e.g. 128px for a 4×4 cut). But sprites have expanded texture frames that include tab padding (`tabPad = Math.ceil(Math.max(pw, ph) * 0.4)` on each side), so the real sprite height is `ph + 2 * tabPad` ≈ 232px. Scale was too large.
+- **Fix**: Compute `tabPad = Math.ceil(Math.max(pw, ph) * 0.4)`, `expandedW = pw + 2*tabPad`, `expandedH = ph + 2*tabPad`, then `_trayScale = Math.min(rowH / expandedH, rowH / expandedW, canvasScale)`. Apply the same `expandedW/H` in `layoutTrayPieces()` slot sizing and `hitTestTrayPiece()` half-extents.
+- **Rule**: Tray sizing must use expanded frame dimensions (matching `buildGridSprites`), not raw `piecePixelW/H`.
+
+### Drag handoff from tray: pass POINTER world coords to `startDragForPiece`, not sprite center
+- **Symptom**: Extracted piece jumps so its center is at the pointer, rather than maintaining the natural grab offset.
+- **Root cause**: `extractToCanvas` was passing `spriteWorld.x/y` (the sprite's world position) as the `worldX/Y` argument to `startDragForPiece`. Inside drag.ts, `dragOffset = spritePos - worldX` → `0` → piece center snaps to pointer on next move.
+- **Fix**: In `onStagePointerMove`, compute `pointerWorld = _viewport.toLocal(e.global)` and pass `pointerWorld.x/Y` to `extractToCanvas` → `startDragForPiece`. The sprite's own world position is computed separately inside `startDragForPiece`.
+- **Rule**: `startDragForPiece(pieceId, pointerId, worldX, worldY)` — the last two args are POINTER world position, never sprite center.
+
+### Container hierarchy must be tracked after adding `_piecesContainer` layer
+- **Symptom**: `_trayContainer.removeChild(container)` throws "child not found" after `_piecesContainer` was introduced.
+- **Root cause**: Piece containers were added to `_trayContainer` initially but moved to `_piecesContainer` inside `initTray`. Extraction code still called `_trayContainer.removeChild`.
+- **Fix**: `(_piecesContainer ?? _trayContainer!).removeChild(container)` everywhere that removes a piece from the tray. Or always use `container.parent.removeChild(container)` to be parent-agnostic.
+- **Rule**: Use `container.parent?.removeChild(container)` when the parent container may have changed since initial setup.
+
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks
 

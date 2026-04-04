@@ -4,7 +4,6 @@ import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
-import { scatterPieces } from '../puzzle/scatter';
 import {
   createHitLayer,
   initDragListeners,
@@ -18,6 +17,7 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
+import { initTray, onTrayResize } from './tray';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const COLS = 4;
@@ -26,8 +26,6 @@ const WORLD_SIZE = 4000;
 
 // ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
 
-// resolution: devicePixelRatio ensures the filter renders at device resolution,
-// preventing pixelated piece edges on retina/HiDPI displays.
 const DPR = window.devicePixelRatio ?? 1;
 
 function makeShadow(): DropShadowFilter {
@@ -37,9 +35,9 @@ function makeShadow(): DropShadowFilter {
     alpha:      0.06,
     color:      0x000000,
     quality:    3,
-    resolution: 1, // DPR causes a thin vertical seam artifact on retina — shadows are blurry by nature so 1x is fine
+    resolution: 1,
   });
-  f.padding = 24; // use dragging padding (largest) to avoid clipping in any state
+  f.padding = 24;
   return f;
 }
 
@@ -63,24 +61,26 @@ function applyShadowPlaced(f: DropShadowFilter): void {
 
 // ─── Sprite builder ───────────────────────────────────────────────────────────
 
+/**
+ * Create piece sprites and containers. Containers are added to `trayParent`
+ * (the tray container) — initTray handles positioning them in the tray row.
+ */
 function buildGridSprites(
-  parent: Container,
+  trayParent: Container,
   texture: Texture,
   scale: number,
 ): { sprites: Sprite[]; containers: Container[] } {
-  // Expand each piece's texture frame so tab protrusions have pixel data.
-  // Tab height = pieceH * 0.25 ± 15%, so 0.4 * max(pw,ph) covers worst case.
   const tabPad = Math.ceil(Math.max(
     Math.floor(texture.width  / COLS),
     Math.floor(texture.height / ROWS),
   ) * 0.4);
-  const { pieces, groups } = gridCut(texture.width, texture.height, COLS, ROWS);
+  const { pieces } = gridCut(texture.width, texture.height, COLS, ROWS);
 
   const gridIndex = new Map<string, string>();
   pieces.forEach((p) => gridIndex.set(`${p.gridCoord.col},${p.gridCoord.row}`, p.id));
 
   usePuzzleStore.getState().setPieces(pieces);
-  usePuzzleStore.getState().setGroups(groups);
+  usePuzzleStore.getState().setGroups([]); // no groups until extraction
   usePuzzleStore.getState().setGridIndex(gridIndex);
 
   const sprites: Sprite[] = [];
@@ -105,36 +105,22 @@ function buildGridSprites(
     const pieceTexture = new Texture({ source: texture.source, frame });
     const sprite = new Sprite(pieceTexture);
     sprite.scale.set(scale);
-    // Anchor at piece centre within the expanded frame so sprite.x/y stays
-    // at the piece centre and the mask (drawn relative to piece centre) aligns.
     sprite.anchor.set(
       (leftPad + pw / 2) / expandedW,
       (topPad + ph / 2) / expandedH,
     );
-    // Wrap sprite in a Container so filters on the container see the correctly
-    // masked jigsaw-shaped sprite rather than the full rectangle. (See gotchas.md)
+    // eventMode set to 'static' by initTray (pieces start in tray, need pointer events)
+    sprite.eventMode = 'none';
+
     const container = new Container();
     container.addChild(sprite);
-    parent.addChild(container);
+    // Add to tray parent — initTray moves them into the tray container properly
+    trayParent.addChild(container);
     sprites.push(sprite);
     containers.push(container);
   }
 
   return { sprites, containers };
-}
-
-function applyScatterToSprites(sprites: Sprite[]): void {
-  const { pieces, groups } = usePuzzleStore.getState();
-  const groupById = new Map(groups.map((g) => [g.id, g]));
-  sprites.forEach((sprite, i) => {
-    const piece = pieces[i];
-    const group = groupById.get(piece.groupId!)!;
-    sprite.position.set(
-      group.position.x + piece.actual.x,
-      group.position.y + piece.actual.y,
-    );
-    sprite.rotation = piece.actual.rotation;
-  });
 }
 
 // ─── Scene entry point ────────────────────────────────────────────────────────
@@ -143,18 +129,18 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const texture = await Assets.load<Texture>(imageUrl);
 
   const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
-  const pieceScreenW = (texture.width / COLS) * scale;
-  const pieceScreenH = (texture.height / ROWS) * scale;
+  const piecePixelW = Math.floor(texture.width  / COLS);
+  const piecePixelH = Math.floor(texture.height / ROWS);
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
 
   // ── Viewport (infinite canvas) ─────────────────────────────────────────────
   const viewport = new Viewport({
-    screenWidth: window.innerWidth,
+    screenWidth:  window.innerWidth,
     screenHeight: window.innerHeight,
-    worldWidth: WORLD_SIZE,
-    worldHeight: WORLD_SIZE,
+    worldWidth:   WORLD_SIZE,
+    worldHeight:  WORLD_SIZE,
     events: app.renderer.events,
   });
   app.stage.addChild(viewport);
@@ -172,22 +158,17 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   viewport.sortableChildren = true;
 
-  // Resize viewport when window resizes (renderer resize handled by resizeTo: window)
-  window.addEventListener('resize', () => {
-    viewport.resize(window.innerWidth, window.innerHeight);
-  });
-
-  // Background: handled entirely by the WebGL clear colour in app.ts
-  // (background: '#f5f5f3'). A Graphics rect produced a thin triangle-seam
-  // artifact on retina/HiDPI displays — removing it eliminates the line.
-
-  // ── Piece sprites + containers ─────────────────────────────────────────────
-  const { sprites, containers } = buildGridSprites(viewport, texture, scale);
-
-  scatterPieces(app.screen.width, app.screen.height, pieceScreenW, pieceScreenH);
-  applyScatterToSprites(sprites);
+  // ── Piece sprites + containers (added to a temp container first) ────────────
+  // buildGridSprites needs a parent — we use a temporary throw-away container.
+  // initTray will move the containers into the real tray container.
+  const tempParent = new Container();
+  const { sprites, containers } = buildGridSprites(tempParent, texture, scale);
 
   // Convert canonical positions from image-pixel space → world-screen space.
+  // Pieces start in tray, but canonical positions are always world-space
+  // so that spiral placement and snap logic resolve correctly.
+  const pieceScreenW = piecePixelW * scale;
+  const pieceScreenH = piecePixelH * scale;
   const boardLeft = (app.screen.width  - texture.width  * scale) / 2;
   const boardTop  = (app.screen.height - texture.height * scale) / 2;
   {
@@ -204,7 +185,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   }
 
   const pieces = usePuzzleStore.getState().pieces;
-  console.log('pieces scattered:', pieces.length);
+  console.log('pieces loaded into tray:', pieces.length);
 
   const spriteMap = new Map<string, Sprite>();
   sprites.forEach((sprite, i) => spriteMap.set(pieces[i].id, sprite));
@@ -212,25 +193,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const containerMap = new Map<string, Container>();
   containers.forEach((container, i) => containerMap.set(pieces[i].id, container));
 
-  sprites.forEach((sprite) => {
-    sprite.eventMode = 'none';
-  });
-  containers.forEach((container, i) => {
-    container.zIndex = i;
-  });
-
   // ── Drag system ────────────────────────────────────────────────────────────
+  // Spatial hash starts empty — pieces in tray are not hashed.
   const hitLayer = createHitLayer(viewport, WORLD_SIZE, WORLD_SIZE);
   initDragListeners(hitLayer, app, spriteMap, viewport);
   setRotateCallback((groupId) => rotateGroup(groupId, spriteMap));
   setSnapCallback((groupId) => checkAndApplySnap(groupId, spriteMap));
 
-  // Persistent shadow filter per container — mutated in place (never replaced).
-  // Replacing `c.filters = [new DropShadowFilter()]` each state change caused
-  // some pieces to disappear mid-drag (PixiJS filter teardown/setup rendering gap).
   const shadowMap = new Map<string, DropShadowFilter>();
 
-  // Shadow state: dragging
   setDragStartCallback((groupId) => {
     const group = usePuzzleStore.getState().groupsById[groupId];
     if (!group) return;
@@ -240,7 +211,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 
-  // Shadow state: resting (reverted on drop; board-snap overrides to placed)
   setDragEndCallback((groupId) => {
     const group = usePuzzleStore.getState().groupsById[groupId];
     if (!group) return;
@@ -253,7 +223,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   setBoardSnapCallback((groupId) => {
     const result = checkAndApplyBoardSnap(groupId, spriteMap);
     if (result) {
-      // Scale pulse + tint flash
       const startTime = performance.now();
       const DURATION_MS = 150;
       const tickerFn = () => {
@@ -278,7 +247,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       };
       app.ticker.add(tickerFn);
 
-      // Shadow state: placed (small, tight)
       for (const pid of result.pieceIds) {
         const f = shadowMap.get(pid);
         if (f) applyShadowPlaced(f);
@@ -291,13 +259,31 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     return result;
   });
 
-  // ── Image analysis + cut generation ───────────────────────────────────────
-  const { width, height } = texture;
-  const offscreen = new OffscreenCanvas(width, height);
-  const ctx = offscreen.getContext('2d')!;
-  ctx.drawImage(texture.source.resource as CanvasImageSource, 0, 0);
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const pixels = new Uint8Array(imageData.data.buffer);
+  // ── Tray ───────────────────────────────────────────────────────────────────
+  // initTray moves all in-tray containers into the tray container, applies
+  // tray scale and eventMode, sets up open/close animation and pointer events,
+  // and issues the initial viewport.resize to account for the open tray.
+  initTray(app, viewport, spriteMap, containerMap, scale, piecePixelW, piecePixelH);
+
+  // ── Board (visible on empty canvas from load) ──────────────────────────────
+  const board = createBoard(
+    texture.width,
+    texture.height,
+    COLS,
+    ROWS,
+    scale,
+    app.screen.width,
+    app.screen.height,
+  );
+  viewport.addChild(board);
+
+  // ── Resize handling ────────────────────────────────────────────────────────
+  // onTrayResize calls viewport.resize internally (tray-height-adjusted).
+  // Listen on both events: window resize fires first but app.screen may lag
+  // one frame; renderer 'resize' fires after the renderer has updated screen
+  // dimensions, giving correct values for background redraws.
+  window.addEventListener('resize', () => onTrayResize(app));
+  app.renderer.on('resize', () => onTrayResize(app));
 
   // ── FPS counter — press F to toggle ───────────────────────────────────────
   let fpsText: Text | null = null;
@@ -325,8 +311,13 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 
-  const piecePixelW = Math.floor(texture.width  / COLS);
-  const piecePixelH = Math.floor(texture.height / ROWS);
+  // ── Image analysis + cut generation ───────────────────────────────────────
+  const { width, height } = texture;
+  const offscreen = new OffscreenCanvas(width, height);
+  const ctx = offscreen.getContext('2d')!;
+  ctx.drawImage(texture.source.resource as CanvasImageSource, 0, 0);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const pixels = new Uint8Array(imageData.data.buffer);
 
   const worker = new AnalysisWorker();
 
@@ -375,7 +366,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         sprite.addChild(mask);
         sprite.mask = mask;
 
-        // BevelFilter on sprite: subtle edge lighting.
         sprite.filters = [new BevelFilter({
           rotation:    225,
           thickness:   2,
@@ -384,15 +374,6 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
           shadowColor: 0x000000,
           shadowAlpha: 0.2,
         })];
-
-        // DropShadowFilter disabled — too subtle to notice, and resolution:DPR
-        // causes a retina texture seam artifact. Revisit if we want stronger shadows.
-        // const container = containerMap.get(piece.id);
-        // if (container) {
-        //   const shadow = makeShadow();
-        //   shadowMap.set(piece.id, shadow);
-        //   container.filters = [shadow];
-        // }
       }
 
       console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);

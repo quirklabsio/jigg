@@ -56,9 +56,9 @@
 - **Piece extraction — click:** Archimedean spiral from viewport center. Spiral origin locked at first click in sequence, resets on pan. Step spacing computed from max piece diagonal (`imageWidth / N * √2 * 1.3`) — 1.3 buffer accounts for Bezier tab protrusion. If exact coordinates occupied, skip to next spiral step.
 - **Keyboard extraction (Enter on tray piece):** triggers same spiral logic as click
 
-- [ ] **Story 30** — Spike: tray rendering model; prototype all three approaches (separate PixiJS stage / DOM thumbnails / canvas viewport region), pick one, document the decision. Explicitly assess how each model handles a future return path to tray — PixiJS-managed tray wins on animation smoothness, DOM-to-canvas handoff is rough. Unblocks all subsequent tray stories.
+- [x] **Story 30** — Spike: tray rendering model; prototype all three approaches (separate PixiJS stage / DOM thumbnails / canvas viewport region), pick one, document the decision. Explicitly assess how each model handles a future return path to tray — PixiJS-managed tray wins on animation smoothness, DOM-to-canvas handoff is rough. Unblocks all subsequent tray stories. **Decision: Approach C (reserved canvas region). See `docs/spike-tray-rendering.md`.**
 - [ ] **Story 31** — Spec: tray impact on `jigg-spec`; piece state (`in-tray` / `on-canvas` / `placed`), filter metadata (edge type, dominant color vector), tray-first load behaviour, rotation session property (`session.rotationEnabled`, `piece.initialRotation`), piece extraction UX (drag + spiral click + keyboard Enter all specced above), deferred return-to-tray logged as conscious omission
-- [ ] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button)
+- [x] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button). Bug-fix round: tray width on resize, open/close hit area, 2-row wrap, piece randomisation, drag extraction jump, board shadow retina artifact, tray scale vs expanded sprite frames.
 - [ ] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
 - [ ] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
 - [ ] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region
@@ -175,6 +175,37 @@ POST     Story 19         (Z-order, informed by tray layering)
 ---
 
 ## Session Notes
+
+### Story 32
+
+- **`src/puzzle/types.ts`**: Added `state: 'in-tray' | 'on-canvas' | 'placed'` to `Piece`
+- **`src/store/puzzleStore.ts`**: Added `trayOpen: boolean`, `setTrayOpen`, `extractPieceToCanvas(pieceId, groupId, groupPos)` (sets state + groupId + creates PieceGroup atomically); `markGroupPlaced` now also sets `state: 'placed'`
+- **`src/puzzle/cutter.ts`**: `gridCut` no longer creates `PieceGroup`s; pieces start with `groupId: null`, `state: 'in-tray'`. Return type is `{ pieces }` only
+- **`src/puzzle/scatter.ts`**: Scatter-on-load logic removed (function is a no-op stub); all math preserved as commented-out block
+- **`src/puzzle/drag.ts`**: Added `isDraggingCanvas()`, `insertGroupAABB()`, `startDragForPiece()` — the three hooks tray.ts needs
+- **`src/canvas/tray.ts`** (new): Screen-space `Container` at `zIndex: 500`; lerp animation with `viewport.resize()` every frame; flat row layout; drag-extraction (pointer crosses tray boundary → reparent + coord convert + `startDragForPiece`); click-extraction (Archimedean spiral, occupied-skip, spiral origin locks on first click, resets on viewport pan); `isDraggingCanvas()` guard on all tray handlers; chevron close / strip-click open; reduced-motion snap
+- **`src/canvas/scene.ts`**: Removed `scatterPieces` / `applyScatterToSprites`; pieces go into tray via `initTray`; `setGroups([])` on load; board added to viewport for visible empty canvas; `onTrayResize` wired to `window.resize`
+- `npm run typecheck` passes clean
+
+**Bug-fix round (post-initial-implementation):**
+- **Tray width wrong on resize/fullscreen**: `app.screen.width` lags one frame. Fixed with `screenW() = Math.max(app.screen.width, window.innerWidth)` and dual resize listeners (`window` + `app.renderer.on('resize')`). `_stripHitArea` reference stored so `redrawBackground()` can resize it correctly.
+- **Open/close not working**: Chevron was drawn stroke-only (`Graphics` with no fill) → no hit area. Fixed: chevron is purely decorative; dedicated `_stripHitArea` transparent-fill rect handles both open and close toggle via unified `setTrayOpen(!trayOpen)` call.
+- **All 16 pieces not accessible**: Single flat row overflows viewport width. Fixed: 2-row wrap (`TRAY_ROWS = 2`), `piecesPerRow = Math.floor((screenW()-PAD)/slotW)`. Added `_piecesContainer` child container with Graphics mask for overflow clipping.
+- **Pieces not randomized**: Added Fisher-Yates shuffle into `_trayDisplayOrder` on `initTray`. Store order untouched.
+- **Drag extraction jump (piece snaps to cursor center)**: `startDragForPiece` was receiving sprite world coords as `worldX/Y` → `dragOffset = 0` → center jump. Fixed: pass `_viewport.toLocal(e.global)` (pointer world pos) from `onStagePointerMove` into `extractToCanvas` → `startDragForPiece`.
+- **Board shadow pixelated ("old video game console")**: `board.ts` had `resolution: window.devicePixelRatio` on `DropShadowFilter`. Same retina seam artifact as piece shadows. Fixed: `resolution: 1`.
+- **Tray scale ignored tab padding**: Scale computed against raw `piecePixelH` (128px) but sprite frames expand to `ph + 2*tabPad` ≈ 232px. Fixed: `_trayScale = Math.min(rowH/expandedH, rowH/expandedW, canvasScale)`. Same fix in slot sizing and hit-test half-extents.
+
+### Story 30
+- Spike complete. **Approach C selected: Reserved Canvas Region.**
+- Tray = screen-space `Container` on `app.stage`, outside `pixi-viewport`
+- `viewport.resize(width, height - TRAY_HEIGHT)` on open/close — documented `pixi-viewport` API
+- Zero texture duplication (one GL context, one Assets cache)
+- Extraction = sprite reparent via `viewport.toLocal()` — no sprite recreation, no missing frames
+- Return path retrofit: medium cost — mid-animation coordinate space switch at tray boundary; `TrayReturnAnimator` ~150–200 lines; smooth within one renderer
+- Approaches A (dual GL context, 2× VRAM, cross-renderer handoff) and B (DOM thumbnails, violates architecture principle, rough extraction) eliminated
+- Key constraints for Stories 31–37: scatter.ts gutted in Story 32, PieceGroup creation deferred to extraction, tray z-index between viewport and UI, tray pointer events suppressed during canvas drag
+- Full analysis: `docs/spike-tray-rendering.md`
 
 ### Story 29
 - Removed `edgeOverlay` Sprite and all overlay construction from `ANALYSIS_COMPLETE` handler in `scene.ts`

@@ -1,5 +1,5 @@
 import { Graphics } from 'pixi.js';
-import type { CutPath, CutPoint, Piece, PieceGroup } from './types';
+import type { CutPath, CutPoint, Piece } from './types';
 
 /**
  * Edge influence for cut routing: 0.0 = classic seeded variation only,
@@ -15,22 +15,23 @@ export function gridCut(
   imageHeight: number,
   cols: number,
   rows: number,
-): { pieces: Piece[]; groups: PieceGroup[] } {
+): { pieces: Piece[] } {
   const pieceW = Math.floor(imageWidth / cols);
   const pieceH = Math.floor(imageHeight / rows);
   const pieces: Piece[] = [];
-  const groups: PieceGroup[] = [];
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const x = col * pieceW;
       const y = row * pieceH;
       const id = `piece-${row}-${col}`;
-      const groupId = `group-${row}-${col}`;
 
+      // PieceGroup creation is deferred to extraction time (Story 32).
+      // groupId is null until the piece is pulled out of the tray.
       pieces.push({
         id,
-        groupId,
+        groupId: null,
+        state: 'in-tray',
         canonical: { x, y, rotation: 0, scale: 1.0 },
         actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
         gridCoord: { col, row },
@@ -38,17 +39,10 @@ export function gridCut(
         placed: false,
         touched: false,
       });
-
-      groups.push({
-        id: groupId,
-        pieceIds: [id],
-        position: { x, y },
-        rotation: 0,
-      });
     }
   }
 
-  return { pieces, groups };
+  return { pieces };
 }
 
 // ─── Mask building ────────────────────────────────────────────────────────────

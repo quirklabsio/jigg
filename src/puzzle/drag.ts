@@ -471,6 +471,76 @@ export function activateDrag(): void {
   if (_hitLayer) _hitLayer.eventMode = 'static';
 }
 
+/** True while a canvas drag is in progress — used by tray.ts as an interaction guard. */
+export function isDraggingCanvas(): boolean {
+  return dragging && activePointerId !== null;
+}
+
+/**
+ * Insert a group's bounding box into the spatial hash directly.
+ * Called by tray.ts after extracting a piece to the canvas.
+ */
+export function insertGroupAABB(
+  groupId: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  spatialHash.insert(groupId, x, y, w, h);
+}
+
+/**
+ * Begin dragging a piece that was just extracted from the tray.
+ * Bypasses the hit layer — the piece is already reparented into the viewport
+ * and its world position set before this is called.
+ */
+export function startDragForPiece(
+  pieceId: string,
+  pointerId: number,
+  worldX: number,
+  worldY: number,
+): void {
+  if (!_spriteMap || !_app || !_worldContainer || !_hitLayer) return;
+  if (activePointerId !== null) return; // another drag already active
+
+  const st = usePuzzleStore.getState();
+  const piece = st.piecesById[pieceId];
+  if (!piece || piece.groupId == null) return;
+
+  const group = st.groupsById[piece.groupId];
+  if (!group) return;
+
+  const anchorRef = _spriteMap.get(pieceId);
+  if (!anchorRef) return;
+
+  groupEntries = [{ sprite: anchorRef, localX: piece.actual.x, localY: piece.actual.y }];
+  baseScale = anchorRef.scale.x;
+  anchorLocalX = piece.actual.x;
+  anchorLocalY = piece.actual.y;
+  anchorSprite = anchorRef;
+  preDragRotation = anchorRef.rotation;
+
+  activePointerId = pointerId;
+  dragging = true;
+  activeGroupId = group.id;
+
+  // Scale lift
+  const liftScale = baseScale * DRAG_SCALE;
+  anchorRef.scale.set(liftScale);
+  (anchorRef.parent ?? anchorRef).zIndex = ++settleCounter;
+  _worldContainer.sortChildren();
+  _hitLayer.cursor = 'grabbing';
+
+  // Drag offset: keep the piece under the pointer at the same relative position
+  const origin = getVisualGroupOrigin(anchorRef, piece.actual.x, piece.actual.y);
+  dragOffsetX = origin.x - worldX;
+  dragOffsetY = origin.y - worldY;
+
+  tweenRotation(_app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+  _dragStartCallback?.(group.id);
+}
+
 export function resetDrag(): void {
   spatialHash.clear();
   dragging = false;

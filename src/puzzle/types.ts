@@ -15,6 +15,7 @@ export interface Piece {
   };
 
   groupId: string | null;         // topology, not geometry
+  state: 'in-tray' | 'on-canvas' | 'placed';
 
   // retained from current implementation
   gridCoord: { col: number; row: number };

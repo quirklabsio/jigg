@@ -40,7 +40,7 @@ export function createBoard(
     alpha:      0.06,
     color:      0x000000,
     quality:    3,
-    resolution: window.devicePixelRatio ?? 1,
+    resolution: 1, // DPR causes a pixelated artifact on retina — same fix as piece shadows
   });
   container.filters = [shadow];
 

@@ -60,5 +60,15 @@ Do not revisit without asking.
 ## Rendering / Shaders
 - **lightAngle hardcoded to 45° (top-left)** — no UI for light direction, universal jigsaw convention. `BevelFilter rotation: 225` (= lightAngle + 180 in BevelFilter's convention). Revisit if surface texture story needs it.
 
+## Tray Architecture (Story 32)
+
+- **Unified strip toggle for open AND close**: A single `_stripHitArea` transparent-fill Graphics rect covers the tray strip and calls `setTrayOpen(!trayOpen)` regardless of current state. Two separate handlers (open vs close) were tried but caused the close path to silently fail when the chevron was stroke-only. Unified handler is simpler and always correct.
+- **`_piecesContainer` with Graphics mask for overflow clipping**: Piece containers live inside `_piecesContainer` (a child of `_trayContainer`) rather than directly in the tray container. A `Graphics` mask on `_piecesContainer` clips pieces to the tray body, preventing overflow during layout. The mask rect is redrawn on every `redrawBackground()` call.
+- **2-row wrap with `piecesPerRow`**: Single flat row would overflow to 1200px+ for 16 pieces. Two rows (`TRAY_ROWS = 2`) with `piecesPerRow = Math.floor((screenW() - PAD) / slotW)` adapts to viewport width. Wrap is recalculated on every `layoutTrayPieces()` call.
+- **`screenW()` utility**: `Math.max(app.screen.width, window.innerWidth)` — always returns the larger of the two because `app.screen.width` lags one frame after `window.resize`. Avoids a class of resize bugs where tray doesn't extend full width on first resize event.
+- **Dual resize listeners**: Both `window.addEventListener('resize')` and `app.renderer.on('resize')` call `onTrayResize`. Window fires first (with `window.innerWidth` correct), renderer fires after (with `app.screen.width` correct). Either event alone would miss one scenario; both together handle fullscreen, DPR changes, and normal resize.
+- **`_trayDisplayOrder` shuffled array separate from store order**: Module-level `_trayDisplayOrder: string[]` is Fisher-Yates shuffled on `initTray`. Filtered on each layout pass to show only `state === 'in-tray'` pieces. Store piece array order is never mutated for display randomisation — keeps store as the authority for puzzle state, tray as the authority for display order.
+- **Archimedean spiral origin locks on first click, resets on viewport pan**: Spiral origin (`spiralOriginX/Y`) is set once when the first piece is click-extracted and held until the viewport moves. This lets rapid successive clicks build a coherent cluster rather than spreading to random world positions. Viewport `moved` event resets the origin so the next spiral starts at the new screen center.
+
 ## Process
 - **Never commit without user testing** — always present the completed work and wait for explicit user approval before running `git commit`. No exceptions, not even for "obviously correct" changes.
