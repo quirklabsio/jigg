@@ -1,5 +1,7 @@
 import { createStore } from 'zustand/vanilla';
-import type { Piece, PieceGroup } from '../puzzle/types';
+import type { EdgeType, Piece, PieceGroup } from '../puzzle/types';
+
+export type TrayFilter = 'all' | EdgeType;
 
 type PieceState = Piece['state'];
 
@@ -19,6 +21,7 @@ interface PuzzleState {
   gridIndex: Map<string, string>;
   puzzleComplete: boolean;
   trayOpen: boolean;
+  activeFilter: TrayFilter;
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
@@ -28,6 +31,7 @@ interface PuzzleState {
   mergeGroups: (survivorId: string, absorbedId: string) => void;
   markGroupPlaced: (groupId: string) => void;
   setTrayOpen: (open: boolean) => void;
+  setActiveFilter: (filter: TrayFilter) => void;
   /** Move a piece from tray to canvas: sets state, assigns groupId, adds PieceGroup. */
   extractPieceToCanvas: (
     pieceId: string,
@@ -44,7 +48,8 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   gridIndex: new Map(),
   puzzleComplete: false,
   trayOpen: true,
-  setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces) }),
+  activeFilter: 'all',
+  setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces), activeFilter: 'all' }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
   updatePieceRotation: (id, rotation) =>
@@ -96,6 +101,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       return { pieces, piecesById, puzzleComplete: state.puzzleComplete || puzzleComplete };
     }),
   setTrayOpen: (open) => set({ trayOpen: open }),
+  setActiveFilter: (filter) => set({ activeFilter: filter }),
   extractPieceToCanvas: (pieceId, groupId, groupPosition) =>
     set((state) => {
       const pieces = state.pieces.map((p) =>

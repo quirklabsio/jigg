@@ -10,7 +10,7 @@ import {
   Text,
 } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
-import { usePuzzleStore } from '../store/puzzleStore';
+import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
 import {
   isDraggingCanvas,
   insertGroupAABB,
@@ -27,8 +27,18 @@ const TRAY_STRIP_COLOR  = 0x16213e;
 const TRAY_HANDLE_COLOR = 0x888899;
 
 // Grid layout constants — Story 33
-const THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
-const PADDING        = 8;                       // px between thumbnails
+const THUMBNAIL_SIZE      = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
+const PADDING             = 8;                       // px between thumbnails
+
+// Filter strip — Story 34
+const FILTER_STRIP_HEIGHT = 36; // px — above the piece grid
+
+const FILTER_OPTIONS: { key: TrayFilter; label: string }[] = [
+  { key: 'all',      label: 'All' },
+  { key: 'corner',   label: 'Corners' },
+  { key: 'edge',     label: 'Edges' },
+  { key: 'interior', label: 'Interior' },
+];
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -41,6 +51,7 @@ let _stripHitArea: Graphics | null = null;
 let _piecesContainer: Container | null = null; // clips piece overflow (mask applied)
 let _piecesMask: Graphics | null = null;        // mask on _piecesContainer
 let _gridContainer: Container | null = null;    // scrollable inner container
+let _filterContainer: Container | null = null;
 let _emptyText: Text | null = null;
 let _spriteMap: Map<string, Sprite> | null = null;
 let _containerMap: Map<string, Container> | null = null;
@@ -153,6 +164,82 @@ function redrawBackground(): void {
   }
 }
 
+// ─── Filter strip ─────────────────────────────────────────────────────────────
+
+/** Returns the subset of in-tray piece IDs that match the active filter. */
+function visibleInTray(): string[] {
+  const { piecesById, activeFilter } = usePuzzleStore.getState();
+  const all = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
+  if (activeFilter === 'all') return all;
+  return all.filter((id) => piecesById[id]?.edgeType === activeFilter);
+}
+
+/**
+ * Redraw the filter strip buttons with current counts and active state.
+ * Called from layoutTrayPieces so counts stay in sync with tray state.
+ */
+function renderFilterStrip(): void {
+  if (!_filterContainer) return;
+
+  _filterContainer.removeChildren();
+
+  const { piecesById, activeFilter } = usePuzzleStore.getState();
+  const w    = screenW();
+  const btnW = Math.floor(w / FILTER_OPTIONS.length);
+  const btnH = 26;
+  const btnY = (FILTER_STRIP_HEIGHT - btnH) / 2;
+
+  // Count in-tray pieces per edge type
+  const counts: Record<TrayFilter, number> = { all: 0, corner: 0, edge: 0, interior: 0 };
+  for (const id of _trayDisplayOrder) {
+    const p = piecesById[id];
+    if (!p || p.state !== 'in-tray') continue;
+    counts.all++;
+    counts[p.edgeType]++;
+  }
+
+  for (let i = 0; i < FILTER_OPTIONS.length; i++) {
+    const { key, label } = FILTER_OPTIONS[i];
+    const isActive = activeFilter === key;
+    const count    = counts[key];
+    const dimmed   = count === 0;
+
+    const btn = new Container();
+    btn.eventMode = 'static';
+    btn.cursor    = 'pointer';
+
+    const bg = new Graphics();
+    bg.rect(i * btnW + 2, btnY, btnW - 4, btnH)
+      .fill({ color: isActive ? 0x4a90d9 : 0x252545 });
+    btn.addChild(bg);
+
+    const txt = new Text({
+      text: `${label} (${count})`,
+      style: {
+        fill:       dimmed ? 0x777799 : isActive ? 0xffffff : 0xddddf0,
+        fontSize:   12,
+        fontFamily: 'sans-serif',
+        fontWeight: isActive ? 'bold' : 'normal',
+      },
+    });
+    txt.anchor.set(0.5, 0.5);
+    txt.x = i * btnW + btnW / 2;
+    txt.y = btnY + btnH / 2;
+    btn.addChild(txt);
+
+    const capturedKey = key;
+    btn.on('pointerdown', (e: FederatedPointerEvent) => {
+      e.stopPropagation();
+      usePuzzleStore.getState().setActiveFilter(capturedKey);
+      _scrollX = 0;
+      if (_gridContainer) _gridContainer.x = 0;
+      layoutTrayPieces();
+    });
+
+    _filterContainer.addChild(btn);
+  }
+}
+
 // ─── Grid layout ──────────────────────────────────────────────────────────────
 
 /**
@@ -182,15 +269,23 @@ function layoutTrayPieces(): void {
   if (!_spriteMap || !_containerMap || !_gridContainer || !_piecesContainer) return;
   const { piecesById } = usePuzzleStore.getState();
 
-  // In-tray pieces in display order
-  const inTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
+  // All in-tray pieces (for empty state + hide pass)
+  const allInTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
+  // Filtered subset — only these are shown in the grid
+  const inTray    = visibleInTray();
 
-  // Rows that fit in the available tray height
-  const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - PADDING;
+  // Hide all in-tray containers; the loop below will re-show visible ones
+  for (const id of allInTray) {
+    const container = _containerMap.get(id);
+    if (container) container.visible = false;
+  }
+
+  // Rows that fit in the available height (below the filter strip)
+  const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING;
   const rows   = Math.max(1, Math.floor(availH / (THUMBNAIL_SIZE + PADDING)));
   const scale  = thumbScale();
 
-  const tabPad   = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
+  const tabPad    = Math.ceil(Math.max(_piecePixelW, _piecePixelH) * 0.4);
   const expandedW = _piecePixelW + 2 * tabPad;
   const expandedH = _piecePixelH + 2 * tabPad;
   const scaledW   = expandedW * scale;
@@ -219,22 +314,25 @@ function layoutTrayPieces(): void {
   });
 
   // Total grid dimensions
-  const totalCols  = inTray.length > 0 ? Math.ceil(inTray.length / rows) : 0;
-  _totalGridWidth  = totalCols > 0 ? PADDING + totalCols * (THUMBNAIL_SIZE + PADDING) : 0;
+  const totalCols = inTray.length > 0 ? Math.ceil(inTray.length / rows) : 0;
+  _totalGridWidth = totalCols > 0 ? PADDING + totalCols * (THUMBNAIL_SIZE + PADDING) : 0;
 
   // Clamp scroll and apply
   _scrollX = clampScroll(_scrollX);
   _gridContainer.x = -_scrollX;
 
-  // Refresh clip mask — covers the visible tray area in _piecesContainer local space
+  // Refresh clip mask — covers the full _piecesContainer area
   const w = screenW();
   if (_piecesMask) {
     _piecesMask.clear();
     _piecesMask.rect(0, 0, w, TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED).fill({ color: 0xffffff });
   }
 
-  // Empty state label
-  updateEmptyState(inTray.length === 0);
+  // Redraw filter strip with current counts
+  renderFilterStrip();
+
+  // Empty state — shown only when all pieces have left the tray
+  updateEmptyState(allInTray.length === 0);
 }
 
 // ─── Tray open / close ────────────────────────────────────────────────────────
@@ -359,13 +457,19 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
  */
 function hitTestTrayPiece(screenX: number, screenY: number): string | null {
   if (!_spriteMap || !_trayContainer || !_piecesContainer) return null;
-  const { piecesById } = usePuzzleStore.getState();
-  const inTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
 
-  // Screen → gridContainer local: tray.x = 0, piecesContainer.x = 0, gridContainer.x = -scrollX
+  // Use the same filtered set that layoutTrayPieces positioned
+  const inTray = visibleInTray();
+
+  // Screen → gridContainer local:
+  //   subtract tray.y, piecesContainer.y, then gridContainer.y (= FILTER_STRIP_HEIGHT)
   const gridLocalX = screenX + _scrollX;
-  const gridLocalY = screenY - _trayContainer.y - (_piecesContainer?.y ?? TRAY_HEIGHT_CLOSED);
-  const half       = THUMBNAIL_SIZE / 2;
+  const gridLocalY =
+    screenY -
+    _trayContainer.y -
+    (_piecesContainer?.y ?? TRAY_HEIGHT_CLOSED) -
+    FILTER_STRIP_HEIGHT;
+  const half = THUMBNAIL_SIZE / 2;
 
   for (let i = inTray.length - 1; i >= 0; i--) {
     const sprite = _spriteMap.get(inTray[i]);
@@ -585,8 +689,16 @@ export function initTray(
   _piecesContainer.addChild(_piecesMask);
   _piecesContainer.mask = _piecesMask;
 
-  // ── Scrollable grid container — child of _piecesContainer ──────────────────
-  _gridContainer = new Container();
+  // ── Filter strip — sits at top of _piecesContainer, above the grid ─────────
+  _filterContainer = new Container();
+  _filterContainer.y         = 0;
+  _filterContainer.eventMode = 'static';
+  _filterContainer.zIndex    = 5;
+  _piecesContainer.addChild(_filterContainer);
+
+  // ── Scrollable grid container — offset below the filter strip ───────────────
+  _gridContainer   = new Container();
+  _gridContainer.y = FILTER_STRIP_HEIGHT;
   _piecesContainer.addChild(_gridContainer);
 
   // Move in-tray piece containers into _gridContainer (in display order)

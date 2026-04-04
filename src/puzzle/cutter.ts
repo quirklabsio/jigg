@@ -1,5 +1,5 @@
 import { Graphics } from 'pixi.js';
-import type { CutPath, CutPoint, Piece } from './types';
+import type { CutPath, CutPoint, EdgeType, Piece } from './types';
 
 /**
  * Edge influence for cut routing: 0.0 = classic seeded variation only,
@@ -26,12 +26,22 @@ export function gridCut(
       const y = row * pieceH;
       const id = `piece-${row}-${col}`;
 
+      // Flat sides: border edges of the grid (no tab or blank — straight cut).
+      const flatSides =
+        (row === 0 ? 1 : 0) +
+        (row === rows - 1 ? 1 : 0) +
+        (col === 0 ? 1 : 0) +
+        (col === cols - 1 ? 1 : 0);
+      const edgeType: EdgeType =
+        flatSides >= 2 ? 'corner' : flatSides === 1 ? 'edge' : 'interior';
+
       // PieceGroup creation is deferred to extraction time (Story 32).
       // groupId is null until the piece is pulled out of the tray.
       pieces.push({
         id,
         groupId: null,
         state: 'in-tray',
+        edgeType,
         canonical: { x, y, rotation: 0, scale: 1.0 },
         actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
         gridCoord: { col, row },

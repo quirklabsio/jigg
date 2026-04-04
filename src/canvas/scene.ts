@@ -17,7 +17,7 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
-import { initTray, onTrayResize } from './tray';
+import { initTray, onTrayResize, setTrayOpen } from './tray';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 
 const COLS = 4;
@@ -290,6 +290,14 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   let fpsTicker: (() => void) | null = null;
 
   window.addEventListener('keydown', (e) => {
+    // Skip if focus is in a form element (accessibility)
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (e.key === 't' || e.key === 'T') {
+      setTrayOpen(!usePuzzleStore.getState().trayOpen);
+      return;
+    }
     if (e.key === 'f' || e.key === 'F') {
       if (fpsText) {
         app.ticker.remove(fpsTicker!);

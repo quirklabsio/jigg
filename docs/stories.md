@@ -60,7 +60,7 @@
 - [ ] **Story 31** — Spec: tray impact on `jigg-spec`; piece state (`in-tray` / `on-canvas` / `placed`), filter metadata (edge type, dominant color vector), tray-first load behaviour, rotation session property (`session.rotationEnabled`, `piece.initialRotation`), piece extraction UX (drag + spiral click + keyboard Enter all specced above), deferred return-to-tray logged as conscious omission
 - [x] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button). Bug-fix round: tray width on resize, open/close hit area, 2-row wrap, piece randomisation, drag extraction jump, board shadow retina artifact, tray scale vs expanded sprite frames.
 - [x] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
-- [ ] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
+- [x] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
 - [ ] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region
 - [ ] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
 - [ ] **Story 37** — Accessibility modes; high contrast toggle, piece number label overlay, reduced motion (disables inertia + snap animations)
@@ -175,6 +175,15 @@ POST     Story 19         (Z-order, informed by tray layering)
 ---
 
 ## Session Notes
+
+### Story 34
+
+- **`src/puzzle/types.ts`**: Added `EdgeType = 'corner' | 'edge' | 'interior'`; added `edgeType: EdgeType` field to `Piece`
+- **`src/puzzle/cutter.ts`**: Computes `flatSides` (count of border edges) in `gridCut`; assigns `edgeType` (`>= 2` flat → `corner`, `1` → `edge`, `0` → `interior`). No WASM changes.
+- **`src/store/puzzleStore.ts`**: Exports `TrayFilter = 'all' | EdgeType`; adds `activeFilter: TrayFilter` (default `'all'`), `setActiveFilter`; resets `activeFilter` to `'all'` in `setPieces` (new puzzle start)
+- **`src/canvas/tray.ts`**: Added `FILTER_STRIP_HEIGHT = 36`; `_filterContainer` as non-scrolling child of `_piecesContainer` at `y=0`; `_gridContainer.y = FILTER_STRIP_HEIGHT`; `visibleInTray()` helper filters `_trayDisplayOrder` by `activeFilter`; `renderFilterStrip()` redraws 4 Graphics+Text buttons (All/Corners/Edges/Interior) with live counts — called from `layoutTrayPieces()`; button `pointerdown` calls `setActiveFilter`, resets `_scrollX=0`, reflows grid; `layoutTrayPieces()` hides all in-tray containers then re-shows filtered subset; `hitTestTrayPiece` uses `visibleInTray()` and subtracts `FILTER_STRIP_HEIGHT` from y; empty-state check uses `allInTray.length === 0` (not filtered count); `availH` updated for filter strip height
+- No DOM elements. `npm run typecheck` passes clean.
+- **Post-implementation polish** (user feedback): inactive button text `0xaaaacc` was unreadable — bumped to `0xddddf0` (near-white), `fontSize: 12`, active label `fontWeight: 'bold'`; dimmed (0-count) buttons `0x777799`. Added `T` key to toggle tray via the existing `keydown` listener in `scene.ts` (imports `setTrayOpen` from `tray.ts`); guard skips handler when focus is in `INPUT`/`TEXTAREA`/`SELECT` elements.
 
 ### Story 33
 

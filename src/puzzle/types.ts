@@ -5,9 +5,12 @@ export interface Transform {
   scale: number;    // 1.0 = native size
 }
 
+export type EdgeType = 'corner' | 'edge' | 'interior';
+
 export interface Piece {
   id: string;
   metadata?: Record<string, unknown>;
+  edgeType: EdgeType;
 
   canonical: Readonly<Transform>; // image space, immutable, set once on creation
   actual: Transform & {
