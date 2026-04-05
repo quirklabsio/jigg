@@ -1,5 +1,6 @@
 import type { Sprite } from 'pixi.js';
 import { usePuzzleStore } from '../store/puzzleStore';
+import { syncLabelRotation } from '../utils/preferences';
 
 /**
  * Rotate a group 90° clockwise in place.
@@ -22,5 +23,6 @@ export function rotateGroup(groupId: string, spriteMap: Map<string, Sprite>): vo
     sprite.x = group.position.x + piece.actual.x;
     sprite.y = group.position.y + piece.actual.y;
     sprite.rotation = piece.actual.rotation;
+    syncLabelRotation(sprite);
   }
 }

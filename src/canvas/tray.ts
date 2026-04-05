@@ -16,7 +16,7 @@ import {
   insertGroupAABB,
   startDragForPiece,
 } from '../puzzle/drag';
-import { BACKGROUND_PRESETS, BG_PRESETS_ORDER } from '../utils/preferences';
+import { BACKGROUND_PRESETS, BG_PRESETS_ORDER, LABEL_CONTAINER_NAME } from '../utils/preferences';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,6 +99,10 @@ let spiralOriginX = 0;
 let spiralOriginY = 0;
 let spiralOriginLocked = false;
 
+// Loading spinner state — hides pieces until cuts are applied
+let _loadingSpinner: Container | null = null;
+let _loadingTickerFn: (() => void) | null = null;
+
 // Zoom-to-place animation state (Story 36)
 let _zoomInFlight = false;
 let _zoomFlightPieceId: string | null = null;
@@ -144,6 +148,7 @@ function updateEmptyState(isEmpty: boolean): void {
     if (!_emptyText) {
       _emptyText = new Text({
         text: 'All pieces placed',
+        resolution: window.devicePixelRatio,
         style: { fill: 0x888899, fontSize: 16, fontFamily: 'sans-serif' },
       });
       _emptyText.anchor.set(0.5);
@@ -284,9 +289,10 @@ function renderFilterStrip(): void {
 
     const txt = new Text({
       text: `${label} (${count})`,
+      resolution: window.devicePixelRatio,
       style: {
         fill:       dimmed ? 0x777799 : isActive ? 0xffffff : 0xddddf0,
-        fontSize:   12,
+        fontSize:   14,
         fontFamily: 'sans-serif',
         fontWeight: isActive ? 'bold' : 'normal',
       },
@@ -419,6 +425,10 @@ function layoutTrayPieces(): void {
 
     // Uniform scale — maintain aspect ratio
     sprite.scale.set(scale);
+
+    // Counter-scale label so it renders at native font size in the tray
+    const trayLabel = sprite.getChildByLabel(LABEL_CONTAINER_NAME) as Container | null;
+    if (trayLabel) trayLabel.scale.set(1 / scale);
 
     // Center within THUMBNAIL_SIZE cell
     sprite.x = cellX + (THUMBNAIL_SIZE - scaledW) / 2 + scaledW / 2;
@@ -572,6 +582,12 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
   usePuzzleStore.getState().extractPieceToCanvas(pieceId, groupId, { x: worldX, y: worldY });
   insertGroupAABB(groupId, worldX - hw, worldY - hh, piece.textureRegion.w, piece.textureRegion.h);
 
+  // Kill counter-rotation so label follows sprite's world rotation on canvas
+  if (usePuzzleStore.getState().pieceLabels) {
+    const label = sprite.getChildByLabel(LABEL_CONTAINER_NAME) as Container | null;
+    if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
+  }
+
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
   layoutTrayPieces();
@@ -661,6 +677,12 @@ function extractToCanvas(
   const hh = piece.textureRegion.h / 2;
   insertGroupAABB(groupId, worldX - hw, worldY - hh, piece.textureRegion.w, piece.textureRegion.h);
 
+  // Kill counter-rotation so label follows sprite's world rotation on canvas
+  if (usePuzzleStore.getState().pieceLabels) {
+    const label = sprite.getChildByLabel(LABEL_CONTAINER_NAME) as Container | null;
+    if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
+  }
+
   // Hand off to drag.ts using POINTER world position (not sprite centre)
   startDragForPiece(pieceId, pointerId, pointerWorldX, pointerWorldY);
 
@@ -740,6 +762,12 @@ function completeZoomAnimation(
   const hw    = piece ? piece.textureRegion.w / 2 : 0;
   const hh    = piece ? piece.textureRegion.h / 2 : 0;
   insertGroupAABB(groupId, landX - hw, landY - hh, piece?.textureRegion.w ?? 0, piece?.textureRegion.h ?? 0);
+
+  // Kill counter-rotation so label follows sprite's world rotation on canvas
+  if (usePuzzleStore.getState().pieceLabels) {
+    const label = sprite.getChildByLabel(LABEL_CONTAINER_NAME) as Container | null;
+    if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
+  }
 
   // Remove from display order and reflow
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
@@ -1129,7 +1157,7 @@ export function initTray(
     usePuzzleStore.getState().setZoomToPlace(zoomCheckbox.checked);
   });
   zoomLabel.appendChild(zoomCheckbox);
-  zoomLabel.appendChild(document.createTextNode('\u00a0Click to zoom'));
+  zoomLabel.appendChild(document.createTextNode('\u00a0Focus Mode'));
   document.body.appendChild(zoomLabel);
   _zoomLabel = zoomLabel;
   // Set initial bottom position
@@ -1144,10 +1172,10 @@ export function initTray(
     key: 'highContrast' | 'greyscale' | 'pieceLabels' | 'reducedMotion';
     label: string;
   }> = [
-    { key: 'highContrast',  label: 'High contrast' },
+    { key: 'highContrast',  label: 'High Contrast' },
     { key: 'greyscale',     label: 'Greyscale' },
-    { key: 'pieceLabels',   label: 'Piece numbers' },
-    { key: 'reducedMotion', label: 'Reduced motion' },
+    { key: 'pieceLabels',   label: 'Piece Labels' },
+    { key: 'reducedMotion', label: 'Reduced Motion' },
   ];
 
   const PREF_LABEL_W = 110; // px per checkbox slot
@@ -1175,6 +1203,9 @@ export function initTray(
     cb.addEventListener('change', () => {
       usePuzzleStore.getState().setPreference(key, cb.checked);
     });
+    // Keep checkbox in sync with store — prefs load after initTray, so initial
+    // value above may be stale; subscriber updates it once the store is hydrated.
+    usePuzzleStore.subscribe((state) => { cb.checked = state[key] as boolean; });
     el.appendChild(cb);
     el.appendChild(document.createTextNode(`\u00a0${labelText}`));
     document.body.appendChild(el);
@@ -1231,6 +1262,10 @@ export function initTray(
   redrawBackground();
   layoutTrayPieces();
 
+  // Hide pieces immediately — cuts aren't applied yet; setTrayLoading(false) in CUTS_COMPLETE
+  _gridContainer!.visible   = false;
+  _filterContainer!.visible = false;
+
   // Initial viewport resize to account for open tray
   viewport.resize(screenW(), app.screen.height - TRAY_HEIGHT_OPEN);
 
@@ -1247,6 +1282,55 @@ function syncBgPresetUI(): void {
     btn.style.color        = isActive ? '#ffffff' : '#ddddf0';
     btn.style.borderColor  = isActive ? '#4a90d9' : '#555577';
   });
+}
+
+/**
+ * Show/hide the tray loading spinner. Call with `true` immediately after initTray,
+ * then `false` in CUTS_COMPLETE once masks are applied and pieces are ready to show.
+ */
+export function setTrayLoading(loading: boolean): void {
+  if (!_gridContainer || !_filterContainer || !_piecesContainer || !_app) return;
+
+  if (loading) {
+    _gridContainer.visible   = false;
+    _filterContainer.visible = false;
+
+    if (!_loadingSpinner) {
+      _loadingSpinner = new Container();
+      _piecesContainer.addChild(_loadingSpinner);
+    }
+    _loadingSpinner.visible = true;
+
+    let angle = 0;
+    _loadingTickerFn = () => {
+      if (!_loadingSpinner || !_piecesContainer) return;
+      const w  = screenW();
+      const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT;
+      _loadingSpinner.x = w / 2;
+      _loadingSpinner.y = FILTER_STRIP_HEIGHT + availH / 2;
+      angle += 0.06;
+
+      const g = _loadingSpinner.children[0] as Graphics | undefined;
+      const arc = g ?? new Graphics();
+      if (!g) _loadingSpinner.addChild(arc);
+      arc.clear();
+      arc.arc(0, 0, 14, angle, angle + Math.PI * 1.4)
+         .stroke({ color: 0x4a90d9, width: 3 });
+    };
+    _app.ticker.add(_loadingTickerFn);
+
+  } else {
+    if (_loadingTickerFn) {
+      _app.ticker.remove(_loadingTickerFn);
+      _loadingTickerFn = null;
+    }
+    if (_loadingSpinner) {
+      _loadingSpinner.visible = false;
+    }
+    _gridContainer.visible   = true;
+    _filterContainer.visible = true;
+    layoutTrayPieces();
+  }
 }
 
 /** Redraw tray visuals after a preference change. Called from scene.ts apply callback. */

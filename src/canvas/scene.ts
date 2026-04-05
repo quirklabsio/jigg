@@ -17,7 +17,7 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences } from './tray';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading } from './tray';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
 import { initAriaLabels } from '../utils/aria';
@@ -282,6 +282,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // tray scale and eventMode, sets up open/close animation and pointer events,
   // and issues the initial viewport.resize to account for the open tray.
   initTray(app, viewport, spriteMap, containerMap, scale, piecePixelW, piecePixelH);
+  setTrayLoading(true);
 
   // ── Preferences ───────────────────────────────────────────────────────────
   // 1. Sample image luminance for adaptive background (async; resolves quickly
@@ -446,6 +447,9 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         spriteMap,
         lum,
       );
+
+      // Reveal tray pieces now that masks and filters are applied
+      setTrayLoading(false);
     }
   });
 }

@@ -137,6 +137,7 @@ export function gridCut(
         edgeType,
         colorVector,
         colorZone: 0,
+        index: row * cols + col + 1,
         canonical: { x, y, rotation: 0, scale: 1.0 },
         actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
         gridCoord: { col, row },

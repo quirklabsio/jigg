@@ -1,4 +1,4 @@
-import { Application } from 'pixi.js';
+import { Application, Container, Graphics, Text } from 'pixi.js';
 import { ColorMatrixFilter } from 'pixi.js';
 import { BevelFilter, OutlineFilter } from 'pixi-filters';
 import type { ColorMatrix } from 'pixi.js';
@@ -183,15 +183,89 @@ export function applyGreyscale(
   });
 }
 
-// ─── Stubs for 37b / 37c ─────────────────────────────────────────────────────
+// ─── Piece labels (Story 37b) ─────────────────────────────────────────────────
 
-/** Stub — implemented in Story 37b. */
+const LABEL_FONT_SIZE      = 14;
+const LABEL_FILL           = 0xffffff;
+const LABEL_STROKE         = 0x000000;
+const LABEL_STROKE_THICK   = 2;
+const LABEL_BG_ALPHA       = 0.45; // test against white-on-white (cloud/snow images)
+const LABEL_BG_PADDING     = 2;
+export const LABEL_CONTAINER_NAME = 'pieceLabel';
+
+// TODO: swap PIXI.Text for BitmapText if piece count exceeds ~2000
+// PIXI.Text generates one GPU texture per unique string — fine at current scale
+function createPieceLabel(piece: Piece): Container {
+  const container = new Container();
+  container.label = LABEL_CONTAINER_NAME;
+
+  // TODO: implement non-scaling labels
+  // At low viewport zoom (<0.3x) labels become unreadable
+  // Fix: on each ticker frame, label.scale = 1 / viewport.scale.x for all visible labels
+  // Only worth implementing if user feedback confirms this is a real pain point
+
+  const text = new Text({
+    text: String(piece.index),
+    style: {
+      fontSize: LABEL_FONT_SIZE,
+      fill: LABEL_FILL,
+      stroke: { color: LABEL_STROKE, width: LABEL_STROKE_THICK },
+    },
+  });
+  text.anchor.set(0.5, 0.5);
+  text.position.set(0, 0);
+
+  // Backing box sized to text bounds — improves legibility on busy textures
+  const bg = new Graphics();
+  const tw = text.width + LABEL_BG_PADDING * 2;
+  const th = text.height + LABEL_BG_PADDING * 2;
+  bg.roundRect(-tw / 2, -th / 2, tw, th, 2).fill({ color: 0x000000, alpha: LABEL_BG_ALPHA });
+
+  container.addChild(bg);
+  container.addChild(text);
+  return container;
+}
+
 export function applyPieceLabels(
-  _active: boolean,
-  _pieces: Piece[],
-  _spriteMap: Map<string, Sprite>,
+  active: boolean,
+  pieces: Piece[],
+  spriteMap: Map<string, Sprite>,
 ): void {
-  // TODO: Story 37b
+  pieces.forEach((piece) => {
+    const sprite = spriteMap.get(piece.id);
+    if (!sprite) return;
+
+    const existing = sprite.getChildByLabel(LABEL_CONTAINER_NAME);
+
+    if (active && !existing) {
+      const label = createPieceLabel(piece);
+      if (piece.state === 'in-tray') {
+        label.rotation = -(piece.actual.rotation * Math.PI) / 180;
+        // Counter-scale so label renders at native size regardless of tray thumbnail scale
+        if (sprite.scale.x > 0) label.scale.set(1 / sprite.scale.x);
+      } else {
+        label.rotation = -sprite.rotation;
+      }
+      // First child so snap highlight renders above; mask clips label to piece shape
+      sprite.addChildAt(label, 0);
+
+    } else if (!active && existing) {
+      sprite.removeChild(existing);
+
+    } else if (active && existing) {
+      // Already has label — update counter-rotation in case state changed
+      const label = existing as Container;
+      label.rotation = piece.state === 'in-tray'
+        ? -(piece.actual.rotation * Math.PI) / 180
+        : -sprite.rotation;
+    }
+  });
+}
+
+/** Keep a label upright after the sprite's rotation changes. No-op if no label. */
+export function syncLabelRotation(sprite: Sprite): void {
+  const label = sprite.getChildByLabel(LABEL_CONTAINER_NAME) as Container | null;
+  if (label) label.rotation = -sprite.rotation;
 }
 
 /** Stub — implemented in Story 37c. */

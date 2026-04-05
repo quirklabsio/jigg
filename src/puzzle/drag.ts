@@ -2,6 +2,7 @@ import type { Application, Container, Sprite } from 'pixi.js';
 import { FederatedPointerEvent, Graphics, Point, Rectangle } from 'pixi.js';
 import type { Piece, PieceGroup } from '../puzzle/types';
 import { usePuzzleStore } from '../store/puzzleStore';
+import { syncLabelRotation } from '../utils/preferences';
 
 const DRAG_SCALE = 1.03;
 const Z_IDLE = 0;
@@ -52,7 +53,7 @@ function tweenRotation(
     if (tweenId !== myId) { app.ticker.remove(tickerFn); return; } // stale — cancelled
     const t = Math.min((performance.now() - start) / TWEEN_MS, 1);
     const rot = from + (to - from) * easeInOut(t);
-    for (const { sprite: s } of entries) s.rotation = rot;
+    for (const { sprite: s } of entries) { s.rotation = rot; syncLabelRotation(s); }
     if (t >= 1) app.ticker.remove(tickerFn);
   };
   app.ticker.add(tickerFn);

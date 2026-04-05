@@ -227,5 +227,15 @@
   ```
 - **Rule**: Never call functions that read `getState()` from inside a Zustand `set` updater callback.
 
+## Piece label counter-rotation: two separate failure modes
+
+### Labels rotate with piece on canvas
+- **Symptom**: After toggling piece labels off and back on while pieces are rotated on the canvas, numbers appear tilted — they rotate with the sprite.
+- **Root cause**: Labels are `Container` children of sprites. PixiJS applies the parent's transform (including rotation) to all children. `applyPieceLabels` counter-rotated tray pieces (`-(actual.rotation * PI)/180`) but set canvas piece labels to `rotation = 0`. Once the sprite rotates (via `rotateGroup` or `tweenRotation`), the label rotates with it and nobody updates it back.
+- **Fix — creation**: In `applyPieceLabels` add `else { label.rotation = -sprite.rotation; }` for non-tray pieces so newly created labels start upright regardless of current sprite rotation.
+- **Fix — ongoing**: Export `syncLabelRotation(sprite)` from `preferences.ts`. Call it in `rotate.ts` after `sprite.rotation = piece.actual.rotation` and inside the `tweenRotation` ticker in `drag.ts` after `s.rotation = rot`. This keeps labels upright through both snap-rotate and drag-lift tween paths.
+- **Fix — extraction**: `tray.ts` extraction paths had `label.rotation = 0; label.scale.set(1)` to kill tray counter-rotation. The `0` is wrong if the sprite already has a canvas rotation. Change to `label.rotation = -sprite.rotation`.
+- **Rule**: Labels are children of sprites; they inherit the sprite's rotation. Every code path that mutates `sprite.rotation` must follow with `syncLabelRotation(sprite)`. The invariant is always `label.rotation === -sprite.rotation`.
+
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.

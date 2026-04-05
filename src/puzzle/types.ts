@@ -22,6 +22,8 @@ export interface Piece {
   groupId: string | null;         // topology, not geometry
   state: 'in-tray' | 'on-canvas' | 'placed';
 
+  index: number;           // 1-based, left-to-right top-to-bottom
+
   // retained from current implementation
   gridCoord: { col: number; row: number };
   textureRegion: { x: number; y: number; w: number; h: number };
