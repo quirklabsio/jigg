@@ -108,6 +108,29 @@
 - **Root cause**: `TypedArray.buffer` is typed as `ArrayBufferLike` in TypeScript's DOM lib, which is a union of `ArrayBuffer | SharedArrayBuffer`. `ImageData`'s constructor only accepts `ArrayBuffer` (not `SharedArrayBuffer`), so the union doesn't satisfy the parameter type.
 - **Fix**: Cast to `ArrayBuffer`: `new Uint8ClampedArray(rgba.buffer as ArrayBuffer)`. In practice the buffer is always a regular `ArrayBuffer` from WASM; the cast is safe.
 
+## `BevelFilter` has no `.contrast` property
+- **Symptom**: `error TS2339: Property 'contrast' does not exist on type 'BevelFilter'`. Spec pseudocode used `f.contrast = value` but pixi-filters v6 BevelFilter exposes no contrast uniform.
+- **Root cause**: `BevelFilter` in pixi-filters v6 has `lightAlpha`, `shadowAlpha`, `thickness`, and `rotation` — no aggregate `contrast` property.
+- **Fix**: Simulate contrast by scaling `lightAlpha` and `shadowAlpha`. If the spec ratio is `BEVEL_CONTRAST_HIGH / BEVEL_CONTRAST_DEFAULT = 1.8`, multiply the base alpha values (0.2) by 1.8: `f.lightAlpha = 0.36; f.shadowAlpha = 0.36`. Tunable via named constants.
+- **Rule**: Always check `BevelFilter.d.ts` before assuming contrast/brightness convenience properties exist.
+
+## `DropShadowFilter` at `offset:{x:0,y:0}` with `blur:0` is invisible
+- **Symptom**: No visible edge outline appears on sprites when using DropShadowFilter as a stroke effect with zero offset and zero blur.
+- **Root cause**: A drop shadow with `offset:{x:0,y:0}` and `blur:0` renders an exact alpha-shape copy of the sprite directly behind it — identical position and shape. The original sprite sits on top, completely obscuring the shadow.
+- **Fix**: Use `OutlineFilter` from `pixi-filters` instead. `OutlineFilter` is purpose-built for edge strokes and actually follows the sprite's alpha mask, rendering a visible ring around the shape boundary. `new OutlineFilter({ thickness: 2, color: 0xffffff, alpha: 1, quality: 0.15 })` attached to `sprite.filters`.
+- **Rule**: For outline/edge-stroke effects on sprites, use `OutlineFilter`, not `DropShadowFilter`. DSF is for offset drop shadows only.
+
+## `ColorMatrixFilter` is in `pixi.js` core, not `pixi-filters`
+- **Symptom**: If imported from `pixi-filters`, module not found. The filter is part of the PixiJS core bundle.
+- **Fix**: `import { ColorMatrixFilter } from 'pixi.js'`. The `.matrix` setter accepts `ColorMatrix = ArrayFixed<number, 20>`; a plain `number[]` requires a type cast: `matrix.matrix = MY_ARRAY as ColorMatrix`.
+- **Convenience methods**: `ColorMatrixFilter` has built-in methods — `.greyscale(scale, multiply)`, `.desaturate()`, `.contrast(amount, multiply)` etc. Using `matrix.desaturate()` is cleaner than manually setting the 20-element matrix, but the raw matrix approach works and is explicit.
+
+## `Piece` type has no `.sprite` field
+- **Symptom**: Code or spec pseudocode referencing `piece.sprite` fails — `Property 'sprite' does not exist on type 'Piece'`.
+- **Root cause**: `Piece` is a pure data model (in `puzzle/types.ts`). Sprites live in `spriteMap: Map<string, Sprite>` owned by `scene.ts`. They are separate concerns.
+- **Fix**: Any function that needs to apply a visual effect per-piece must accept `spriteMap: Map<string, Sprite>` as a parameter and look up sprites with `spriteMap.get(piece.id)`. Guard the result: `if (!sprite) return`.
+- **Rule**: `Piece` is never augmented with a sprite reference. The spriteMap is the join table.
+
 ## PixiJS v8: `sortChildren()` not called automatically within the same frame
 - **Symptom**: Pieces disappear under other pieces when dragged — they render at their old z-position during the first frame(s) of the drag.
 - **Root cause**: The `zIndex` setter correctly sets `parent.sortDirty = true`, but `sortChildren()` is only called lazily during the render pass. If other operations (filter swaps, scale changes) trigger a render before the sort runs, the old z-order is used.
@@ -186,6 +209,23 @@
 
 ## Zustand
 - Use `getState()` / `setState()` outside React context — never import hooks
+
+### `getState()` inside a `set` updater returns stale state
+- **Symptom**: UI callback fired from inside `set(updaterFn)` reads the old value — e.g. `syncBgPresetUI()` calling `getState().backgroundPreset` returned the pre-toggle value, so the active button highlight was always one step behind.
+- **Root cause**: Zustand's `set(fn)` calls `fn(currentState)` to compute the patch, then commits the result. Any `getState()` call made while inside `fn` still returns the pre-commit state, because the state variable hasn't been reassigned yet.
+- **Fix**: Move callbacks that read store state OUTSIDE the `set` call. Build `newPrefs` inside the updater (it has access to `state`), call `savePreferences(newPrefs)` there, but call `fireApplyPreferences(newPrefs)` after `set` returns. Since Zustand's `set` is synchronous, the state is committed by the time the next line executes.
+  ```typescript
+  setPreference: (key, value) => {
+    let newPrefs!: Preferences;
+    set((state) => {
+      newPrefs = { ...state, [key]: value };
+      savePreferences(newPrefs);
+      return { [key]: value };
+    });
+    fireApplyPreferences(newPrefs); // after set — getState() now returns new state
+  },
+  ```
+- **Rule**: Never call functions that read `getState()` from inside a Zustand `set` updater callback.
 
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.

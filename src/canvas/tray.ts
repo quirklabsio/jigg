@@ -16,15 +16,17 @@ import {
   insertGroupAABB,
   startDragForPiece,
 } from '../puzzle/drag';
+import { BACKGROUND_PRESETS, BG_PRESETS_ORDER } from '../utils/preferences';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const TRAY_HEIGHT_OPEN   = 220; // px — tunable
 export const TRAY_HEIGHT_CLOSED =  40; // collapsed strip height
 
-const TRAY_BG_COLOR     = 0x1a1a2e;
-const TRAY_STRIP_COLOR  = 0x16213e;
-const TRAY_HANDLE_COLOR = 0x888899;
+const TRAY_BG_COLOR           = 0x1a1a2e;
+const TRAY_STRIP_COLOR        = 0x16213e;
+const TRAY_HANDLE_COLOR       = 0x888899;
+const TRAY_BG_HIGH_CONTRAST   = 0x1a1a1a; // darkened, 90% opacity in high contrast
 
 // Grid layout constants — Story 33
 const THUMBNAIL_SIZE      = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
@@ -105,6 +107,10 @@ let _zoomTickerFn: (() => void) | null = null;
 // DOM element for zoom toggle — removed when Story 52 ships
 let _zoomLabel: HTMLLabelElement | null = null;
 
+// DOM elements for preference checkboxes — moved to settings panel in Story 52
+let _prefLabels: HTMLLabelElement[] = [];
+let _bgPresetLabel: HTMLElement | null = null;
+
 // ─── Fisher-Yates shuffle ─────────────────────────────────────────────────────
 
 function shuffle<T>(arr: T[]): T[] {
@@ -158,11 +164,17 @@ function redrawBackground(): void {
   if (!_bg || !_handle) return;
   const w = screenW();
   const h = currentTrayHeight;
-  const open = usePuzzleStore.getState().trayOpen;
+  const { trayOpen, highContrast } = usePuzzleStore.getState();
+  const open = trayOpen;
 
   _bg.clear();
-  _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_COLOR });
-  _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_STRIP_COLOR });
+  if (highContrast) {
+    _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 });
+    _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 });
+  } else {
+    _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_COLOR });
+    _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_STRIP_COLOR });
+  }
 
   // Chevron — purely decorative; strip hit area handles interaction
   _handle.clear();
@@ -297,8 +309,9 @@ function renderFilterStrip(): void {
   }
 
   // ── Color zone swatches ──────────────────────────────────────────────────
-  const meanColors = zoneMeanColors();
-  const swatchCY   = FILTER_STRIP_HEIGHT / 2;
+  const meanColors  = zoneMeanColors();
+  const swatchCY    = FILTER_STRIP_HEIGHT / 2;
+  const { highContrast: hcSwatches } = usePuzzleStore.getState();
   // Place swatches starting from right of text area, centred in strip
   const swatchStartX = textAreaW + (SWATCH_AREA_W - NUM_ZONES * SWATCH_SPACING) / 2 + SWATCH_RADIUS;
 
@@ -320,6 +333,10 @@ function renderFilterStrip(): void {
     // Active ring (drawn first, behind fill)
     if (isActive) {
       g.circle(cx, swatchCY, SWATCH_RADIUS + 3).stroke({ color: 0xffffff, width: 2 });
+    }
+    // High contrast border — distinguishable without relying on color alone
+    if (hcSwatches) {
+      g.circle(cx, swatchCY, SWATCH_RADIUS + 1).stroke({ color: 0x000000, width: 2 });
     }
     // Filled swatch circle
     g.circle(cx, swatchCY, SWATCH_RADIUS).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
@@ -455,10 +472,11 @@ function applyTrayLayout(): void {
   _viewport.resize(w, _app.screen.height - currentTrayHeight);
   redrawBackground();
 
-  // Keep DOM checkbox aligned to tray strip (strip sits at top of tray container)
-  if (_zoomLabel) {
-    _zoomLabel.style.bottom = `${currentTrayHeight - TRAY_HEIGHT_CLOSED}px`;
-  }
+  // Keep DOM checkboxes aligned to tray strip (strip sits at top of tray container)
+  const bottomOffset = `${currentTrayHeight - TRAY_HEIGHT_CLOSED}px`;
+  if (_zoomLabel) _zoomLabel.style.bottom = bottomOffset;
+  for (const lbl of _prefLabels) lbl.style.bottom = bottomOffset;
+  if (_bgPresetLabel) _bgPresetLabel.style.bottom = bottomOffset;
 }
 
 // ─── Easing ───────────────────────────────────────────────────────────────────
@@ -1117,6 +1135,99 @@ export function initTray(
   // Set initial bottom position
   zoomLabel.style.bottom = `${TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED}px`;
 
+  // ── Accessibility preference checkboxes ─────────────────────────────────────
+  // TODO: move these to settings panel in Story 52
+  for (const lbl of _prefLabels) lbl.remove();
+  _prefLabels = [];
+
+  const prefDefs: Array<{
+    key: 'highContrast' | 'greyscale' | 'pieceLabels' | 'reducedMotion';
+    label: string;
+  }> = [
+    { key: 'highContrast',  label: 'High contrast' },
+    { key: 'greyscale',     label: 'Greyscale' },
+    { key: 'pieceLabels',   label: 'Piece numbers' },
+    { key: 'reducedMotion', label: 'Reduced motion' },
+  ];
+
+  const PREF_LABEL_W = 110; // px per checkbox slot
+  prefDefs.forEach(({ key, label: labelText }, i) => {
+    const el = document.createElement('label');
+    el.style.cssText = [
+      'position:fixed',
+      `right:${130 + (prefDefs.length - 1 - i) * PREF_LABEL_W}px`,
+      `height:${TRAY_HEIGHT_CLOSED}px`,
+      'display:flex',
+      'align-items:center',
+      'gap:4px',
+      'font-size:11px',
+      'font-family:sans-serif',
+      'color:#aaaacc',
+      'z-index:501',
+      'pointer-events:auto',
+      'user-select:none',
+      'cursor:pointer',
+    ].join(';');
+    const cb = document.createElement('input');
+    cb.type    = 'checkbox';
+    cb.checked = usePuzzleStore.getState()[key] as boolean;
+    cb.style.margin = '0';
+    cb.addEventListener('change', () => {
+      usePuzzleStore.getState().setPreference(key, cb.checked);
+    });
+    el.appendChild(cb);
+    el.appendChild(document.createTextNode(`\u00a0${labelText}`));
+    document.body.appendChild(el);
+    el.style.bottom = `${TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED}px`;
+    _prefLabels.push(el);
+  });
+
+  // ── Background preset UI ─────────────────────────────────────────────────────
+  // TODO: move to settings panel in Story 52
+  if (_bgPresetLabel) _bgPresetLabel.remove();
+  const bgEl = document.createElement('div');
+  bgEl.style.cssText = [
+    'position:fixed',
+    'left:12px',
+    `height:${TRAY_HEIGHT_CLOSED}px`,
+    'display:flex',
+    'align-items:center',
+    'gap:6px',
+    'font-size:11px',
+    'font-family:sans-serif',
+    'color:#aaaacc',
+    'z-index:501',
+    'user-select:none',
+  ].join(';');
+  bgEl.style.bottom = `${TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED}px`;
+
+  const bgLabelText = document.createElement('span');
+  bgLabelText.textContent = 'BG:';
+  bgEl.appendChild(bgLabelText);
+
+  BG_PRESETS_ORDER.forEach((preset) => {
+    const btn = document.createElement('button');
+    btn.dataset.preset = preset;
+    btn.textContent = preset.charAt(0).toUpperCase() + preset.slice(1).replace('-', '-');
+    btn.style.cssText = [
+      'font-size:10px',
+      'font-family:sans-serif',
+      'padding:1px 5px',
+      'border-radius:3px',
+      'cursor:pointer',
+      'border:1px solid #555577',
+      'background:#252545',
+      'color:#ddddf0',
+    ].join(';');
+    btn.addEventListener('click', () => {
+      usePuzzleStore.getState().setPreference('backgroundPreset', preset);
+    });
+    bgEl.appendChild(btn);
+  });
+
+  document.body.appendChild(bgEl);
+  _bgPresetLabel = bgEl;
+
   redrawBackground();
   layoutTrayPieces();
 
@@ -1124,6 +1235,25 @@ export function initTray(
   viewport.resize(screenW(), app.screen.height - TRAY_HEIGHT_OPEN);
 
   return tray;
+}
+
+/** Highlight the active background preset button, dim the rest. */
+function syncBgPresetUI(): void {
+  if (!_bgPresetLabel) return;
+  const active = usePuzzleStore.getState().backgroundPreset;
+  _bgPresetLabel.querySelectorAll<HTMLButtonElement>('button[data-preset]').forEach((btn) => {
+    const isActive = btn.dataset.preset === active;
+    btn.style.background   = isActive ? '#4a90d9' : '#252545';
+    btn.style.color        = isActive ? '#ffffff' : '#ddddf0';
+    btn.style.borderColor  = isActive ? '#4a90d9' : '#555577';
+  });
+}
+
+/** Redraw tray visuals after a preference change. Called from scene.ts apply callback. */
+export function applyTrayPreferences(): void {
+  redrawBackground();
+  renderFilterStrip();
+  syncBgPresetUI();
 }
 
 /** Call from both window resize and renderer resize events in scene.ts. */

@@ -1,5 +1,11 @@
 import { createStore } from 'zustand/vanilla';
 import type { EdgeType, Piece, PieceGroup } from '../puzzle/types';
+import {
+  savePreferences,
+  fireApplyPreferences,
+  type Preferences,
+  type BackgroundPreset,
+} from '../utils/preferences';
 
 export type TrayFilter = 'all' | EdgeType | 'zone-0' | 'zone-1' | 'zone-2' | 'zone-3' | 'zone-4';
 
@@ -23,6 +29,14 @@ interface PuzzleState {
   trayOpen: boolean;
   activeFilter: TrayFilter;
   zoomToPlace: boolean;
+  // Preferences
+  highContrast: boolean;
+  greyscale: boolean;
+  pieceLabels: boolean;
+  reducedMotion: boolean;
+  backgroundPreset: BackgroundPreset | null;
+  imageLuminance: number; // sampled on puzzle load; default neutral mid
+  setPreference: <K extends keyof Preferences>(key: K, value: Preferences[K]) => void;
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
@@ -52,6 +66,12 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   trayOpen: true,
   activeFilter: 'all',
   zoomToPlace: false,
+  highContrast: false,
+  greyscale: false,
+  pieceLabels: false,
+  reducedMotion: false,
+  backgroundPreset: null,
+  imageLuminance: 128,
   setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces), activeFilter: 'all' }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
@@ -106,6 +126,24 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   setTrayOpen: (open) => set({ trayOpen: open }),
   setActiveFilter: (filter) => set({ activeFilter: filter }),
   setZoomToPlace: (value) => set({ zoomToPlace: value }),
+  setPreference: (key, value) => {
+    // Build newPrefs inside set (has access to current state), but fire the
+    // apply callback AFTER set returns — getState() inside syncBgPresetUI etc.
+    // must read the already-committed new state, not the pre-commit old state.
+    let newPrefs!: Preferences;
+    set((state) => {
+      newPrefs = {
+        highContrast:     key === 'highContrast'     ? (value as boolean)                 : state.highContrast,
+        greyscale:        key === 'greyscale'        ? (value as boolean)                 : state.greyscale,
+        pieceLabels:      key === 'pieceLabels'      ? (value as boolean)                 : state.pieceLabels,
+        reducedMotion:    key === 'reducedMotion'    ? (value as boolean)                 : state.reducedMotion,
+        backgroundPreset: key === 'backgroundPreset' ? (value as BackgroundPreset | null) : state.backgroundPreset,
+      };
+      savePreferences(newPrefs);
+      return { [key]: value };
+    });
+    fireApplyPreferences(newPrefs);
+  },
   extractPieceToCanvas: (pieceId, groupId, groupPosition) =>
     set((state) => {
       const pieces = state.pieces.map((p) =>

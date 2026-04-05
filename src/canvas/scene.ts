@@ -17,8 +17,17 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen } from './tray';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences } from './tray';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
+import { sampleImageLuminance } from '../utils/luminance';
+import { initAriaLabels } from '../utils/aria';
+import {
+  loadPreferences,
+  applyPreferences,
+  initPreferencesApp,
+  registerApplyFn,
+  BG_PRESETS_ORDER,
+} from '../utils/preferences';
 
 const COLS = 4;
 const ROWS = 4;
@@ -274,6 +283,35 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // and issues the initial viewport.resize to account for the open tray.
   initTray(app, viewport, spriteMap, containerMap, scale, piecePixelW, piecePixelH);
 
+  // ── Preferences ───────────────────────────────────────────────────────────
+  // 1. Sample image luminance for adaptive background (async; resolves quickly
+  //    since the image was already loaded above via PixiJS Assets).
+  // 2. Load stored prefs and hydrate Zustand.
+  // 3. Register the full apply callback (captures spriteMap + imageLuminance).
+  // 4. Apply immediately — bevel filters not yet attached (cuts arrive async);
+  //    applyHighContrast runs again in CUTS_COMPLETE once filters exist.
+  initPreferencesApp(app);
+  const prefs = loadPreferences();
+  const imageLuminance = await sampleImageLuminance(imageUrl);
+  usePuzzleStore.setState({
+    highContrast:     prefs.highContrast,
+    greyscale:        prefs.greyscale,
+    pieceLabels:      prefs.pieceLabels,
+    reducedMotion:    prefs.reducedMotion,
+    backgroundPreset: prefs.backgroundPreset,
+    imageLuminance,
+  });
+
+  registerApplyFn((p) => {
+    const { pieces, imageLuminance: lum } = usePuzzleStore.getState();
+    applyPreferences(p, pieces, spriteMap, lum);
+    applyTrayPreferences();
+  });
+
+  applyPreferences(prefs, usePuzzleStore.getState().pieces, spriteMap, imageLuminance);
+  applyTrayPreferences();
+  initAriaLabels(usePuzzleStore.getState().pieces);
+
   // ── Board (visible on empty canvas from load) ──────────────────────────────
   const board = createBoard(
     texture.width,
@@ -305,6 +343,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
     if (e.key === 't' || e.key === 'T') {
       setTrayOpen(!usePuzzleStore.getState().trayOpen);
+      return;
+    }
+    // Shift+B cycles background presets: off-white → gray → charcoal → off-white
+    // Plain B avoided — conflicts with screen reader button navigation
+    if (e.key === 'B' && e.shiftKey) {
+      const current = usePuzzleStore.getState().backgroundPreset;
+      const idx = current ? BG_PRESETS_ORDER.indexOf(current) : -1;
+      const next = BG_PRESETS_ORDER[(idx + 1) % BG_PRESETS_ORDER.length];
+      usePuzzleStore.getState().setPreference('backgroundPreset', next);
       return;
     }
     if (e.key === 'f' || e.key === 'F') {
@@ -388,6 +435,17 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       }
 
       console.log(`Cuts applied: ${cuts.length} cut paths, ${currentPieces.length} pieces masked`);
+
+      // Re-apply preferences now that BevelFilters are attached to sprites.
+      // highContrast and greyscale need live filter references.
+      const { highContrast, greyscale, pieceLabels, reducedMotion, backgroundPreset, imageLuminance: lum } =
+        usePuzzleStore.getState();
+      applyPreferences(
+        { highContrast, greyscale, pieceLabels, reducedMotion, backgroundPreset },
+        currentPieces,
+        spriteMap,
+        lum,
+      );
     }
   });
 }
