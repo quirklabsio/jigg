@@ -179,6 +179,40 @@ POST     Story 19         (Z-order, informed by tray layering)
 
 ## Session Notes
 
+### Story 37d (2026-04-05)
+
+High contrast core repair. `npm run typecheck` passes.
+
+**`src/utils/preferences.ts`**
+- Removed dead single-outline system (`OUTLINE_FILTER_TAG`, `addEdgeOutline`, `removeEdgeOutline`) and dead `SNAP_HIGHLIGHT_OPACITY`/`SNAP_HIGHLIGHT_WIDTH` exports (were never imported anywhere).
+- AC-1: Added sandwich stroke — `HC_INNER_OUTLINE_THICKNESS = 1.5` (white) + `HC_OUTER_OUTLINE_THICKNESS = 2.5` (black), both tagged `'hc-sandwich'`. `addSandwichStroke` guards against duplicate application; `removeSandwichStroke` calls `f.destroy()` on removed filters to release GPU memory. Both are called from `applyHighContrast` within the existing RAF batch pattern. Filter order: BevelFilter stays at index 0; inner + outer appended to end.
+- AC-3: Renamed `LABEL_BG_ALPHA` → `LABEL_BG_ALPHA_DEFAULT = 0.45`, added `LABEL_BG_ALPHA_HC = 0.8`. `createPieceLabel` now takes `bgAlpha` param. `applyPieceLabels` extended with `highContrast: boolean` param; added `updateLabelBgAlpha(label, bgAlpha)` helper that redraws the backing `Graphics` using `getChildAt(0)` (bg) / `getChildAt(1)` (text) — deterministic structure. "active && existing" branch now also calls `updateLabelBgAlpha` alongside the rotation update. `applyPreferences` passes `prefs.highContrast` through.
+
+**`src/canvas/tray.ts`**
+- AC-2: Replaced `TRAY_BG_COLOR`/`TRAY_STRIP_COLOR`/`TRAY_BG_HIGH_CONTRAST` with `TRAY_BG_DEFAULT_COLOR = 0x1a1a1a`/`TRAY_BG_DEFAULT_ALPHA = 0.85` (glass) and `TRAY_BG_HC_COLOR = 0x000000`/`TRAY_BG_HC_ALPHA = 1.0` (solid). `redrawBackground` simplified to single-rect fill — no separate strip colour in normal mode.
+- AC-2: Added `_unsubscribeHC` module var. At end of `initTray`: `_unsubscribeHC?.()` (idempotent) then subscribe to `usePuzzleStore` comparing `state.highContrast !== prev.highContrast`; calls `redrawBackground()` on change. Fires synchronously — not deferred via applyFn chain.
+- Added `teardownTray()` export: cleans up `_unsubscribeHC`.
+
+**`src/canvas/scene.ts`**
+- AC-4: Added snap highlight constants (`SNAP_HIGHLIGHT_COLOR_DEFAULT = 0x00ff00`, `SNAP_HIGHLIGHT_COLOR_HC = 0xff00ff`, `SNAP_HIGHLIGHT_ALPHA_DEFAULT = 0.4`, `SNAP_HIGHLIGHT_ALPHA_HC = 1.0`, `SNAP_HIGHLIGHT_THICKNESS_DEFAULT/HC = 2/4`). Module-level `_snapHighlightColor` + `_snapHighlightAlpha` vars.
+- `updateSnapHighlight(hc, rm)`: `reducedMotion` takes priority (magenta at 1.0); else HC or default values applied.
+- Board-snap pulse updated: replaced hardcoded cycling gChannel tint with `pulseColor`/`pulseAlpha` snapshot (read from module-level vars at snap time). Scale pulse retained. `s.alpha` animated from `pulseAlpha` → 1.0 over the pulse and reset to 1 at end.
+- `updateSnapHighlight` called immediately after preferences load; Zustand subscription fires on `highContrast` or `reducedMotion` change.
+
+---
+
+### Accessibility Audit (2026-04-05)
+
+Generated `docs/accessibility.md` — comprehensive audit of the accessibility suite across `puzzleStore.ts`, `preferences.ts`, `scene.ts`, `tray.ts`, `drag.ts`, `aria.ts`, and `types.ts`.
+
+**Key findings:**
+- `applyReducedMotion` is a confirmed stub (Story 37c). All four canvas animations (drag-lift tween, snap-back tween, board-snap pulse, zoom-to-piece) ignore the Zustand `reducedMotion` flag.
+- Zoom-to-place reads `window.matchMedia` directly instead of Zustand — known TODO in the code, must be fixed in Story 37c.
+- No animation uses `duration: 0` — no NaN/Infinity risk when 37c ships.
+- High-contrast tray background uses `alpha: 0.9` instead of `alpha: 1.0` — minor but counter to the intent of high-contrast mode.
+- ARIA labels are only initialised once on load; `setAriaLabel` is never called on state transitions (in-tray → on-canvas → placed). Story 38 must wire this.
+- All `.jigg` spec checks pass: no `piece.row`, no `piece.sprite`, `piece.gridCoord` used correctly throughout.
+
 ### Story 36
 
 - **`src/store/puzzleStore.ts`**: Added `zoomToPlace: boolean` (default `false`) and `setZoomToPlace` action to `PuzzleState`.

@@ -87,23 +87,44 @@ const BEVEL_SHADOW_ALPHA_DEFAULT = 0.2;
 const BEVEL_LIGHT_ALPHA_HIGH     = 0.2 * 1.8; // 0.36
 const BEVEL_SHADOW_ALPHA_HIGH    = 0.2 * 1.8; // 0.36
 
-// Outline filter tag — prevents duplicate on rapid toggle
-const OUTLINE_FILTER_TAG = 'highContrastOutline';
+// ─── Sandwich stroke (AC-1) ───────────────────────────────────────────────────
+// Two distinct OutlineFilter instances — inner white + outer black.
+// STRICT MODE: must never be merged into a single filter. The sandwich effect
+// requires two separate fragment shader passes.
+const HC_INNER_OUTLINE_THICKNESS = 1.5;
+const HC_INNER_OUTLINE_COLOR     = 0xffffff;
+const HC_OUTER_OUTLINE_THICKNESS = 2.5;
+const HC_OUTER_OUTLINE_COLOR     = 0x000000;
+const HC_FILTER_TAG              = 'hc-sandwich';
 
-export let SNAP_HIGHLIGHT_OPACITY = 0.4;
-export let SNAP_HIGHLIGHT_WIDTH   = 2;
+function addSandwichStroke(sprite: Sprite): void {
+  // Guard — never stack if already applied
+  if (sprite.filters?.some((f) => (f as any)._tag === HC_FILTER_TAG)) return;
 
-function addEdgeOutline(sprite: Sprite): void {
-  const already = sprite.filters?.some((f) => (f as any)._tag === OUTLINE_FILTER_TAG);
-  if (already) return;
-  const outline = new OutlineFilter({ thickness: 2, color: 0xffffff, alpha: 1, quality: 0.15 });
-  (outline as any)._tag = OUTLINE_FILTER_TAG;
-  sprite.filters = [...(sprite.filters ?? []), outline];
+  const inner = new OutlineFilter({ thickness: HC_INNER_OUTLINE_THICKNESS, color: HC_INNER_OUTLINE_COLOR, quality: 0.15 });
+  const outer = new OutlineFilter({ thickness: HC_OUTER_OUTLINE_THICKNESS, color: HC_OUTER_OUTLINE_COLOR, quality: 0.15 });
+
+  // Tag both filters — required for clean removal and leak prevention
+  (inner as any)._tag = HC_FILTER_TAG;
+  (outer as any)._tag = HC_FILTER_TAG;
+
+  // Filter order is mandatory:
+  //   Index 0:   BevelFilter — internal piece depth, must render before outlines
+  //   Index n-1: inner OutlineFilter (white, 1.5px)
+  //   Index n:   outer OutlineFilter (black, 2.5px)
+  // Append to end of existing array — never reorder BevelFilter.
+  sprite.filters = [...(sprite.filters ?? []), inner, outer];
 }
 
-function removeEdgeOutline(sprite: Sprite): void {
-  if (!sprite.filters) return;
-  sprite.filters = sprite.filters.filter((f) => (f as any)._tag !== OUTLINE_FILTER_TAG);
+function removeSandwichStroke(sprite: Sprite): void {
+  // Collect tagged filters before removal so they can be destroyed
+  const toDestroy = sprite.filters?.filter((f) => (f as any)._tag === HC_FILTER_TAG) ?? [];
+
+  // Remove from sprite
+  sprite.filters = sprite.filters?.filter((f) => (f as any)._tag !== HC_FILTER_TAG) ?? [];
+
+  // Destroy to release GPU resources — prevents memory leaks
+  toDestroy.forEach((f) => f.destroy());
 }
 
 const BATCH_THRESHOLD = 200;
@@ -113,9 +134,6 @@ export function applyHighContrast(
   pieces: Piece[],
   spriteMap: Map<string, Sprite>,
 ): void {
-  SNAP_HIGHLIGHT_OPACITY = active ? 0.9 : 0.4;
-  SNAP_HIGHLIGHT_WIDTH   = active ? 4   : 2;
-
   const lightAlpha  = active ? BEVEL_LIGHT_ALPHA_HIGH  : BEVEL_LIGHT_ALPHA_DEFAULT;
   const shadowAlpha = active ? BEVEL_SHADOW_ALPHA_HIGH : BEVEL_SHADOW_ALPHA_DEFAULT;
 
@@ -130,8 +148,8 @@ export function applyHighContrast(
         }
       }
     }
-    if (active) addEdgeOutline(sprite);
-    else removeEdgeOutline(sprite);
+    if (active) addSandwichStroke(sprite);
+    else removeSandwichStroke(sprite);
   };
 
   if (pieces.length <= BATCH_THRESHOLD) {
@@ -189,13 +207,14 @@ const LABEL_FONT_SIZE      = 14;
 const LABEL_FILL           = 0xffffff;
 const LABEL_STROKE         = 0x000000;
 const LABEL_STROKE_THICK   = 2;
-const LABEL_BG_ALPHA       = 0.45; // test against white-on-white (cloud/snow images)
-const LABEL_BG_PADDING     = 2;
+const LABEL_BG_ALPHA_DEFAULT = 0.45; // test against white-on-white (cloud/snow images)
+const LABEL_BG_ALPHA_HC      = 0.8;  // solid enough in high contrast — AC-3
+const LABEL_BG_PADDING       = 2;
 export const LABEL_CONTAINER_NAME = 'pieceLabel';
 
 // TODO: swap PIXI.Text for BitmapText if piece count exceeds ~2000
 // PIXI.Text generates one GPU texture per unique string — fine at current scale
-function createPieceLabel(piece: Piece): Container {
+function createPieceLabel(piece: Piece, bgAlpha: number): Container {
   const container = new Container();
   container.label = LABEL_CONTAINER_NAME;
 
@@ -215,22 +234,36 @@ function createPieceLabel(piece: Piece): Container {
   text.anchor.set(0.5, 0.5);
   text.position.set(0, 0);
 
-  // Backing box sized to text bounds — improves legibility on busy textures
+  // Backing box sized to text bounds — improves legibility on busy textures.
+  // bg at index 0, text at index 1 — order is structural contract used by applyPieceLabels.
   const bg = new Graphics();
   const tw = text.width + LABEL_BG_PADDING * 2;
   const th = text.height + LABEL_BG_PADDING * 2;
-  bg.roundRect(-tw / 2, -th / 2, tw, th, 2).fill({ color: 0x000000, alpha: LABEL_BG_ALPHA });
+  bg.roundRect(-tw / 2, -th / 2, tw, th, 2).fill({ color: 0x000000, alpha: bgAlpha });
 
   container.addChild(bg);
   container.addChild(text);
   return container;
 }
 
+/** Redraw the backing Graphics of an existing label container at a new alpha. */
+function updateLabelBgAlpha(label: Container, bgAlpha: number): void {
+  const bg   = label.getChildAt(0) as Graphics;
+  const text = label.getChildAt(1) as Text;
+  const tw = text.width  + LABEL_BG_PADDING * 2;
+  const th = text.height + LABEL_BG_PADDING * 2;
+  bg.clear();
+  bg.roundRect(-tw / 2, -th / 2, tw, th, 2).fill({ color: 0x000000, alpha: bgAlpha });
+}
+
 export function applyPieceLabels(
   active: boolean,
   pieces: Piece[],
   spriteMap: Map<string, Sprite>,
+  highContrast: boolean,
 ): void {
+  const bgAlpha = highContrast ? LABEL_BG_ALPHA_HC : LABEL_BG_ALPHA_DEFAULT;
+
   pieces.forEach((piece) => {
     const sprite = spriteMap.get(piece.id);
     if (!sprite) return;
@@ -238,7 +271,7 @@ export function applyPieceLabels(
     const existing = sprite.getChildByLabel(LABEL_CONTAINER_NAME);
 
     if (active && !existing) {
-      const label = createPieceLabel(piece);
+      const label = createPieceLabel(piece, bgAlpha);
       if (piece.state === 'in-tray') {
         label.rotation = -(piece.actual.rotation * Math.PI) / 180;
         // Counter-scale so label renders at native size regardless of tray thumbnail scale
@@ -253,11 +286,12 @@ export function applyPieceLabels(
       sprite.removeChild(existing);
 
     } else if (active && existing) {
-      // Already has label — update counter-rotation in case state changed
+      // Already has label — update counter-rotation and backing box alpha
       const label = existing as Container;
       label.rotation = piece.state === 'in-tray'
         ? -(piece.actual.rotation * Math.PI) / 180
         : -sprite.rotation;
+      updateLabelBgAlpha(label, bgAlpha);
     }
   });
 }
@@ -284,7 +318,7 @@ export function applyPreferences(
   applyBackground(prefs.backgroundPreset, imageLuminance);
   applyHighContrast(prefs.highContrast, pieces, spriteMap);
   applyGreyscale(prefs.greyscale, pieces, spriteMap);
-  applyPieceLabels(prefs.pieceLabels, pieces, spriteMap);
+  applyPieceLabels(prefs.pieceLabels, pieces, spriteMap, prefs.highContrast);
   applyReducedMotion(prefs.reducedMotion);
 }
 

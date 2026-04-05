@@ -33,6 +33,39 @@ const COLS = 4;
 const ROWS = 4;
 const WORLD_SIZE = 4000;
 
+// ─── Snap highlight state (AC-4) ─────────────────────────────────────────────
+// Module-level state read by the board-snap pulse ticker. Updated by
+// updateSnapHighlight() when highContrast or reducedMotion changes.
+
+const SNAP_HIGHLIGHT_COLOR_DEFAULT     = 0x00ff00; // green
+const SNAP_HIGHLIGHT_COLOR_HC          = 0xff00ff; // neon magenta — most distinct vs natural images
+const SNAP_HIGHLIGHT_ALPHA_DEFAULT     = 0.4;
+const SNAP_HIGHLIGHT_ALPHA_HC          = 1.0;      // no partial opacity in HC
+const SNAP_HIGHLIGHT_THICKNESS_DEFAULT = 2;
+const SNAP_HIGHLIGHT_THICKNESS_HC      = 4;
+
+let _snapHighlightColor = SNAP_HIGHLIGHT_COLOR_DEFAULT;
+let _snapHighlightAlpha = SNAP_HIGHLIGHT_ALPHA_DEFAULT;
+
+/**
+ * Update snap highlight state from current HC / RM flags.
+ * reducedMotion takes highest priority — maximises visibility for vestibular users.
+ * Call on init and whenever highContrast or reducedMotion changes in Zustand.
+ */
+function updateSnapHighlight(highContrast: boolean, reducedMotion: boolean): void {
+  if (reducedMotion) {
+    // Reduced motion: skip animation entirely (Story 37c) but ensure highlight
+    // is still maximally visible when it does appear.
+    _snapHighlightColor = SNAP_HIGHLIGHT_COLOR_HC;
+    _snapHighlightAlpha = SNAP_HIGHLIGHT_ALPHA_HC;
+    return;
+  }
+  _snapHighlightColor = highContrast ? SNAP_HIGHLIGHT_COLOR_HC          : SNAP_HIGHLIGHT_COLOR_DEFAULT;
+  _snapHighlightAlpha = highContrast ? SNAP_HIGHLIGHT_ALPHA_HC          : SNAP_HIGHLIGHT_ALPHA_DEFAULT;
+}
+
+// SNAP_HIGHLIGHT_THICKNESS_DEFAULT / _HC reserved for a future Graphics stroke overlay.
+
 // ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
 
 const DPR = window.devicePixelRatio ?? 1;
@@ -243,22 +276,24 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (result) {
       const startTime = performance.now();
       const DURATION_MS = 150;
+      // Snapshot HC state at snap time — reads module-level vars set by updateSnapHighlight.
+      const pulseColor = _snapHighlightColor;
+      const pulseAlpha = _snapHighlightAlpha;
       const tickerFn = () => {
         const t = Math.min((performance.now() - startTime) / DURATION_MS, 1);
         const pulseFactor = 1 + 0.05 * Math.sin(t * Math.PI);
-        const gChannel = Math.round(255 - 17 * Math.sin(t * Math.PI));
-        const tint = (0xff << 16) | (gChannel << 8) | 0xff;
         for (const pid of result.pieceIds) {
           const s = spriteMap.get(pid);
           if (s) {
             s.scale.set(scale * pulseFactor);
-            s.tint = tint;
+            s.tint  = pulseColor;
+            s.alpha = pulseAlpha + (1 - pulseAlpha) * (1 - Math.sin(t * Math.PI));
           }
         }
         if (t >= 1) {
           for (const pid of result.pieceIds) {
             const s = spriteMap.get(pid);
-            if (s) { s.scale.set(scale); s.tint = 0xffffff; }
+            if (s) { s.scale.set(scale); s.tint = 0xffffff; s.alpha = 1; }
           }
           app.ticker.remove(tickerFn);
         }
@@ -312,6 +347,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   applyPreferences(prefs, usePuzzleStore.getState().pieces, spriteMap, imageLuminance);
   applyTrayPreferences();
   initAriaLabels(usePuzzleStore.getState().pieces);
+
+  // AC-4: Initialise snap highlight state from loaded prefs, then subscribe
+  // so it stays in sync whenever highContrast or reducedMotion changes.
+  updateSnapHighlight(prefs.highContrast, prefs.reducedMotion);
+  usePuzzleStore.subscribe((state, prev) => {
+    if (state.highContrast !== prev.highContrast || state.reducedMotion !== prev.reducedMotion) {
+      updateSnapHighlight(state.highContrast, state.reducedMotion);
+    }
+  });
 
   // ── Board (visible on empty canvas from load) ──────────────────────────────
   const board = createBoard(

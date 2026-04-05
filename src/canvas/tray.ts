@@ -23,10 +23,13 @@ import { BACKGROUND_PRESETS, BG_PRESETS_ORDER, LABEL_CONTAINER_NAME } from '../u
 export const TRAY_HEIGHT_OPEN   = 220; // px — tunable
 export const TRAY_HEIGHT_CLOSED =  40; // collapsed strip height
 
-const TRAY_BG_COLOR           = 0x1a1a2e;
-const TRAY_STRIP_COLOR        = 0x16213e;
-const TRAY_HANDLE_COLOR       = 0x888899;
-const TRAY_BG_HIGH_CONTRAST   = 0x1a1a1a; // darkened, 90% opacity in high contrast
+// Normal mode: glass tray at 85% opacity.
+// High contrast: pure black at full opacity — no transparency, maximises legibility (AC-2).
+const TRAY_BG_DEFAULT_COLOR = 0x1a1a1a;
+const TRAY_BG_DEFAULT_ALPHA = 0.85;
+const TRAY_BG_HC_COLOR      = 0x000000;
+const TRAY_BG_HC_ALPHA      = 1.0;
+const TRAY_HANDLE_COLOR     = 0x888899;
 
 // Grid layout constants — Story 33
 const THUMBNAIL_SIZE      = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
@@ -103,6 +106,9 @@ let spiralOriginLocked = false;
 let _loadingSpinner: Container | null = null;
 let _loadingTickerFn: (() => void) | null = null;
 
+// HC store subscription — unsubscribed on teardown, replaced on re-init (AC-2)
+let _unsubscribeHC: (() => void) | null = null;
+
 // Zoom-to-place animation state (Story 36)
 let _zoomInFlight = false;
 let _zoomFlightPieceId: string | null = null;
@@ -172,14 +178,12 @@ function redrawBackground(): void {
   const { trayOpen, highContrast } = usePuzzleStore.getState();
   const open = trayOpen;
 
+  // AC-2: solid pure black at α 1.0 in HC mode — no canvas bleed-through.
+  // Normal mode: glass tray at α 0.85.
+  const bgColor = highContrast ? TRAY_BG_HC_COLOR : TRAY_BG_DEFAULT_COLOR;
+  const bgAlpha = highContrast ? TRAY_BG_HC_ALPHA : TRAY_BG_DEFAULT_ALPHA;
   _bg.clear();
-  if (highContrast) {
-    _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 });
-    _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 });
-  } else {
-    _bg.rect(0, 0, w, h).fill({ color: TRAY_BG_COLOR });
-    _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_STRIP_COLOR });
-  }
+  _bg.rect(0, 0, w, h).fill({ color: bgColor, alpha: bgAlpha });
 
   // Chevron — purely decorative; strip hit area handles interaction
   _handle.clear();
@@ -1269,6 +1273,15 @@ export function initTray(
   // Initial viewport resize to account for open tray
   viewport.resize(screenW(), app.screen.height - TRAY_HEIGHT_OPEN);
 
+  // AC-2: Subscribe directly to highContrast changes so the tray redraws
+  // immediately on toggle — not deferred via the applyFn callback chain.
+  // Unsubscribe any previous subscription first — prevents duplicates if
+  // initTray is called more than once (idempotent).
+  _unsubscribeHC?.();
+  _unsubscribeHC = usePuzzleStore.subscribe((state, prev) => {
+    if (state.highContrast !== prev.highContrast) redrawBackground();
+  });
+
   return tray;
 }
 
@@ -1338,6 +1351,15 @@ export function applyTrayPreferences(): void {
   redrawBackground();
   renderFilterStrip();
   syncBgPresetUI();
+}
+
+/**
+ * Clean up the HC store subscription. Call if the tray is ever torn down
+ * (e.g. new puzzle load that reinitialises the tray). Idempotent.
+ */
+export function teardownTray(): void {
+  _unsubscribeHC?.();
+  _unsubscribeHC = null;
 }
 
 /** Call from both window resize and renderer resize events in scene.ts. */
