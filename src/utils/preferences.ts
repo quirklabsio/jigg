@@ -1,6 +1,7 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import { ColorMatrixFilter } from 'pixi.js';
 import { BevelFilter, OutlineFilter } from 'pixi-filters';
+import { Viewport } from 'pixi-viewport';
 import type { ColorMatrix } from 'pixi.js';
 import type { Sprite } from 'pixi.js';
 import type { Piece } from '../puzzle/types';
@@ -52,6 +53,14 @@ let _app: Application | null = null;
 
 export function initPreferencesApp(app: Application): void {
   _app = app;
+}
+
+// ─── Viewport reference (set once from scene.ts) ──────────────────────────────
+
+let _viewport: Viewport | null = null;
+
+export function initPreferencesViewport(viewport: Viewport): void {
+  _viewport = viewport;
 }
 
 // ─── Background ───────────────────────────────────────────────────────────────
@@ -302,9 +311,31 @@ export function syncLabelRotation(sprite: Sprite): void {
   if (label) label.rotation = -sprite.rotation;
 }
 
-/** Stub — implemented in Story 37c. */
-export function applyReducedMotion(_active: boolean): void {
-  // TODO: Story 37c
+// ─── Reduced motion ───────────────────────────────────────────────────────────
+
+// Must match the friction value passed to .decelerate() in scene.ts.
+const DECELERATE_FRICTION_DEFAULT = 0.95;
+const DECELERATE_FRICTION_REDUCED = 1.0;
+
+/**
+ * Apply or remove reduced-motion adaptations on the PixiJS viewport.
+ * - active=true:  friction → 1.0 (board stops instantly on release);
+ *                 any in-flight viewport animate plugin is cancelled.
+ * - active=false: friction restored to DECELERATE_FRICTION_DEFAULT.
+ *
+ * Per-animation branches (drag lift, snap-back, tray lerp, zoom-to-piece,
+ * board pulse) live in drag.ts, scene.ts, and tray.ts — each reads
+ * usePuzzleStore.getState().reducedMotion directly.
+ */
+export function applyReducedMotion(active: boolean): void {
+  if (!_viewport) return;
+  const decelerate = _viewport.plugins.get('decelerate');
+  if (decelerate) {
+    (decelerate as any).friction = active ? DECELERATE_FRICTION_REDUCED : DECELERATE_FRICTION_DEFAULT;
+  }
+  // Cancel any in-flight viewport animation immediately on enable.
+  // On disable there is no in-flight animation to cancel.
+  if (active) _viewport.plugins.remove('animate');
 }
 
 // ─── Single traversal point ───────────────────────────────────────────────────

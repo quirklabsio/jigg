@@ -1,6 +1,6 @@
 # Accessibility Audit — jigg.app
 
-**Audit date:** 2026-04-05
+**Audit date:** 2026-04-05 (updated after Story 37d)
 **Audited files:**
 - `src/store/puzzleStore.ts`
 - `src/utils/preferences.ts`
@@ -20,16 +20,16 @@ The suite is organised into three pillars: **Visual**, **Vestibular**, and **Inf
 
 | Flag | Store default | Where set | Canvas effect | Ticker effect | DOM effect |
 |---|---|---|---|---|---|
-| `highContrast` | `false` | `Preferences` / `setPreference` | BevelFilter `lightAlpha`/`shadowAlpha` ×1.8 (0.20 → 0.36); white `OutlineFilter` (thickness 2, tagged `highContrastOutline`) added to every sprite; `SNAP_HIGHLIGHT_OPACITY` 0.4 → 0.9; `SNAP_HIGHLIGHT_WIDTH` 2 → 4; tray bg `0x1a1a2e` → `0x1a1a1a` at α 0.9; color-zone swatches gain black border ring | None | None |
-| `greyscale` | `false` | `Preferences` / `setPreference` | Luminance-weighted `ColorMatrixFilter` (0.299/0.587/0.114 ITU-R BT.601) added per sprite, tagged `greyscale`; strictly non-destructive — BevelFilter and OutlineFilter are preserved | None | None |
+| `highContrast` | `false` | `Preferences` / `setPreference` | BevelFilter `lightAlpha`/`shadowAlpha` ×1.8 (0.20 → 0.36); **sandwich stroke** — two `OutlineFilter` instances: white 1.5px (`hc-sandwich`) then black 2.5px (`hc-sandwich`) appended after BevelFilter (BevelFilter stays at index 0); `_snapHighlightColor` → neon magenta `0xff00ff`, `_snapHighlightAlpha` → 1.0, thickness reserved at 4px; tray bg `0x1a1a1a` α 0.85 → pure black `0x000000` α 1.0; color-zone swatches gain black border ring | None | None |
+| `greyscale` | `false` | `Preferences` / `setPreference` | Luminance-weighted `ColorMatrixFilter` (0.299/0.587/0.114 ITU-R BT.601) added per sprite, tagged `greyscale`; strictly non-destructive — BevelFilter and sandwich stroke are preserved | None | None |
 | `backgroundPreset` | `null` (adaptive) | `Preferences` / `setPreference` | `_app.renderer.background.color` set to preset hex or luminance-derived adaptive value (luminance < 100 → `0xf5f5f3` off-white; > 150 → `0x2a2a2a` charcoal; mid → `0x808080` gray) | None | DOM preset-button UI synced via `syncBgPresetUI()` |
-| `pieceLabels` | `false` | `Preferences` / `setPreference` | PIXI `Container` (label=`pieceLabel`) with 14 px `Text` (white fill, 2 px black stroke) + semi-opaque `Graphics` roundRect backing (α 0.45) added via `sprite.addChildAt(label, 0)` per piece | `syncLabelRotation(sprite)` called each frame inside `tweenRotation` ticker to keep label upright during lift/snap-back tween | None |
+| `pieceLabels` | `false` | `Preferences` / `setPreference` | PIXI `Container` (label=`pieceLabel`) with 14 px `Text` (white fill, 2 px black stroke) + black `Graphics` roundRect backing; backing alpha: **0.45** in normal mode, **0.8** in high-contrast mode (AC-3); added via `sprite.addChildAt(label, 0)` per piece | `syncLabelRotation(sprite)` called each frame inside `tweenRotation` ticker to keep label upright during lift/snap-back tween | None |
 
 ### Vestibular Pillar
 
 | Flag | Store default | Where set | Canvas effect | Ticker effect | DOM effect |
 |---|---|---|---|---|---|
-| `reducedMotion` | `window.matchMedia('(prefers-reduced-motion: reduce)').matches` at import time | `Preferences` / `setPreference` | **STUB** — `applyReducedMotion` has an empty body (`// TODO: Story 37c`). No canvas filters or property changes occur. | None — drag lift tween (`TWEEN_MS = 80 ms`), snap-back tween, board-snap pulse (150 ms), and zoom-to-piece tween (600 ms) are **all unaffected** by the Zustand flag | None |
+| `reducedMotion` | `window.matchMedia('(prefers-reduced-motion: reduce)').matches` at import time | `Preferences` / `setPreference` | `applyReducedMotion(active)` fully implemented (Story 37c): decelerate plugin friction set to `1.0` on enable (board stops instantly) / restored to `0.95` on disable; in-flight `animate` plugin cancelled on enable. Board-snap pulse skipped entirely when flag is set. Zoom-to-piece teleports to playable-area centre (`scale.set` → `moveCenter` with `trayOffset` → `decelerate.reset()`). Tray open/close snaps immediately. | `tweenRotation` ticker checks flag every tick — snaps to end rotation and self-removes. Drag lift and snap-back use explicit `if/else` branches (no tween when set). Tray animation ticker snaps `currentTrayHeight = targetTrayHeight` on first frame when flag is set. Visual tether ticker checks flag per tick — snaps sprite, cancels animate plugin, calls `completeZoomAnimation`. | None |
 
 ### Informational Pillar
 
@@ -40,78 +40,159 @@ The suite is organised into three pillars: **Visual**, **Vestibular**, and **Inf
 
 ---
 
-## 2. Logic Verification
+## 2. Verified Repairs — Story 37d
 
-### 2.1 reducedMotion: branching vs. duration:0
+Story 37d (High Contrast Core Repair) addressed four numbered accessibility criteria. All four are verified against source as of the 2026-04-05 commit.
 
-**Finding: The `reducedMotion` Zustand flag is not yet wired to any animation.**
+### AC-1 — Sandwich Stroke (VERIFIED PASS)
 
-`applyReducedMotion` in `preferences.ts` is an explicit stub:
+**File:** `src/utils/preferences.ts:100–128`
+
+`addSandwichStroke` creates two distinct `OutlineFilter` instances — separate fragment shader passes are mandatory for the visual effect:
 
 ```ts
-/** Stub — implemented in Story 37c. */
-export function applyReducedMotion(_active: boolean): void {
-  // TODO: Story 37c
+const inner = new OutlineFilter({ thickness: 1.5, color: 0xffffff, quality: 0.15 });
+const outer = new OutlineFilter({ thickness: 2.5, color: 0x000000, quality: 0.15 });
+(inner as any)._tag = 'hc-sandwich';
+(outer as any)._tag = 'hc-sandwich';
+sprite.filters = [...(sprite.filters ?? []), inner, outer];
+```
+
+- Both instances are tagged `hc-sandwich` — required for clean removal (`removeSandwichStroke` calls `f.destroy()` to release GPU memory).
+- **Filter order is preserved:** `BevelFilter` (set at sprite creation, index 0) → `inner` white 1.5px (index n-1) → `outer` black 2.5px (index n).
+- Guard on line 102 prevents double-application: checks `sprite.filters?.some((f) => f._tag === 'hc-sandwich')` before proceeding.
+- Called from `applyHighContrast` within the existing RAF-batch pattern (immediate below `BATCH_THRESHOLD = 200`, two-frame split above it).
+
+**Pre-37d state:** A single `OutlineFilter` (green, 2px) tagged `highContrastOutline` was used. No sandwich separation, no BevelFilter ordering guarantee. The dead system was fully removed in 37d.
+
+### AC-2 — Solid Tray (VERIFIED PASS)
+
+**File:** `src/canvas/tray.ts:28–31, 183–186`
+
+Constants (top of module):
+
+```ts
+const TRAY_BG_DEFAULT_COLOR = 0x1a1a1a;
+const TRAY_BG_DEFAULT_ALPHA = 0.85;  // glass
+const TRAY_BG_HC_COLOR      = 0x000000;
+const TRAY_BG_HC_ALPHA      = 1.0;   // solid — AC-2
+```
+
+`redrawBackground()` applies them as a single rect:
+
+```ts
+const bgColor = highContrast ? TRAY_BG_HC_COLOR : TRAY_BG_DEFAULT_COLOR;
+const bgAlpha = highContrast ? TRAY_BG_HC_ALPHA : TRAY_BG_DEFAULT_ALPHA;
+_bg.rect(0, 0, w, h).fill({ color: bgColor, alpha: bgAlpha });
+```
+
+- **High contrast:** pure black `0x000000` at `alpha: 1.0` — no canvas bleed-through.
+- **Normal mode:** `0x1a1a1a` at `alpha: 0.85` — deliberate glass effect.
+- **Subscription wired:** `usePuzzleStore.subscribe` at `initTray:1281` fires `redrawBackground()` synchronously on every `highContrast` toggle (not deferred via the `applyFn` chain).
+- **Idempotent:** `_unsubscribeHC?.()` called before resubscribing — prevents duplicates if `initTray` is called more than once.
+
+**Pre-37d state:** The previous audit (§3) identified α 0.9 in HC mode as counter to accessibility best practice. This is now repaired — α 1.0 confirmed.
+
+### AC-3 — Label Pill Backing (VERIFIED PASS)
+
+**File:** `src/utils/preferences.ts:210–212, 265, 242`
+
+```ts
+const LABEL_BG_ALPHA_DEFAULT = 0.45;
+const LABEL_BG_ALPHA_HC      = 0.8;  // solid enough in high contrast — AC-3
+
+// In applyPieceLabels:
+const bgAlpha = highContrast ? LABEL_BG_ALPHA_HC : LABEL_BG_ALPHA_DEFAULT;
+
+// In createPieceLabel:
+bg.roundRect(-tw / 2, -th / 2, tw, th, 2).fill({ color: 0x000000, alpha: bgAlpha });
+```
+
+- Black `Graphics` roundRect backing applied at `alpha: 0.8` **only when `highContrast: true`**.
+- Normal mode uses `alpha: 0.45` (sufficient for most images).
+- The `active && existing` update branch also calls `updateLabelBgAlpha(label, bgAlpha)` — backing is redrawn live when HC is toggled while labels are active.
+- `updateLabelBgAlpha` uses deterministic structure: `getChildAt(0)` is always the `Graphics` bg, `getChildAt(1)` is always the `Text`.
+
+**Pre-37d state:** Single `LABEL_BG_ALPHA = 0.45` constant — no differentiation for HC mode.
+
+### AC-4 — Neon Magenta Snap (VERIFIED PASS)
+
+**File:** `src/canvas/scene.ts:40–65`
+
+```ts
+const SNAP_HIGHLIGHT_COLOR_HC          = 0xff00ff; // neon magenta
+const SNAP_HIGHLIGHT_ALPHA_HC          = 1.0;      // no partial opacity in HC
+const SNAP_HIGHLIGHT_THICKNESS_HC      = 4;        // reserved — future stroke overlay
+
+function updateSnapHighlight(highContrast: boolean, reducedMotion: boolean): void {
+  if (reducedMotion) {
+    _snapHighlightColor = SNAP_HIGHLIGHT_COLOR_HC;
+    _snapHighlightAlpha = SNAP_HIGHLIGHT_ALPHA_HC;
+    return;
+  }
+  _snapHighlightColor = highContrast ? SNAP_HIGHLIGHT_COLOR_HC : SNAP_HIGHLIGHT_COLOR_DEFAULT;
+  _snapHighlightAlpha = highContrast ? SNAP_HIGHLIGHT_ALPHA_HC : SNAP_HIGHLIGHT_ALPHA_DEFAULT;
 }
 ```
 
-The four animations that must respect this flag when Story 37c ships:
+- `_snapHighlightColor` and `_snapHighlightAlpha` are module-level vars read by the board-snap pulse ticker at snap time (`pulseColor` / `pulseAlpha` snapshot at `scene.ts:280`).
+- `reducedMotion` takes highest priority in `updateSnapHighlight` — even without an active stub, the snap remains maximally visible for vestibular users.
+- `updateSnapHighlight` is called immediately after preferences load AND from the `usePuzzleStore.subscribe` handler on `highContrast` or `reducedMotion` change.
+- **One gap:** `SNAP_HIGHLIGHT_THICKNESS_HC = 4` is defined (line 45) but is explicitly deferred — line 67 comment: "SNAP_HIGHLIGHT_THICKNESS_DEFAULT / _HC reserved for a future Graphics stroke overlay." The board-snap pulse does not yet apply a 4px border. This is a known partial implementation, not a regression.
 
-| Animation | File | Duration | Current reducedMotion handling |
+**Pre-37d state:** Snap pulse used a hardcoded cycling green channel tint with no HC variant.
+
+---
+
+## 3. Logic Verification
+
+### 3.1 reducedMotion: IMPLEMENTED (Story 37c)
+
+`applyReducedMotion` in `preferences.ts` is fully implemented. The four animations now respect the flag:
+
+| Animation | File | Duration | reducedMotion handling |
 |---|---|---|---|
-| Drag-lift rotation tween (1°) | `drag.ts:438,541` | 80 ms | None — always fires |
-| Snap-back to nearest 90° tween | `drag.ts:249` | 80 ms | None — always fires |
-| Board-snap pulse (scale + tint) | `scene.ts:246` | 150 ms | None — always fires |
-| Zoom-to-piece viewport animation | `tray.ts:826` | 600 ms | Reads `window.matchMedia` directly, **not** the Zustand flag (see §2.2) |
+| Drag-lift rotation tween (1°) | `drag.ts` | 80 ms | Explicit `if/else` — snaps to `preDragRotation + LIFT_ROT`, calls `syncLabelRotation` |
+| Snap-back to nearest 90° tween | `drag.ts` | 80 ms | Explicit `if/else` — snaps immediately, calls `syncLabelRotation` |
+| Board-snap pulse (scale + tint) | `scene.ts` | 150 ms | Skipped entirely; per-tick bail-out for mid-pulse toggle |
+| Zoom-to-piece viewport animation | `tray.ts` | 600 ms | Teleports: `scale.set` → `moveCenter` with `trayOffset` → `decelerate.reset()` |
 
-**Good news:** None of the animations use a `duration: 0` hack. All use fixed positive denominators (`TWEEN_MS = 80`, `DURATION_MS = 150`, `ANIM_DURATION = 600`), so there is **no risk of NaN or Infinity** from a divide-by-zero when the flag ships. Story 37c should use explicit `if/else` branching (skip the animation block entirely, or jump to end-state immediately) — never set a duration to 0.
+Precision centering: zoom-to-piece teleport centres the piece in the playable area (above tray), not raw screen centre. `trayOffset = currentTrayHeight / 2 / viewport.scale.y` added to `piece.canonical.y` as the `moveCenter` Y argument.
 
-### 2.2 Zoom-to-piece: matchMedia vs. Zustand flag mismatch
+### 3.2 Zoom-to-piece: matchMedia mismatch RESOLVED
 
-`tray.ts:826` reads the OS-level media query directly:
+`tray.ts` previously read `window.matchMedia` directly. Story 37c replaced all occurrences with `usePuzzleStore.getState().reducedMotion`. In-app toggle and OS-level setting are now equivalent.
+
+### 3.3 Drag ticker: syncLabelRotation wiring (VERIFIED PASS)
+
+`drag.ts:56` calls `syncLabelRotation(s)` inside the `tweenRotation` ticker, every frame:
 
 ```ts
-// TODO: replace matchMedia check with Story 37 reducedMotion Zustand flag when it ships
-if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  // jump directly, no animation
-}
+for (const { sprite: s } of entries) { s.rotation = rot; syncLabelRotation(s); }
 ```
 
-This means:
-- A user who sets `reducedMotion: true` via the in-app checkbox will **not** have zoom-to-piece animations suppressed.
-- A user whose OS has reduced motion enabled will have zoom-to-piece suppressed **but** the in-app checkbox is redundant for this path.
-
-When Story 37c ships, this must be replaced with `usePuzzleStore.getState().reducedMotion`.
+Labels remain upright throughout all rotation tweens (lift and snap-back). No separate counter-rotation needed in drag.ts.
 
 ---
 
-## 3. The "Glass Tray" Conflict
+## 4. Tray Background: Pre-37d Conflict (RESOLVED)
 
-**Tray background in normal mode** (`highContrast: false`):
+The previous audit (§3 in original) flagged that the high-contrast tray used `alpha: 0.9` — counter to the intent of HC mode, which requires fully opaque backgrounds.
 
-```ts
-_bg.rect(0, 0, w, h).fill({ color: TRAY_BG_COLOR }); // 0x1a1a2e, α implicit 1.0
-_bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_STRIP_COLOR }); // 0x16213e
-```
+**Story 37d resolved this.** Current state:
 
-The tray is **fully opaque** (α 1.0) in normal mode — there is no glass/translucency effect in the current implementation.
+| Mode | Color | Alpha | Notes |
+|---|---|---|---|
+| Normal | `0x1a1a1a` | `0.85` | Deliberate "glass tray" — canvas content shows through |
+| High contrast | `0x000000` | `1.0` | Solid — no canvas bleed-through (AC-2) |
 
-**Tray background in high-contrast mode** (`highContrast: true`):
-
-```ts
-_bg.rect(0, 0, w, h).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 }); // 0x1a1a1a
-_bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha: 0.9 });
-```
-
-**Finding:** The tray uses α 0.9 in high-contrast mode, making it *marginally more transparent* than in normal mode (α 1.0). This is counter to accessibility best practice: high-contrast mode should maximise foreground/background separation, which requires the background to be **fully opaque** (α 1.0). Canvas content bleeding through at 10% will reduce contrast for users who need it most.
-
-**Recommendation for Story 37a follow-up:** Change the high-contrast fill to `alpha: 1` (or omit the alpha key to default to 1.0).
+Previously the tray used two separate rects (main bg + strip colour). 37d simplified to a single rect fill, removing the dead `TRAY_BG_COLOR`/`TRAY_STRIP_COLOR`/`TRAY_BG_HIGH_CONTRAST` constants.
 
 ---
 
-## 4. ARIA Label Sync
+## 5. ARIA Label Sync
 
-### 4.1 Data sourcing (hallucination check)
+### 5.1 Data sourcing (hallucination check)
 
 `setAriaLabel` in `aria.ts`:
 
@@ -119,70 +200,65 @@ _bg.rect(0, 0, w, TRAY_HEIGHT_CLOSED).fill({ color: TRAY_BG_HIGH_CONTRAST, alpha
 `Piece row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1} — ${stateLabel}`
 ```
 
-- Uses `piece.gridCoord.row` and `piece.gridCoord.col` ✓ — no `piece.row` reference
-- `piece.gridCoord` is defined in `types.ts` as `{ col: number; row: number }` ✓
-- No reference to `piece.sprite` anywhere ✓ — spec-correct
+- Uses `piece.gridCoord.row` and `piece.gridCoord.col` ✓ — no `piece.row` reference.
+- `piece.gridCoord` is defined in `types.ts` as `{ col: number; row: number }` ✓.
+- No reference to `piece.sprite` anywhere ✓ — spec-correct.
 
-### 4.2 State-transition gap
+### 5.2 State-transition gap
 
-`initAriaLabels` is called once in `scene.ts` after `CUTS_COMPLETE`. However, `setAriaLabel` is **never called on state transitions** (in-tray → on-canvas → placed). The `setAriaLabel` docstring explicitly says "Call on every piece state transition" but no call site exists in `tray.ts` (extraction) or `snap.ts`/`scene.ts` (placement).
+`initAriaLabels` is called once in `scene.ts` after `CUTS_COMPLETE`. `setAriaLabel` is **never called on state transitions** (in-tray → on-canvas → placed). The `setAriaLabel` docstring says "Call on every piece state transition" but no call site exists in `tray.ts` (extraction) or `snap.ts`/`scene.ts` (placement).
 
-Screen readers will announce the initial state for all pieces correctly, but will never announce that a piece has been extracted or placed. This must be wired as part of Story 38 (keyboard focus spike) or earlier.
+Screen readers announce the initial state correctly for all pieces, but will never announce that a piece has been extracted or placed. Must be wired as part of Story 38.
 
-### 4.3 piece.index vs. ARIA label
+### 5.3 piece.index vs. ARIA label
 
-The `pieceLabels` visual overlay uses `piece.index` (1-based sequential number). The ARIA label uses grid coordinates (`row+1, col+1`). These are consistent representations of the same position but worded differently. This is intentional: sighted users see a number; screen readers announce a spatial coordinate. No conflict.
+The `pieceLabels` visual overlay uses `piece.index` (1-based sequential number). The ARIA label uses grid coordinates (`row+1, col+1`). These are consistent representations of the same position but expressed differently. This is intentional: sighted users see a number; screen readers announce a spatial coordinate. No conflict.
 
 ---
 
-## 5. Hallucination Check — .jigg Spec Compliance
+## 6. Hallucination Check — .jigg Spec Compliance
 
 Audited all five source files against the `.jigg` spec constraints:
 
 | Check | Result |
 |---|---|
 | No `piece.row` field | ✓ Confirmed — `types.ts` has `gridCoord: { col, row }`, no top-level `row` |
-| No `piece.sprite` field | ✓ Confirmed — sprites live in `spriteMap: Map<string, Sprite>`, never on `Piece` |
+| No `piece.sprite` field | ✓ Confirmed — `grep` across all of `src/` returns zero matches for `piece.sprite`; sprites live exclusively in `spriteMap: Map<string, Sprite>` |
 | `piece.gridCoord` used for ARIA | ✓ Confirmed — `aria.ts` reads `piece.gridCoord.row / .col` |
 | `piece.index` used for labels | ✓ Confirmed — `cutter.ts` sets `index = row * cols + col + 1`; `preferences.ts` reads it |
-| No `spriteMap` confusion | ✓ Confirmed — `applyPreferences`, `applyHighContrast`, `applyGreyscale`, `applyPieceLabels` all take `Map<string, Sprite>` as an explicit argument; no property access on `Piece` for visual state |
+| No `spriteMap` confusion | ✓ Confirmed — `applyHighContrast`, `applyGreyscale`, `applyPieceLabels` all take `Map<string, Sprite>` as explicit argument; no visual state accessed via `Piece` |
+| sandwich filters destroyed on removal | ✓ Confirmed — `removeSandwichStroke` calls `f.destroy()` on each removed filter |
 
 ---
 
-## 6. Known Constraints
+## 7. Known Constraints
 
-### 6.1 Piece labels at low zoom (Visual)
+### 7.1 Piece labels at low zoom (Visual)
 
-Labels are rendered at a fixed 14 px font size and scale with the viewport. At viewport zoom < 0.3× labels become unreadable. There is a `TODO` comment in `createPieceLabel` (`preferences.ts:203`):
+Labels are rendered at 14 px and scale with the viewport. At zoom < 0.3× they become unreadable. `clampZoom` in `scene.ts` allows down to 0.05× — at that zoom a 14 px label renders at ~0.7 px.
 
 ```ts
 // TODO: implement non-scaling labels
-// At low viewport zoom (<0.3x) labels become unreadable
 // Fix: on each ticker frame, label.scale = 1 / viewport.scale.x for all visible labels
-// Only worth implementing if user feedback confirms this is a real pain point
 ```
 
-The `clampZoom` in `scene.ts` allows zoom down to 0.05×. At that zoom level, a 14 px label renders at ~0.7 px — completely invisible.
+### 7.2 Label GPU cost at high piece counts (Visual)
 
-### 6.2 Label GPU cost at high piece counts (Visual)
-
-`PIXI.Text` generates one GPU texture per unique string. At current 4×4 = 16 pieces this is negligible. A `TODO` in `preferences.ts:196` flags this:
+`PIXI.Text` generates one GPU texture per unique string. At 4×4 = 16 pieces this is negligible.
 
 ```ts
 // TODO: swap PIXI.Text for BitmapText if piece count exceeds ~2000
 ```
 
-Relevant if jigg scales to user-defined grid sizes.
+### 7.3 Greyscale does not affect tray background (Visual)
 
-### 6.3 Greyscale does not affect tray background (Visual)
+`applyGreyscale` operates on the `spriteMap` (PixiJS sprites). The tray `Graphics` background and DOM elements (preference checkboxes, filter strip, ARIA container) are unaffected. Users who enable greyscale will still see coloured tray chrome and coloured color-zone swatches. The swatches have no greyscale fallback text label — zone identification relies solely on the mean color fill.
 
-`applyGreyscale` operates on the `spriteMap` (PixiJS sprites). The tray `Graphics` background and HTML DOM elements (preference checkboxes, filter strip, ARIA container) are unaffected. Users who enable greyscale will still see the coloured tray chrome and colored color-zone swatches. The swatches have no greyscale fallback text label — zone identification relies solely on the mean color fill.
-
-### 6.4 High contrast does not affect the board grid overlay (Visual)
+### 7.4 High contrast does not affect the board grid overlay (Visual)
 
 `applyHighContrast` targets piece sprites only. The board grid overlay (`board.ts`) has no high-contrast variant — grid line color and opacity are static.
 
-### 6.5 reducedMotion auto-detect fires once at module import (Vestibular)
+### 7.5 reducedMotion auto-detect fires once at module import (Vestibular)
 
 ```ts
 const defaults: Preferences = {
@@ -191,27 +267,33 @@ const defaults: Preferences = {
 };
 ```
 
-This samples the media query **once at module evaluation time** and persists it to `localStorage`. If a user changes their OS accessibility setting mid-session without reloading, the in-memory Zustand state will not update. A `MediaQueryList.addEventListener('change', ...)` listener would be needed for live-update support.
+Samples the media query **once at module evaluation time** and persists to `localStorage`. If the user changes their OS accessibility setting mid-session without reloading, the in-memory Zustand state will not update. A `MediaQueryList.addEventListener('change', ...)` listener would be needed for live-update support.
 
-### 6.6 ARIA list is never updated after initial load (Informational)
+### 7.6 ARIA list is never updated after initial load (Informational)
 
 `setAriaLabel` must be called on every `piece.state` transition. Until Story 38 wires this up, screen-reader users hear stale state ("In tray") for pieces that have since been extracted or placed.
 
-### 6.7 No keyboard navigation on canvas (Informational)
+### 7.7 No keyboard navigation on canvas (Informational)
 
 Stories 38–42 (keyboard focus epic) are unscheduled beyond the spike in Story 38. The virtual cursor model is locked architecturally but not yet implemented. Canvas interactions (drag, rotate, snap) are pointer-only.
 
+### 7.8 Snap thickness constant not yet wired (Visual)
+
+`SNAP_HIGHLIGHT_THICKNESS_HC = 4` is defined in `scene.ts:45` but deferred (line 67: "reserved for a future Graphics stroke overlay"). The board-snap pulse currently applies only color and alpha from the HC variant. A 4px stroke border around the snap region is not yet rendered.
+
 ---
 
-## 7. Summary: Open Work by Priority
+## 8. Remaining Gaps by Priority
 
 | Priority | Issue | Story |
 |---|---|---|
-| P1 | `applyReducedMotion` is a stub — all four canvas animations ignore the flag | Story 37c |
-| P1 | zoom-to-piece reads `matchMedia` directly, not Zustand `reducedMotion` flag | Story 37c |
-| P1 | `setAriaLabel` never called on state transitions — screen reader state is stale | Story 38 |
-| P2 | High-contrast tray background uses α 0.9 instead of α 1.0 | Story 37a follow-up |
+| P1 | `setAriaLabel` never called on state transitions — screen reader state is always stale | Story 38 |
 | P2 | No keyboard navigation — canvas is pointer-only | Stories 38–42 |
+| P2 | Snap pulse thickness not applied (`SNAP_HIGHLIGHT_THICKNESS_HC = 4` wired to nothing) | Post-37d follow-up |
 | P3 | Labels unreadable below ~0.3× zoom | Post-launch (low priority) |
 | P3 | Greyscale filter doesn't reach tray chrome or color-zone swatches | Story 37a follow-up |
-| P3 | `reducedMotion` OS-change not detected live (only sampled at module load) | Story 37c |
+| P3 | `reducedMotion` OS-change not detected live (only sampled at module load) | Post-37c follow-up |
+
+**Resolved this session:**
+- ~~P1: `applyReducedMotion` is a stub~~ — fully implemented (Story 37c)
+- ~~P1: Zoom-to-piece reads `window.matchMedia` directly~~ — replaced with Zustand flag (Story 37c)

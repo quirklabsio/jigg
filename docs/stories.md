@@ -66,7 +66,7 @@
 - [ ] **Story 36b** — Content-aware edge type; `edgeType` currently derived from grid position only. For shaped images (circular crop, vignette, alpha-masked source), corner/edge grid pieces may be mostly transparent — not real puzzle edges. Compute average alpha of border pixels per piece at cut time; if a nominally-flat side sits over transparent pixels, don't count it as a flat side. Re-derive `edgeType` from content-aware flat-side count. Affects filter strip counts and future snap logic.
 - [x] **Story 37a** — Accessibility foundation + adaptive background + high contrast + greyscale. `src/utils/preferences.ts` — `Preferences` type (`highContrast`, `greyscale`, `pieceLabels`, `reducedMotion`, `backgroundPreset`), `loadPreferences`/`savePreferences`, `applyPreferences(prefs, pieces, spriteMap, luminance)`, `registerApplyFn`/`fireApplyPreferences` callback path (decouples store from spriteMap). `src/utils/luminance.ts` — `sampleImageLuminance(url)` via 1×1 canvas, CORS try/catch returns 128 on failure. `src/utils/aria.ts` — hidden `role=list` container, `initAriaLabels`/`setAriaLabel` using `piece.gridCoord.row/col`. Store: `highContrast`, `greyscale`, `pieceLabels`, `reducedMotion`, `backgroundPreset`, `imageLuminance`, `setPreference`. Adaptive bg: luminance < 100 → off-white, > 150 → charcoal, between → gray. Shift+B cycles presets. High contrast: bevel `lightAlpha`/`shadowAlpha` ×1.8, `OutlineFilter` edge stroke (follows alpha mask, not bounding box), tray darkens to `0x1a1a1a` at 90% opacity, swatch black border ring, snap highlight constants exported. Greyscale: named `ColorMatrixFilter` added/removed by `_tag`, strictly non-destructive to bevel/outline. Four checkboxes + BG preset buttons in tray strip with TODO comment. All applied on init and re-applied in CUTS_COMPLETE after BevelFilters attach. `npm run typecheck` passes.
 - [x] **Story 37b** — Piece number label overlay. `src/puzzle/types.ts` — added `index: number` (1-based, l→r t→b) only; `gridRow`/`gridCol` rejected (already `gridCoord`), `initialRotation` rejected (already `actual.rotation` in degrees per spec). `src/puzzle/cutter.ts` — `index = row * cols + col + 1` set on piece creation. `src/utils/preferences.ts` — `createPieceLabel` builds `Container` (label=`pieceLabel`) with `Text` (size-14, white fill, black stroke `{ color, width }`) and semi-opaque backing `Graphics` (roundRect, alpha 0.45); label at `(0,0)` (sprite anchor is piece centre); `applyPieceLabels` idempotent add/remove/update; `sprite.addChildAt(label, 0)`; counter-rotation `-(actual.rotation * Math.PI) / 180` for tray pieces at creation; `else { label.rotation = -sprite.rotation }` for canvas pieces at creation; `syncLabelRotation(sprite)` exported helper (`label.rotation = -sprite.rotation`) called from `rotate.ts` (after `sprite.rotation =`) and `drag.ts` (per frame inside `tweenRotation` ticker); counter-scale `1/sprite.scale.x` applied at creation and in `layoutTrayPieces` so labels read at native size in thumbnails; scale reset to 1 on extraction. PixiJS v8: `container.label` not `.name`; `getChildByLabel` not `getChildByName`; single-arg `addChild` calls. `src/canvas/tray.ts` — extraction paths use `label.rotation = -sprite.rotation` (not `0`) to account for piece rotation at extraction time; `layoutTrayPieces` counter-scales existing labels; preference checkboxes subscribe to store so they sync after prefs load (init order fix); filter strip `fontSize` 12→14; `setTrayLoading(true/false)` — hides grid+filter, shows spinning arc during WASM cut phase, reveals pieces in CUTS_COMPLETE. `src/canvas/scene.ts` — imports `setTrayLoading`; calls `true` after `initTray`, `false` after `CUTS_COMPLETE` preferences apply. `npm run typecheck` passes.
-- [ ] **Story 37c** — Reduced motion mode (depends on 37a)
+- [x] **Story 37c** — Reduced motion mode. `src/utils/preferences.ts` — added `_viewport` / `initPreferencesViewport(viewport)`; `DECELERATE_FRICTION_DEFAULT = 0.95` / `DECELERATE_FRICTION_REDUCED = 1.0`; implemented `applyReducedMotion`: sets decelerate plugin friction to 1.0 on enable (board stops instantly), restores to 0.95 on disable, cancels `viewport.plugins.remove('animate')` on enable. `src/canvas/scene.ts` — imports `applyReducedMotion`, `initPreferencesViewport`; calls `initPreferencesViewport(viewport)` after `.decelerate({ friction: 0.95 })`; extended `usePuzzleStore.subscribe` to call `applyReducedMotion(state.reducedMotion)` on change; board-snap pulse wrapped in `if (!reducedMotion)` — skipped entirely, per-tick bail-out added for mid-pulse toggle. `src/puzzle/drag.ts` — `tweenRotation` ticker checks `reducedMotion` on every tick → snaps to `to` and removes; lift tween at both `initDragListeners` pointerdown and `startDragForPiece` replaced with explicit `if (reducedMotion)` branch (snap + `syncLabelRotation`); snap-back in `onUp` same treatment. `src/canvas/tray.ts` — `setTrayOpen` `window.matchMedia` → `usePuzzleStore.getState().reducedMotion`; animation ticker snaps `currentTrayHeight = targetTrayHeight` immediately on first frame when flag is set; `zoomToPlacePiece` `window.matchMedia` → Zustand flag; tether ticker checks `reducedMotion` per tick — snaps sprite to screen center, cancels viewport animate, calls `completeZoomAnimation`. Completion animation TODO comment: `// TODO: Story 51 not yet shipped — apply reducedMotion when implemented`. `npm run typecheck` passes.
 
 ---
 
@@ -201,17 +201,109 @@ High contrast core repair. `npm run typecheck` passes.
 
 ---
 
-### Accessibility Audit (2026-04-05)
+### Story 37c (2026-04-05)
 
-Generated `docs/accessibility.md` — comprehensive audit of the accessibility suite across `puzzleStore.ts`, `preferences.ts`, `scene.ts`, `tray.ts`, `drag.ts`, `aria.ts`, and `types.ts`.
+Reduced motion mode — `applyReducedMotion` fully implemented, no longer a stub. `npm run typecheck` passes.
 
-**Key findings:**
-- `applyReducedMotion` is a confirmed stub (Story 37c). All four canvas animations (drag-lift tween, snap-back tween, board-snap pulse, zoom-to-piece) ignore the Zustand `reducedMotion` flag.
-- Zoom-to-place reads `window.matchMedia` directly instead of Zustand — known TODO in the code, must be fixed in Story 37c.
-- No animation uses `duration: 0` — no NaN/Infinity risk when 37c ships.
-- High-contrast tray background uses `alpha: 0.9` instead of `alpha: 1.0` — minor but counter to the intent of high-contrast mode.
-- ARIA labels are only initialised once on load; `setAriaLabel` is never called on state transitions (in-tray → on-canvas → placed). Story 38 must wire this.
-- All `.jigg` spec checks pass: no `piece.row`, no `piece.sprite`, `piece.gridCoord` used correctly throughout.
+**`src/utils/preferences.ts`**
+- Added `Viewport` import from `pixi-viewport`.
+- Added `_viewport: Viewport | null` module var + `initPreferencesViewport(viewport)` export (same pattern as `initPreferencesApp`).
+- Added `DECELERATE_FRICTION_DEFAULT = 0.95` (mirrors `scene.ts` `.decelerate({ friction: 0.95 })`) and `DECELERATE_FRICTION_REDUCED = 1.0`.
+- Implemented `applyReducedMotion(active)`: gets `_viewport.plugins.get('decelerate')`, casts to `any` and sets `.friction`; calls `_viewport.plugins.remove('animate')` on enable only.
+
+**`src/canvas/scene.ts`**
+- Imported `applyReducedMotion` and `initPreferencesViewport` from preferences.
+- Called `initPreferencesViewport(viewport)` immediately after `.decelerate({ friction: 0.95 })`.
+- Extended existing `usePuzzleStore.subscribe` — added `if (state.reducedMotion !== prev.reducedMotion) applyReducedMotion(state.reducedMotion)` branch so mid-session toggles apply immediately.
+- Board-snap pulse: wrapped `app.ticker.add(tickerFn)` in `if (!reducedMotion)` block; added per-tick bail-out inside the ticker for mid-pulse toggle. Reset to `scale/tint/alpha` defaults in all exit paths.
+
+**`src/puzzle/drag.ts`**
+- `tweenRotation` ticker: added per-tick `reducedMotion` check — snaps to `to` and removes ticker immediately.
+- `initDragListeners` pointerdown lift: replaced `tweenRotation(...)` with explicit `if (reducedMotion) { snap } else { tween }`. `syncLabelRotation` called in both branches.
+- `startDragForPiece` lift: same explicit branch.
+- `onUp` snap-back: same explicit branch.
+
+**`src/canvas/tray.ts`**
+- `setTrayOpen`: replaced `window.matchMedia('prefers-reduced-motion')` with `usePuzzleStore.getState().reducedMotion`.
+- Animation ticker: added reducedMotion snap block at top — `currentTrayHeight = targetTrayHeight; applyTrayLayout(); return` when flag is set and heights differ.
+- `zoomToPlacePiece`: replaced `window.matchMedia` with `usePuzzleStore.getState().reducedMotion`; removed TODO comment.
+- Visual tether ticker: added per-tick `reducedMotion` check — snaps sprite to `endScreenX/endScreenY`, removes viewport animate plugin, calls `completeZoomAnimation`.
+
+---
+
+### Accessibility Audit + Story 37c Intake (2026-04-05)
+
+**Accessibility Audit — post-37d**
+
+Rewrote `docs/accessibility.md` as a comprehensive post-37d audit. All five source files (`puzzleStore.ts`, `preferences.ts`, `scene.ts`, `tray.ts`, `drag.ts`) plus `aria.ts` and `types.ts` audited against spec.
+
+**Story 37d verified repairs (all PASS):**
+- AC-1 Sandwich stroke: two `OutlineFilter` instances (white 1.5px + black 2.5px), both tagged `hc-sandwich`, BevelFilter stays at index 0, GPU memory freed on removal.
+- AC-2 Solid tray: `TRAY_BG_HC_COLOR = 0x000000` / `TRAY_BG_HC_ALPHA = 1.0` confirmed. Previous α 0.9 gap resolved. `usePuzzleStore.subscribe` in `initTray` fires `redrawBackground()` synchronously on toggle.
+- AC-3 Label pill backing: `LABEL_BG_ALPHA_HC = 0.8` applied only when `highContrast: true`; update path (`active && existing`) also calls `updateLabelBgAlpha`.
+- AC-4 Neon magenta snap: `SNAP_HIGHLIGHT_COLOR_HC = 0xff00ff` at α 1.0 confirmed. `SNAP_HIGHLIGHT_THICKNESS_HC = 4` defined but deferred (reserved for future stroke overlay — P2 gap).
+
+**Hallucination guard:** `grep` across all of `src/` — zero matches for `piece.sprite`. Confirmed spec-clean.
+
+**Remaining gaps (unchanged from pre-37d except α 0.9 resolved):**
+- P1: `applyReducedMotion` still a stub (Story 37c).
+- P1: zoom-to-piece reads `window.matchMedia` directly, not Zustand flag (Story 37c).
+- P1: `setAriaLabel` never called on state transitions — screen reader state is stale (Story 38).
+- P2: No keyboard navigation (Stories 38–42).
+- P2: `SNAP_HIGHLIGHT_THICKNESS_HC` not yet wired.
+- P3: Labels unreadable below ~0.3× zoom; greyscale doesn't reach tray chrome; `reducedMotion` not re-detected on OS change mid-session.
+
+**Story 37c spec received — not yet implemented**
+
+Full spec delivered. Touch only: `preferences.ts`, `drag.ts`, `scene.ts`, `tray.ts`. Key contracts:
+- `applyReducedMotion` must be fully implemented — no longer a stub.
+- Decelerate friction → `1.0` on enable, restored to `DECELERATE_FRICTION_DEFAULT` on disable; in-flight `animate` plugin cancelled immediately.
+- Store subscription wired for mid-session toggle, idempotent.
+- Every ticker tween checks flag on every tick — snaps to end state if toggled mid-tween.
+- Drag lift: snaps immediately, no 80ms tween. `syncLabelRotation` always called.
+- Snap-back: immediate `position.set`. Board pulse: skipped entirely.
+- Tray open/close: snaps immediately. Spiral: piece appears at position.
+- Zoom-to-piece: `moveCenter` + `scale.set`, `window.matchMedia` check replaced with Zustand flag.
+- Visual tether + opacity pulse: skipped entirely.
+- Completion animation: `// TODO: Story 51` comment only.
+- STRICT: never `duration: 0`. Explicit `if (reducedMotion)` branches only.
+
+### Story 37c — AC-3 Precision Centering + UI Repairs (2026-04-05)
+
+Follow-on refinements after the core Story 37c implementation.
+
+**AC-3 Precision Centering**
+
+Initial `zoomToPlacePiece` teleport placed the piece at raw screen centre (ignoring tray height). Refined to centre on the playable area (above tray):
+- `viewport.scale.set(clampedScale)` called **first**
+- `trayOffset = currentTrayHeight / 2 / viewport.scale.y` converts tray half-height to world units
+- `viewport.moveCenter(piece.canonical.x, piece.canonical.y + trayOffset)` shifts piece to playable centre
+- `viewport.plugins.get('decelerate')?.reset()` clears any residual momentum
+- Same three-step sequence applied to the mid-flight tether ticker bail-out path
+
+**HC Color Swatch Halo**
+
+Dark swatches (`0x000000`) were invisible against the pure-black HC tray. Replaced single black border with a dual-ring halo designed to abut at `r+1.5`:
+- Outer ring: `circle(cx, cy, drawRadius + 2.5).stroke({ color: outerColor, width: 2 })` — covers `r+1.5` to `r+3.5`
+- Inner ring: `circle(cx, cy, drawRadius + 1).stroke({ color: 0x000000, width: 1 })` — covers `r+0.5` to `r+1.5`
+- Rings share a clean abutment edge at exactly `r+1.5` — no overlap, no gap
+- In HC mode: outer ring is white (normal) or magenta `0xff00ff` (active)
+- Non-HC active ring drawn at `drawRadius + 3` (dynamically relative to fill radius)
+
+**SWATCH_SPACING Tuning**
+
+Iterated on spacing feedback: `28 → 36 → 32`. Settled at `SWATCH_SPACING = 32`.
+
+**AC-6 Swatch Selection State**
+
+Added distinct active-swatch visual treatment. Initial pass was wrong — tied `drawRadius` and white dot to `isActive && highContrast` condition. User correction:
+- `drawRadius = isActive ? SWATCH_RADIUS_ACTIVE : SWATCH_RADIUS` — unconditional on HC
+- White centre dot `if (isActive)` — unconditional on HC
+- Magenta outer ring: only inside existing `if (hcSwatches)` block, changes `outerColor` from white to `0xff00ff` when `isActive`
+
+Constants: `SWATCH_RADIUS_ACTIVE = 13`, `SWATCH_GLOW_R = 2`, `SWATCH_HC_ACTIVE_CLR = 0xff00ff`.
+
+---
 
 ### Story 36
 

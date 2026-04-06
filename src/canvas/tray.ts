@@ -215,8 +215,11 @@ function visibleInTray(): string[] {
 }
 
 // Color swatch constants
-const SWATCH_RADIUS  = 10; // px — filled circle radius
-const SWATCH_SPACING = 28; // px — centre-to-centre horizontal spacing
+const SWATCH_RADIUS        = 10;     // px — inactive filled circle radius
+const SWATCH_RADIUS_ACTIVE = 13;     // px — HC active: "pops" toward user
+const SWATCH_SPACING       = 32;     // px — centre-to-centre horizontal spacing
+const SWATCH_GLOW_R        = 2;      // px — white inner-glow dot radius (HC active)
+const SWATCH_HC_ACTIVE_CLR = 0xff00ff; // neon magenta — matches snap-highlight language
 const NUM_ZONES      = 5;
 const SWATCH_AREA_W  = NUM_ZONES * SWATCH_SPACING + 8; // right-side reserved width
 
@@ -340,16 +343,34 @@ function renderFilterStrip(): void {
     swatch.cursor    = 'pointer';
 
     const g = new Graphics();
-    // Active ring (drawn first, behind fill)
-    if (isActive) {
-      g.circle(cx, swatchCY, SWATCH_RADIUS + 3).stroke({ color: 0xffffff, width: 2 });
+    // Active swatches always scale up — pops toward the user regardless of HC.
+    const drawRadius = isActive ? SWATCH_RADIUS_ACTIVE : SWATCH_RADIUS;
+
+    // ── Non-HC active ring ───────────────────────────────────────────────────
+    // White selection ring 3 px outside the fill — normal mode only.
+    if (isActive && !hcSwatches) {
+      g.circle(cx, swatchCY, drawRadius + 3).stroke({ color: 0xffffff, width: 2 });
     }
-    // High contrast border — distinguishable without relying on color alone
+
+    // ── HC dual-ring halo ────────────────────────────────────────────────────
+    // Rings abut perfectly (touch at drawRadius + 1.5):
+    //   Outer (r+2.5, w=2) → pixel-radii (r+1.5)–(r+3.5)
+    //   Inner (r+1,   w=1) → pixel-radii (r+0.5)–(r+1.5)
+    // Outer ring: Neon Magenta when active+HC, White otherwise.
     if (hcSwatches) {
-      g.circle(cx, swatchCY, SWATCH_RADIUS + 1).stroke({ color: 0x000000, width: 2 });
+      const outerColor = (isActive) ? SWATCH_HC_ACTIVE_CLR : 0xffffff;
+      g.circle(cx, swatchCY, drawRadius + 2.5).stroke({ color: outerColor, width: 2 });
+      g.circle(cx, swatchCY, drawRadius + 1  ).stroke({ color: 0x000000,   width: 1 });
     }
-    // Filled swatch circle
-    g.circle(cx, swatchCY, SWATCH_RADIUS).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
+
+    // ── Filled swatch circle ─────────────────────────────────────────────────
+    g.circle(cx, swatchCY, drawRadius).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
+
+    // ── Active inner glow ────────────────────────────────────────────────────
+    // White dot at centre — always when active, drawn last (on top of fill).
+    if (isActive) {
+      g.circle(cx, swatchCY, SWATCH_GLOW_R).fill({ color: 0xffffff });
+    }
 
     swatch.addChild(g);
 
@@ -472,8 +493,8 @@ export function setTrayOpen(open: boolean): void {
   usePuzzleStore.getState().setTrayOpen(open);
   targetTrayHeight = open ? TRAY_HEIGHT_OPEN : TRAY_HEIGHT_CLOSED;
 
-  // Reduced motion: snap immediately
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Reduced motion: snap immediately instead of lerping
+  if (usePuzzleStore.getState().reducedMotion) {
     currentTrayHeight = targetTrayHeight;
     applyTrayLayout();
   }
@@ -825,11 +846,18 @@ function zoomToPlacePiece(pieceId: string): void {
   _zoomInFlight      = true;
   _zoomFlightPieceId = pieceId;
 
-  // Reduced motion: skip animations, jump directly
-  // TODO: replace matchMedia check with Story 37 reducedMotion Zustand flag when it ships
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    _viewport.moveCenter(piece.canonical.x, piece.canonical.y);
+  // Reduced motion: precision teleport — no animation, perfectly centred in
+  // the playable area above the tray.
+  if (usePuzzleStore.getState().reducedMotion) {
+    // 1. Scale first so the trayOffset conversion uses the final scale.
     _viewport.scale.set(clampedScale);
+    // 2. Offset accounts for tray height so the piece lands at the centre of
+    //    the playable area, not the raw screen centre (which is half-occluded
+    //    by the tray).  trayOffset world-units down = currentTrayHeight/2 px up.
+    const trayOffset = currentTrayHeight / 2 / _viewport.scale.y;
+    _viewport.moveCenter(piece.canonical.x, piece.canonical.y + trayOffset);
+    // 3. Zero any leftover decelerate momentum so the board doesn't drift.
+    _viewport.plugins.get('decelerate')?.reset();
     completeZoomAnimation(pieceId, sprite, container, landX, landY);
     return;
   }
@@ -839,8 +867,22 @@ function zoomToPlacePiece(pieceId: string): void {
   const endScreenY    = _app.screen.height / 2;
   const startTime     = performance.now();
 
-  // Visual tether: animate sprite from tray position toward screen center
+  // Visual tether: animate sprite from tray position toward screen center.
+  // Per-tick reducedMotion check: if toggled mid-flight, snap and complete.
   const tickerFn = () => {
+    if (usePuzzleStore.getState().reducedMotion) {
+      // Mid-flight toggle: apply same precision teleport as the initial path.
+      _viewport?.plugins.remove('animate');
+      if (_viewport) {
+        _viewport.scale.set(clampedScale);
+        const trayOffset = currentTrayHeight / 2 / _viewport.scale.y;
+        _viewport.moveCenter(piece.canonical.x, piece.canonical.y + trayOffset);
+        _viewport.plugins.get('decelerate')?.reset();
+      }
+      sprite.position.set(endScreenX, endScreenY);
+      completeZoomAnimation(pieceId, sprite, container, landX, landY);
+      return;
+    }
     const t     = Math.min((performance.now() - startTime) / ANIM_DURATION, 1);
     const eased = easeInOutQuad(t);
     sprite.position.set(
@@ -1115,8 +1157,16 @@ export function initTray(
   app.stage.on('pointercancel',    (e) => onStagePointerUp(e));
   app.stage.on('pointerupoutside', (e) => onStagePointerUp(e));
 
-  // ── Animation ticker (lerp) ─────────────────────────────────────────────────
+  // ── Animation ticker (lerp / snap) ─────────────────────────────────────────
   app.ticker.add(() => {
+    // Reduced motion: skip lerp — snap to target on any frame where they differ.
+    if (usePuzzleStore.getState().reducedMotion) {
+      if (currentTrayHeight !== targetTrayHeight) {
+        currentTrayHeight = targetTrayHeight;
+        applyTrayLayout();
+      }
+      return;
+    }
     if (Math.abs(currentTrayHeight - targetTrayHeight) < 0.5) {
       if (currentTrayHeight !== targetTrayHeight) {
         currentTrayHeight = targetTrayHeight;

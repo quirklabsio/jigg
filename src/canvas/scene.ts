@@ -24,7 +24,9 @@ import { initAriaLabels } from '../utils/aria';
 import {
   loadPreferences,
   applyPreferences,
+  applyReducedMotion,
   initPreferencesApp,
+  initPreferencesViewport,
   registerApplyFn,
   BG_PRESETS_ORDER,
 } from '../utils/preferences';
@@ -200,7 +202,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     .drag()
     .pinch()
     .wheel()
-    .decelerate({ friction: 0.95 });
+    .decelerate({ friction: 0.95 }); // DECELERATE_FRICTION_DEFAULT = 0.95 — mirrored in preferences.ts
+
+  // Give preferences.ts a reference to the viewport so applyReducedMotion
+  // can adjust the decelerate plugin friction and cancel animate on toggle.
+  initPreferencesViewport(viewport);
 
   viewport.clampZoom({
     minScale: 0.05,
@@ -274,31 +280,48 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   setBoardSnapCallback((groupId) => {
     const result = checkAndApplyBoardSnap(groupId, spriteMap);
     if (result) {
-      const startTime = performance.now();
-      const DURATION_MS = 150;
-      // Snapshot HC state at snap time — reads module-level vars set by updateSnapHighlight.
-      const pulseColor = _snapHighlightColor;
-      const pulseAlpha = _snapHighlightAlpha;
-      const tickerFn = () => {
-        const t = Math.min((performance.now() - startTime) / DURATION_MS, 1);
-        const pulseFactor = 1 + 0.05 * Math.sin(t * Math.PI);
+      if (usePuzzleStore.getState().reducedMotion) {
+        // Skip pulse entirely — snap pieces to final state immediately
         for (const pid of result.pieceIds) {
           const s = spriteMap.get(pid);
-          if (s) {
-            s.scale.set(scale * pulseFactor);
-            s.tint  = pulseColor;
-            s.alpha = pulseAlpha + (1 - pulseAlpha) * (1 - Math.sin(t * Math.PI));
-          }
+          if (s) { s.scale.set(scale); s.tint = 0xffffff; s.alpha = 1; }
         }
-        if (t >= 1) {
+      } else {
+        const startTime = performance.now();
+        const DURATION_MS = 150;
+        // Snapshot HC state at snap time — reads module-level vars set by updateSnapHighlight.
+        const pulseColor = _snapHighlightColor;
+        const pulseAlpha = _snapHighlightAlpha;
+        const tickerFn = () => {
+          // Mid-pulse reducedMotion toggle: snap to final state immediately
+          if (usePuzzleStore.getState().reducedMotion) {
+            for (const pid of result.pieceIds) {
+              const s = spriteMap.get(pid);
+              if (s) { s.scale.set(scale); s.tint = 0xffffff; s.alpha = 1; }
+            }
+            app.ticker.remove(tickerFn);
+            return;
+          }
+          const t = Math.min((performance.now() - startTime) / DURATION_MS, 1);
+          const pulseFactor = 1 + 0.05 * Math.sin(t * Math.PI);
           for (const pid of result.pieceIds) {
             const s = spriteMap.get(pid);
-            if (s) { s.scale.set(scale); s.tint = 0xffffff; s.alpha = 1; }
+            if (s) {
+              s.scale.set(scale * pulseFactor);
+              s.tint  = pulseColor;
+              s.alpha = pulseAlpha + (1 - pulseAlpha) * (1 - Math.sin(t * Math.PI));
+            }
           }
-          app.ticker.remove(tickerFn);
-        }
-      };
-      app.ticker.add(tickerFn);
+          if (t >= 1) {
+            for (const pid of result.pieceIds) {
+              const s = spriteMap.get(pid);
+              if (s) { s.scale.set(scale); s.tint = 0xffffff; s.alpha = 1; }
+            }
+            app.ticker.remove(tickerFn);
+          }
+        };
+        app.ticker.add(tickerFn);
+      }
 
       for (const pid of result.pieceIds) {
         const f = shadowMap.get(pid);
@@ -350,10 +373,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   // AC-4: Initialise snap highlight state from loaded prefs, then subscribe
   // so it stays in sync whenever highContrast or reducedMotion changes.
+  // Story 37c: also call applyReducedMotion on reducedMotion toggle so the
+  // decelerate friction and any in-flight animate plugin update immediately.
   updateSnapHighlight(prefs.highContrast, prefs.reducedMotion);
   usePuzzleStore.subscribe((state, prev) => {
     if (state.highContrast !== prev.highContrast || state.reducedMotion !== prev.reducedMotion) {
       updateSnapHighlight(state.highContrast, state.reducedMotion);
+    }
+    if (state.reducedMotion !== prev.reducedMotion) {
+      applyReducedMotion(state.reducedMotion);
     }
   });
 

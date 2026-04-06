@@ -237,5 +237,25 @@
 - **Fix — extraction**: `tray.ts` extraction paths had `label.rotation = 0; label.scale.set(1)` to kill tray counter-rotation. The `0` is wrong if the sprite already has a canvas rotation. Change to `label.rotation = -sprite.rotation`.
 - **Rule**: Labels are children of sprites; they inherit the sprite's rotation. Every code path that mutates `sprite.rotation` must follow with `syncLabelRotation(sprite)`. The invariant is always `label.rotation === -sprite.rotation`.
 
+## Tool Invocation / Claude Agent SDK
+
+### Typed tool parameters fail if the tool schema is not in context — load with `ToolSearch` first
+- **Symptom**: `InputValidationError: TodoWrite failed — parameter 'todos' expected as array but provided as string`. The tool call looks correct in the source but the runtime rejects the parameter type.
+- **Root cause**: Some tools (e.g. `TodoWrite`) are deferred — their schemas are not included in the initial prompt context. Without the schema, typed parameters (arrays, numbers, booleans) are serialised as plain strings. The client-side validator then rejects the mismatch.
+- **Fix**: Call `ToolSearch` with `query: "select:TodoWrite"` (substituting the target tool name) before invoking the tool. Once `ToolSearch` returns the schema in a `<functions>` block, the tool can be called with correctly-typed parameters.
+- **Rule**: If any tool call fails with `InputValidationError` citing an unexpected string type, the tool's schema is missing from context. Use `ToolSearch` to load it, then retry the call.
+
+## pixi-viewport: decelerate plugin `.friction` not on the `Plugin` type — cast to `any`
+- **Symptom**: TypeScript would reject `viewport.plugins.get('decelerate').friction = value` — `friction` does not exist on type `Plugin`.
+- **Root cause**: `Plugins.get(name)` returns the `Plugin` base class type. `DeceleratePlugin` extends `Plugin` and adds `.friction` at runtime, but the narrowed return type doesn't know which plugin subtype was retrieved.
+- **Fix**: Cast the result: `(viewport.plugins.get('decelerate') as any).friction = value`. The property exists at runtime; the cast is safe.
+- **Rule**: pixi-viewport plugin-specific properties always require `as any` or a manual cast when accessed via `plugins.get()`.
+
+## PixiJS Graphics: active ring radius must track the fill radius, not a hardcoded constant
+- **Symptom**: After scaling the active swatch fill from radius 10 to 13, the non-HC active ring (previously `SWATCH_RADIUS + 3 = 13`) sat exactly at the fill edge — visually the ring merged with or disappeared behind the fill.
+- **Root cause**: The ring radius was hardcoded as `SWATCH_RADIUS + 3` — a constant. When `drawRadius` was made dynamic (10 inactive, 13 active), the ring didn't follow.
+- **Fix**: Use `drawRadius + 3` instead of `SWATCH_RADIUS + 3` for the ring so it always sits 3 px outside the current fill radius, regardless of active state.
+- **Rule**: Any decorative ring that must appear outside a fill circle should be expressed as `fillRadius + gap`, not as a constant, when the fill radius can change.
+
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.

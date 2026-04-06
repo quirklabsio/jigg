@@ -51,6 +51,12 @@ function tweenRotation(
   const start = performance.now();
   const tickerFn = () => {
     if (tweenId !== myId) { app.ticker.remove(tickerFn); return; } // stale — cancelled
+    // Mid-tween reducedMotion toggle: snap to end state immediately.
+    if (usePuzzleStore.getState().reducedMotion) {
+      for (const { sprite: s } of entries) { s.rotation = to; syncLabelRotation(s); }
+      app.ticker.remove(tickerFn);
+      return;
+    }
     const t = Math.min((performance.now() - start) / TWEEN_MS, 1);
     const rot = from + (to - from) * easeInOut(t);
     for (const { sprite: s } of entries) { s.rotation = rot; syncLabelRotation(s); }
@@ -246,7 +252,12 @@ function onUp(e?: FederatedPointerEvent): void {
     const snapRot = nearestQuarter(preDragRotation);
     // Snapshot current entries before async snap below mutates groupEntries
     const entriesSnapshot = [...groupEntries];
-    tweenRotation(_app, entriesSnapshot, as.rotation, snapRot);
+    if (usePuzzleStore.getState().reducedMotion) {
+      // Snap immediately — no 80ms tween
+      for (const { sprite: s } of entriesSnapshot) { s.rotation = snapRot; syncLabelRotation(s); }
+    } else {
+      tweenRotation(_app, entriesSnapshot, as.rotation, snapRot);
+    }
   }
 
   // ── Shadow: revert to resting ────────────────────────────────────────────
@@ -434,8 +445,13 @@ export function initDragListeners(
     dragOffsetX = origin.x - px;
     dragOffsetY = origin.y - py;
 
-    // 1° rotation tween on pickup
-    tweenRotation(app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+    // 1° rotation tween on pickup — snap immediately if reducedMotion
+    if (usePuzzleStore.getState().reducedMotion) {
+      const liftRot = preDragRotation + LIFT_ROT;
+      for (const { sprite: s } of groupEntries) { s.rotation = liftRot; syncLabelRotation(s); }
+    } else {
+      tweenRotation(app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+    }
 
     // Shadow: dragging state
     _dragStartCallback?.(bestGroupId);
@@ -538,7 +554,14 @@ export function startDragForPiece(
   dragOffsetX = origin.x - worldX;
   dragOffsetY = origin.y - worldY;
 
-  tweenRotation(_app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+  // 1° rotation tween on pickup — snap immediately if reducedMotion
+  if (usePuzzleStore.getState().reducedMotion) {
+    const liftRot = preDragRotation + LIFT_ROT;
+    anchorRef.rotation = liftRot;
+    syncLabelRotation(anchorRef);
+  } else {
+    tweenRotation(_app, groupEntries, preDragRotation, preDragRotation + LIFT_ROT);
+  }
   _dragStartCallback?.(group.id);
 }
 
