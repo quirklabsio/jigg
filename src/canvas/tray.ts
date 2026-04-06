@@ -16,7 +16,7 @@ import {
   insertGroupAABB,
   startDragForPiece,
 } from '../puzzle/drag';
-import { BACKGROUND_PRESETS, BG_PRESETS_ORDER, LABEL_CONTAINER_NAME } from '../utils/preferences';
+import { addGreyscaleFilter, BACKGROUND_PRESETS, BG_PRESETS_ORDER, LABEL_CONTAINER_NAME } from '../utils/preferences';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -108,6 +108,12 @@ let _loadingTickerFn: (() => void) | null = null;
 
 // HC store subscription — unsubscribed on teardown, replaced on re-init (AC-2)
 let _unsubscribeHC: (() => void) | null = null;
+
+// Greyscale store subscription — unsubscribed on teardown (Story 37e)
+let _unsubscribeGreyscale: (() => void) | null = null;
+
+// Zone swatch containers — rebuilt on each renderFilterStrip call (Story 37e)
+const _swatchContainers: Container[] = [];
 
 // Zoom-to-place animation state (Story 36)
 let _zoomInFlight = false;
@@ -223,6 +229,56 @@ const SWATCH_HC_ACTIVE_CLR = 0xff00ff; // neon magenta — matches snap-highligh
 const NUM_ZONES      = 5;
 const SWATCH_AREA_W  = NUM_ZONES * SWATCH_SPACING + 8; // right-side reserved width
 
+// ─── Zone label constants (Story 37e) ────────────────────────────────────────
+
+const ZONE_LABEL_FONT_SIZE_DEFAULT = 10;
+const ZONE_LABEL_FONT_SIZE_ACTIVE  = 13;
+const ZONE_LABEL_FILL              = 0xffffff;
+const ZONE_LABEL_STROKE            = 0x000000;
+const ZONE_LABEL_STROKE_THICK      = 2;
+const ZONE_LABEL_NAME              = 'zoneLabel';
+
+/**
+ * Add a centred zone index label (Z1–Z5) to a swatch container.
+ * Idempotent — removes any existing label first.
+ * Also hides the glowDot on the active swatch to avoid clash with text.
+ */
+function addZoneLabel(swatchContainer: Container, zoneIndex: number, active: boolean): void {
+  removeZoneLabel(swatchContainer);
+
+  const fontSize = active ? ZONE_LABEL_FONT_SIZE_ACTIVE : ZONE_LABEL_FONT_SIZE_DEFAULT;
+  const label = new Text({
+    text: `Z${zoneIndex + 1}`,
+    style: {
+      fontSize,
+      fontWeight: 'bold',
+      fill: ZONE_LABEL_FILL,
+      stroke: { color: ZONE_LABEL_STROKE, width: ZONE_LABEL_STROKE_THICK },
+    },
+  });
+  label.name = ZONE_LABEL_NAME;
+  label.anchor.set(0.5);
+  // Swatch containers are positioned at circle center (0,0 local) — label sits at origin.
+  label.position.set(0, 0);
+  swatchContainer.addChild(label);
+
+  // Always hide the glow dot when a zone label is present — they clash visually
+  const glowDot = swatchContainer.getChildByName('glowDot');
+  if (glowDot) glowDot.visible = false;
+}
+
+/**
+ * Remove zone label from a swatch container and restore glow dot visibility.
+ */
+function removeZoneLabel(swatchContainer: Container): void {
+  const existing = swatchContainer.getChildByName(ZONE_LABEL_NAME);
+  if (existing) swatchContainer.removeChild(existing);
+
+  // Restore glow dot visibility
+  const glowDot = swatchContainer.getChildByName('glowDot');
+  if (glowDot) glowDot.visible = true;
+}
+
 /**
  * Compute the mean colorVector of all pieces (all states) in each zone.
  * Used as the swatch fill colour — stable regardless of tray state.
@@ -324,9 +380,14 @@ function renderFilterStrip(): void {
   // ── Color zone swatches ──────────────────────────────────────────────────
   const meanColors  = zoneMeanColors();
   const swatchCY    = FILTER_STRIP_HEIGHT / 2;
-  const { highContrast: hcSwatches } = usePuzzleStore.getState();
+  const { highContrast: hcSwatches, greyscale } = usePuzzleStore.getState();
   // Place swatches starting from right of text area, centred in strip
   const swatchStartX = textAreaW + (SWATCH_AREA_W - NUM_ZONES * SWATCH_SPACING) / 2 + SWATCH_RADIUS;
+
+  // TODO: Story 52 — add zone index labels to preferences color zone buttons
+  // when greyscale active (AC-3). The filter strip swatches below receive Z1–Z5
+  // labels via addZoneLabel, but a future settings panel (Story 52) must also
+  // propagate zone indices to any DOM color zone filter buttons it introduces.
 
   for (let z = 0; z < NUM_ZONES; z++) {
     const filterKey = `zone-${z}` as TrayFilter;
@@ -338,9 +399,12 @@ function renderFilterStrip(): void {
 
     const cx = swatchStartX + z * SWATCH_SPACING;
 
+    // Swatch container positioned at circle center — children draw at (0, 0).
+    // This allows zone labels to be placed at (0, 0) with anchor (0.5).
     const swatch = new Container();
     swatch.eventMode = 'static';
     swatch.cursor    = 'pointer';
+    swatch.position.set(cx, swatchCY);
 
     const g = new Graphics();
     // Active swatches always scale up — pops toward the user regardless of HC.
@@ -349,7 +413,7 @@ function renderFilterStrip(): void {
     // ── Non-HC active ring ───────────────────────────────────────────────────
     // White selection ring 3 px outside the fill — normal mode only.
     if (isActive && !hcSwatches) {
-      g.circle(cx, swatchCY, drawRadius + 3).stroke({ color: 0xffffff, width: 2 });
+      g.circle(0, 0, drawRadius + 3).stroke({ color: 0xffffff, width: 2 });
     }
 
     // ── HC dual-ring halo ────────────────────────────────────────────────────
@@ -359,20 +423,30 @@ function renderFilterStrip(): void {
     // Outer ring: Neon Magenta when active+HC, White otherwise.
     if (hcSwatches) {
       const outerColor = (isActive) ? SWATCH_HC_ACTIVE_CLR : 0xffffff;
-      g.circle(cx, swatchCY, drawRadius + 2.5).stroke({ color: outerColor, width: 2 });
-      g.circle(cx, swatchCY, drawRadius + 1  ).stroke({ color: 0x000000,   width: 1 });
+      g.circle(0, 0, drawRadius + 2.5).stroke({ color: outerColor, width: 2 });
+      g.circle(0, 0, drawRadius + 1  ).stroke({ color: 0x000000,   width: 1 });
     }
 
     // ── Filled swatch circle ─────────────────────────────────────────────────
-    g.circle(cx, swatchCY, drawRadius).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
-
-    // ── Active inner glow ────────────────────────────────────────────────────
-    // White dot at centre — always when active, drawn last (on top of fill).
-    if (isActive) {
-      g.circle(cx, swatchCY, SWATCH_GLOW_R).fill({ color: 0xffffff });
-    }
+    g.circle(0, 0, drawRadius).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
 
     swatch.addChild(g);
+
+    // ── Active inner glow dot — separate named child for visibility toggle ───
+    // White dot at centre — always created, visible only when active.
+    const glowDot = new Graphics();
+    glowDot.name = 'glowDot';
+    glowDot.circle(0, 0, SWATCH_GLOW_R).fill({ color: 0xffffff });
+    glowDot.visible = isActive;
+    swatch.addChild(glowDot);
+
+    // ── Zone label — shown when greyscale active ─────────────────────────────
+    if (greyscale) {
+      addZoneLabel(swatch, z, isActive);
+    }
+
+    // Track swatch containers so greyscale toggle can add/remove labels
+    _swatchContainers[z] = swatch;
 
     const capturedZ = z;
     swatch.on('pointerdown', (e: FederatedPointerEvent) => {
@@ -599,6 +673,8 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   // Restore original filters now that the piece is on the canvas
   sprite.filters = _originalFilters.get(pieceId) ?? [];
+  // Greyscale may have been toggled after _originalFilters was saved — reapply if active
+  if (usePuzzleStore.getState().greyscale) addGreyscaleFilter(sprite);
 
   sprite.position.set(worldX, worldY);
   sprite.scale.set(_canvasScale);
@@ -684,6 +760,8 @@ function extractToCanvas(
 
   // Restore original filters now that the piece is on the canvas
   sprite.filters = _originalFilters.get(pieceId) ?? [];
+  // Greyscale may have been toggled after _originalFilters was saved — reapply if active
+  if (usePuzzleStore.getState().greyscale) addGreyscaleFilter(sprite);
 
   // Place sprite so the cursor sits at the same relative position on the piece
   // as when the user pressed down (trayPointerDownSpriteDX/Y are the screen-space
@@ -829,6 +907,8 @@ function zoomToPlacePiece(pieceId: string): void {
 
   // Restore filters and switch to canvas scale
   sprite.filters   = _originalFilters.get(pieceId) ?? [];
+  // Greyscale may have been toggled after _originalFilters was saved — reapply if active
+  if (usePuzzleStore.getState().greyscale) addGreyscaleFilter(sprite);
   sprite.scale.set(_canvasScale);
   sprite.position.set(startScreenX, startScreenY);
   sprite.eventMode = 'none';
@@ -1332,6 +1412,13 @@ export function initTray(
     if (state.highContrast !== prev.highContrast) redrawBackground();
   });
 
+  // Story 37e: Subscribe to greyscale changes — rebuild filter strip so zone
+  // labels appear/disappear on toggle without waiting for the next layout call.
+  _unsubscribeGreyscale?.();
+  _unsubscribeGreyscale = usePuzzleStore.subscribe((state, prev) => {
+    if (state.greyscale !== prev.greyscale) layoutTrayPieces();
+  });
+
   return tray;
 }
 
@@ -1410,6 +1497,8 @@ export function applyTrayPreferences(): void {
 export function teardownTray(): void {
   _unsubscribeHC?.();
   _unsubscribeHC = null;
+  _unsubscribeGreyscale?.();
+  _unsubscribeGreyscale = null;
 }
 
 /** Call from both window resize and renderer resize events in scene.ts. */

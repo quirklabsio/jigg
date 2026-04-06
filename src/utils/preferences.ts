@@ -185,29 +185,79 @@ const GREYSCALE_MATRIX: ColorMatrix = [
 
 const GREYSCALE_FILTER_TAG = 'greyscale';
 
+export function addGreyscaleFilter(sprite: Sprite): void {
+  // Guard — never stack if already applied
+  if (sprite.filters?.some((f) => (f as any)._tag === GREYSCALE_FILTER_TAG)) return;
+
+  const matrix = new ColorMatrixFilter();
+  matrix.matrix = GREYSCALE_MATRIX;
+  (matrix as any)._tag = GREYSCALE_FILTER_TAG;
+
+  // Mandatory filter order:
+  // Index 0:   BevelFilter           — never moved
+  // Index 1-2: hc-sandwich filters   — present only if highContrast active
+  // Index n:   ColorMatrixFilter     — always appended last
+  sprite.filters = [...(sprite.filters ?? []), matrix];
+}
+
+function removeGreyscaleFilter(sprite: Sprite): void {
+  const toDestroy = sprite.filters?.filter(
+    (f) => (f as any)._tag === GREYSCALE_FILTER_TAG,
+  ) ?? [];
+
+  sprite.filters = sprite.filters?.filter(
+    (f) => (f as any)._tag !== GREYSCALE_FILTER_TAG,
+  ) ?? [];
+
+  // Destroy to release GPU resources
+  toDestroy.forEach((f) => f.destroy());
+}
+
 export function applyGreyscale(
   active: boolean,
   pieces: Piece[],
   spriteMap: Map<string, Sprite>,
 ): void {
-  pieces.forEach((piece) => {
+  const applyToOne = (piece: Piece) => {
     const sprite = spriteMap.get(piece.id);
     if (!sprite) return;
+    if (active) addGreyscaleFilter(sprite);
+    else removeGreyscaleFilter(sprite);
 
-    const hasGreyscale = sprite.filters?.some((f) => (f as any)._tag === GREYSCALE_FILTER_TAG);
-
-    if (active && !hasGreyscale) {
-      const matrix = new ColorMatrixFilter();
-      matrix.matrix = GREYSCALE_MATRIX;
-      (matrix as any)._tag = GREYSCALE_FILTER_TAG;
-      sprite.filters = [...(sprite.filters ?? []), matrix];
-    } else if (!active) {
-      // Remove only the named greyscale filter — BevelFilter and outline unaffected
-      sprite.filters = sprite.filters?.filter(
-        (f) => (f as any)._tag !== GREYSCALE_FILTER_TAG,
-      ) ?? [];
+    // Debug assertion — filter order: BevelFilter at 0, greyscale last.
+    // Only checked when active (greyscale was just added) and a BevelFilter
+    // is present — skips the pre-CUTS_COMPLETE init call where bevels don't
+    // exist yet.
+    if (import.meta.env.DEV && active) {
+      const filters = sprite.filters ?? [];
+      const hasBevel = filters.some((f) => f instanceof BevelFilter);
+      if (hasBevel) {
+        console.assert(
+          filters[0] instanceof BevelFilter,
+          `Piece ${piece.id}: BevelFilter must be at index 0`,
+        );
+      }
+      const greyIdx = filters.findIndex((f) => (f as any)._tag === GREYSCALE_FILTER_TAG);
+      if (greyIdx !== -1) {
+        console.assert(
+          greyIdx === filters.length - 1,
+          `Piece ${piece.id}: Greyscale filter must be last`,
+        );
+      }
     }
-  });
+  };
+
+  if (pieces.length <= BATCH_THRESHOLD) {
+    pieces.forEach(applyToOne);
+  } else {
+    const half = Math.ceil(pieces.length / 2);
+    requestAnimationFrame(() => {
+      pieces.slice(0, half).forEach(applyToOne);
+      requestAnimationFrame(() => {
+        pieces.slice(half).forEach(applyToOne);
+      });
+    });
+  }
 }
 
 // ─── Piece labels (Story 37b) ─────────────────────────────────────────────────
