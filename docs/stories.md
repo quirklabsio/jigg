@@ -1,6 +1,10 @@
 # Stories
 
-## Completed
+Append-only. When a story closes, session notes are added here and the story is marked `[x]` in `docs/roadmap.md`. Never edited retroactively.
+
+---
+
+## Shipped
 
 ### Epic: Core Pipeline
 - [x] Story 1: WASM pipeline proof of life
@@ -36,149 +40,17 @@
 
 ---
 
-## Roadmap
-
-### Pre-Epic Cleanup
-- [x] **Story 29** — Remove edge overlay debug scaffolding; strip visual overlay + `E` key binding from `scene.ts`, retain edge map data for `edgeInfluence` in cut generation. Gate any future dev tooling behind `?debug=true`
-
----
-
-### Epic: Piece Tray
-*Tray-first model. All pieces load into tray on puzzle start. Canvas starts empty. User pulls pieces out as they work. Staging only — no manipulation in tray.*
-
-**Design decisions locked:**
-- Piece state machine: `in-tray` → `on-canvas` → `placed`
-- Return path to tray (including group behaviour) fully deferred pending user feedback — no architectural constraints added that prevent it later
-- Filters: single-select, mutually exclusive (corner / edge / interior / color zone)
-- Filter metadata computed at cut time, cached on piece — not derived on filter change
-- Rotation On: pieces arrive in tray pre-rotated, double-tap enabled. Rotation Off: pieces arrive upright, double-tap handler explicitly disabled
-- **Piece extraction — drag:** follows cursor from tray exit, lands on release. Drop shadow appears and opacity normalises on tray exit
-- **Piece extraction — click:** Archimedean spiral from viewport center. Spiral origin locked at first click in sequence, resets on pan. Step spacing computed from max piece diagonal (`imageWidth / N * √2 * 1.3`) — 1.3 buffer accounts for Bezier tab protrusion. If exact coordinates occupied, skip to next spiral step.
-- **Keyboard extraction (Enter on tray piece):** triggers same spiral logic as click
-
-- [x] **Story 30** — Spike: tray rendering model; prototype all three approaches (separate PixiJS stage / DOM thumbnails / canvas viewport region), pick one, document the decision. Explicitly assess how each model handles a future return path to tray — PixiJS-managed tray wins on animation smoothness, DOM-to-canvas handoff is rough. Unblocks all subsequent tray stories. **Decision: Approach C (reserved canvas region). See `docs/spike-tray-rendering.md`.**
-- [ ] **Story 31** — Spec: tray impact on `jigg-spec`; piece state (`in-tray` / `on-canvas` / `placed`), filter metadata (edge type, dominant color vector), tray-first load behaviour, rotation session property (`session.rotationEnabled`, `piece.initialRotation`), piece extraction UX (drag + spiral click + keyboard Enter all specced above), deferred return-to-tray logged as conscious omission
-- [x] **Story 32** — Bottom drawer tray; all pieces populate on load, pushes viewport up when open, collapses. Note: `scatter.ts` — gut the scatter-on-load behaviour, preserve the random distribution math for potential future use (e.g. "scatter all canvas pieces" panic button). Bug-fix round: tray width on resize, open/close hit area, 2-row wrap, piece randomisation, drag extraction jump, board shadow retina artifact, tray scale vs expanded sprite frames.
-- [x] **Story 33** — Tray layout; grid view of unplaced pieces, synced with canvas state in real time
-- [x] **Story 34** — Piece filtering; single-select filter strip — corner / edge / interior
-- [x] **Story 35** — Color zone filter; k-means clustering at cut time, filter tray by dominant color region. `colorVector` computed per piece in `gridCut()` (dominantColor, sample every 4th pixel). k-means k=5 runs synchronously in `gridCut()` after all pieces created, assigns `colorZone 0–4`. Five filled-circle swatches appended to filter strip; fill = mean colorVector of zone; active swatch has white ring; zero-piece swatches dimmed. Pixel data extracted once in `loadScene` and reused for the WASM worker (eliminated duplicate OffscreenCanvas). Mutually exclusive with edge type filter. Filter resets to `all` on new puzzle load (via `setPieces`).
-- [x] **Story 36** — Zoom-to-piece; click tray piece, canvas pans and zooms to its correct world position
-- [ ] **Story 36b** — Content-aware edge type; `edgeType` currently derived from grid position only. For shaped images (circular crop, vignette, alpha-masked source), corner/edge grid pieces may be mostly transparent — not real puzzle edges. Compute average alpha of border pixels per piece at cut time; if a nominally-flat side sits over transparent pixels, don't count it as a flat side. Re-derive `edgeType` from content-aware flat-side count. Affects filter strip counts and future snap logic.
-- [x] **Story 37a** — Accessibility foundation + adaptive background + high contrast + greyscale. `src/utils/preferences.ts` — `Preferences` type (`highContrast`, `greyscale`, `pieceLabels`, `reducedMotion`, `backgroundPreset`), `loadPreferences`/`savePreferences`, `applyPreferences(prefs, pieces, spriteMap, luminance)`, `registerApplyFn`/`fireApplyPreferences` callback path (decouples store from spriteMap). `src/utils/luminance.ts` — `sampleImageLuminance(url)` via 1×1 canvas, CORS try/catch returns 128 on failure. `src/utils/aria.ts` — hidden `role=list` container, `initAriaLabels`/`setAriaLabel` using `piece.gridCoord.row/col`. Store: `highContrast`, `greyscale`, `pieceLabels`, `reducedMotion`, `backgroundPreset`, `imageLuminance`, `setPreference`. Adaptive bg: luminance < 100 → off-white, > 150 → charcoal, between → gray. Shift+B cycles presets. High contrast: bevel `lightAlpha`/`shadowAlpha` ×1.8, `OutlineFilter` edge stroke (follows alpha mask, not bounding box), tray darkens to `0x1a1a1a` at 90% opacity, swatch black border ring, snap highlight constants exported. Greyscale: named `ColorMatrixFilter` added/removed by `_tag`, strictly non-destructive to bevel/outline. Four checkboxes + BG preset buttons in tray strip with TODO comment. All applied on init and re-applied in CUTS_COMPLETE after BevelFilters attach. `npm run typecheck` passes.
-- [x] **Story 37b** — Piece number label overlay. `src/puzzle/types.ts` — added `index: number` (1-based, l→r t→b) only; `gridRow`/`gridCol` rejected (already `gridCoord`), `initialRotation` rejected (already `actual.rotation` in degrees per spec). `src/puzzle/cutter.ts` — `index = row * cols + col + 1` set on piece creation. `src/utils/preferences.ts` — `createPieceLabel` builds `Container` (label=`pieceLabel`) with `Text` (size-14, white fill, black stroke `{ color, width }`) and semi-opaque backing `Graphics` (roundRect, alpha 0.45); label at `(0,0)` (sprite anchor is piece centre); `applyPieceLabels` idempotent add/remove/update; `sprite.addChildAt(label, 0)`; counter-rotation `-(actual.rotation * Math.PI) / 180` for tray pieces at creation; `else { label.rotation = -sprite.rotation }` for canvas pieces at creation; `syncLabelRotation(sprite)` exported helper (`label.rotation = -sprite.rotation`) called from `rotate.ts` (after `sprite.rotation =`) and `drag.ts` (per frame inside `tweenRotation` ticker); counter-scale `1/sprite.scale.x` applied at creation and in `layoutTrayPieces` so labels read at native size in thumbnails; scale reset to 1 on extraction. PixiJS v8: `container.label` not `.name`; `getChildByLabel` not `getChildByName`; single-arg `addChild` calls. `src/canvas/tray.ts` — extraction paths use `label.rotation = -sprite.rotation` (not `0`) to account for piece rotation at extraction time; `layoutTrayPieces` counter-scales existing labels; preference checkboxes subscribe to store so they sync after prefs load (init order fix); filter strip `fontSize` 12→14; `setTrayLoading(true/false)` — hides grid+filter, shows spinning arc during WASM cut phase, reveals pieces in CUTS_COMPLETE. `src/canvas/scene.ts` — imports `setTrayLoading`; calls `true` after `initTray`, `false` after `CUTS_COMPLETE` preferences apply. `npm run typecheck` passes.
-- [x] **Story 37c** — Reduced motion mode. `src/utils/preferences.ts` — added `_viewport` / `initPreferencesViewport(viewport)`; `DECELERATE_FRICTION_DEFAULT = 0.95` / `DECELERATE_FRICTION_REDUCED = 1.0`; implemented `applyReducedMotion`: sets decelerate plugin friction to 1.0 on enable (board stops instantly), restores to 0.95 on disable, cancels `viewport.plugins.remove('animate')` on enable. `src/canvas/scene.ts` — imports `applyReducedMotion`, `initPreferencesViewport`; calls `initPreferencesViewport(viewport)` after `.decelerate({ friction: 0.95 })`; extended `usePuzzleStore.subscribe` to call `applyReducedMotion(state.reducedMotion)` on change; board-snap pulse wrapped in `if (!reducedMotion)` — skipped entirely, per-tick bail-out added for mid-pulse toggle. `src/puzzle/drag.ts` — `tweenRotation` ticker checks `reducedMotion` on every tick → snaps to `to` and removes; lift tween at both `initDragListeners` pointerdown and `startDragForPiece` replaced with explicit `if (reducedMotion)` branch (snap + `syncLabelRotation`); snap-back in `onUp` same treatment. `src/canvas/tray.ts` — `setTrayOpen` `window.matchMedia` → `usePuzzleStore.getState().reducedMotion`; animation ticker snaps `currentTrayHeight = targetTrayHeight` immediately on first frame when flag is set; `zoomToPlacePiece` `window.matchMedia` → Zustand flag; tether ticker checks `reducedMotion` per tick — snaps sprite to screen center, cancels viewport animate, calls `completeZoomAnimation`. Completion animation TODO comment: `// TODO: Story 51 not yet shipped — apply reducedMotion when implemented`. `npm run typecheck` passes.
-- [x] **Story 37e** — Greyscale and zone labeling. `src/utils/preferences.ts` — extracted `addGreyscaleFilter(sprite)` (ITU-R BT.601 matrix, `_tag: 'greyscale'` guard, appended last after BevelFilter and any hc-sandwich filters) and `removeGreyscaleFilter(sprite)` (`f.destroy()` on removal for GPU cleanup); `applyGreyscale` refactored to use them with RAF batching above `BATCH_THRESHOLD`; dev-only `console.assert` verifies BevelFilter at index 0 and greyscale last. `src/canvas/tray.ts` — swatch containers refactored: positioned at circle center `(cx, swatchCY)`, children draw at `(0, 0)`; `glowDot` extracted as named `Graphics` child (always created, `visible = isActive`) so it can be toggled independently; `addZoneLabel(swatch, z, active)` / `removeZoneLabel(swatch)` added — label at `(0, 0)` anchor 0.5, 10px/13px bold white with black stroke, hides glowDot on active swatch; `renderFilterStrip` applies zone labels inline when greyscale active; `_swatchContainers[]` tracks swatch refs per zone; `_unsubscribeGreyscale` subscription in `initTray` calls `layoutTrayPieces()` on toggle; `teardownTray` unsubscribes both HC and greyscale. AC-3 TODO comment in `renderFilterStrip` for Story 52 settings panel. Greyscale applied to piece sprites only via `spriteMap` — not stage, viewport, or tray chrome. Snap highlight excluded (Sin City effect). `npm run typecheck` passes.
-
----
-
-### Epic: Keyboard Accessibility
-*Scoped as its own epic. Parallel focus system on WebGL canvas is non-trivial — spike before committing to estimates.*
-
-**Approach locked:** Virtual cursor model — hidden DOM accessibility tree mirrors canvas state. Tabbing moves through invisible DOM buttons. Visual focus ring rendered on PixiJS stage. Browser-native tab order, canvas visual response.
-
-- [ ] **Story 38** — Spike: keyboard focus model; implement virtual cursor approach, assess ARIA tree structure, produce realistic estimates for Stories 40–42 before they are scheduled
-- [ ] **Story 39** — Spec: keyboard nav impact on `jigg-spec`; focus state, interaction model, ARIA landmark structure
-- [ ] **Story 40** — Tray keyboard nav; tab through tray pieces via hidden DOM buttons, focus ring rendered on PixiJS stage
-- [ ] **Story 41** — Canvas keyboard interaction; arrow keys to move focused piece, Enter to place. Enter on tray piece triggers spiral extraction identical to click behaviour
-- [ ] **Story 42** — Focus coordination; tray ↔ canvas focus handoff, no dead ends in tab order
-
----
-
-### Epic: Image Ingestion
-*File picker immediately after Tray — unblocks real playtesting against user images.*
-
-- [ ] **Story 43** — Spec: image ingestion impact on `jigg-spec`; image source, dimensions, library metadata
-- [ ] **Story 44** — File picker + drag-drop own image onto canvas; replace hardcoded dev image
-- [ ] **Story 45** — Static curated library (10–15 CC0 images); `metadata.json` drives picker UI
-- [ ] **Story 46** — Image of the day; deterministic rotation (`dayOfYear % count`), featured on load
-
----
-
-### Epic: App Shell
-*Chrome shaped around the proven tray mechanic and real image input.*
-
-- [ ] **Story 47** — Spec: app shell impact on `jigg-spec`; session init, grid size, difficulty
-- [ ] **Story 48** — New puzzle flow; image source picker → grid size selector → launch
-- [ ] **Story 49** — HUD; piece counter + elapsed timer, togglable
-- [ ] **Story 50** — Reference image panel; draggable DOM overlay, snaps to nearest corner on release, resizable, fullscreen option, hotkey toggle (`R`), collapsed by default, ARIA landmark, meaningful `alt` text
-- [ ] **Story 50b** — Ghost underlay mode; opt-in semi-transparent overlay on canvas, opacity slider 0–100%, `pointer-events: none`. Continuous coordinate transform synced to viewport pan and zoom via event listener — DOM position updates on every viewport move event. Gated on Story 50.
-- [ ] **Story 50c** — High contrast integration; when Story 37 high contrast active, reference panel offers edge-only view toggle. Gated on Stories 50 and 50b.
-- [ ] **Story 51** — Completion animation; payoff moment on solve
-- [ ] **Story 52** — Settings panel; texture variant, snap sensitivity, rotation On/Off, accessibility toggles from Story 37
-
----
-
-### Epic: Persistence
-*IndexedDB-first. Flat + serializable for future Supabase sync.*
-
-Note: Story 53 (spec) runs in parallel with App Shell. Stories 54–55 explicitly gated on Story 48 — no session model exists until then.
-
-- [ ] **Story 53** — Spec: persistence model; canonical vs actual transforms per piece, session schema (including `rotationEnabled`), session reset trigger (destructive settings change e.g. grid size mid-puzzle prompts "Starting a new puzzle will lose your current progress. Continue?"), sync extension points
-- [ ] **Story 54** — Auto-save to IndexedDB; debounced ~2s on snap, place, rotate, tray interaction. Gated on Story 48.
-- [ ] **Story 55** — Resume on load; detect in-progress session, offer Continue or New Game. Gated on Story 48.
-
----
-
-### Epic: Usage Tracking
-*Anonymous only, no accounts. Pull into launch window — want data from user one.*
-
-- [ ] **Story 56** — Spec: tracking impact on `jigg-spec`; conscious call, likely no changes needed
-- [ ] **Story 57** — Anonymous device UUID; generate on first load, persist in IndexedDB
-- [ ] **Story 58** — Supabase event logging; fire-and-forget on `puzzle_started`, `puzzle_completed`, `puzzle_abandoned`
-- [ ] **Story 59** — Umami integration; standard snippet, configure goals for start/complete events
-- [ ] **Story 60** — Privacy notice; minimal inline copy, no consent wall needed for anonymous data
-
----
-
-### Epic: PWA
-*Low effort given the stack. Last mile before launch.*
-
-- [ ] **Story 61** — Spec: PWA impact on `jigg-spec`; asset manifest, cache strategy — likely no changes, conscious call
-- [ ] **Story 62** — `vite-plugin-pwa`; manifest, service worker, precache app shell + WASM binary
-- [ ] **Story 63** — Curated image cache strategy; lazy-cache on first access, not upfront precache
-
----
-
-### Epic: Spec Doc
-*Co-deliverable. Chapters written after each epic ships.*
-
-- [ ] **Story 64** — Spec chapter: rendering pipeline (PixiJS, WebGL, shader decisions)
-- [ ] **Story 65** — Spec chapter: cut algorithm (WASM, Canny, Bezier, content-aware routing)
-- [ ] **Story 66** — Spec chapter: persistence model + sync extension points
-- [ ] **Story 67** — Resolve Bezier geometry representation + spec chapter: cut algorithm math. Pulled forward — resolved during this chapter. **Public repo risk, do not defer past Story 66.**
-- [ ] **Story 68** — Spec chapter: tray system + accessibility rationale
-- [ ] **Story 69** — Spec chapter: what Jigg proves as a reference application
-
----
-
-### Launch Sequence
-```
-NOW      Story 29         (Cleanup — before anything else)          ✓
-         Story 30         (Tray spike — unblocks tray epic)
-         Story 38         (Keyboard spike — parallel, get estimate early)
-NEXT     Stories 31–37    (Tray epic — mechanic first)
-         Stories 39–42    (Keyboard — informed by spike estimate)
-         Story 44         (File picker — unblocks real playtesting immediately)
-THEN     Stories 43–52    (Ingestion + Shell — content + chrome)
-           50 → 50b → 50c (Reference image panel — sequential dependency)
-         Story 53         (Persistence spec — parallel with Shell)
-         Stories 54–55    (Persistence impl — gated on Story 48)
-         Stories 56–60    (Tracking — pull into launch window)
-         Stories 61–63    (PWA — last mile)
-LAUNCH
-POST     Story 19         (Z-order, informed by tray layering)
-         Stories 64–69    (Spec — after each epic, Story 67 resolved at Story 66)
-```
-
----
-
-### Open / Deferred
-- **Return-to-tray mechanic** — deferred pending user feedback post-launch. No architectural constraints added that prevent it later.
-- **Stories 40–42 estimates** — not schedulable until Story 38 spike closes.
-
----
-
 ## Session Notes
+
+### Story 38 (2026-04-07)
+
+Keyboard focus spike. No source files modified. Output: `docs/spike-keyboard-focus.md`.
+
+Seven questions answered: ARIA landmark structure (`role="application"` × 2 — "Piece tray" DOM-first, "Puzzle board" second); virtualisation (Approach A full DOM ≤200 pieces, board element count self-reduces as groups form); focus ring (screen-space `Graphics` on `app.stage` topmost, `viewport.toGlobal()` each frame, 2px neon magenta `0xff00ff`, wraps group AABB); tab order at tray→board boundary (direct DOM-order, no intermediary); key bindings (Space `preventDefault()`, R = rotate canvas-only, T/Shift+B safe in `role="application"`); ARIA label format (`"Piece {index} — Zone {N}, row X, column Y, {state}"`); group model (group = one tab stop, primary piece = lowest `piece.index`).
+
+Refinements during spike review: stage layer order explicit (`viewport → trayContainer → focusRing`); zone included in ARIA label to bridge visual/greyscale/auditory identification systems; filter focus-drop prevention documented as critical (move focus before `tabIndex="-1"`, not after); arrow-key collision decision (no snap mid-movement, evaluate on put-down); Story 41 downgraded Hard → Non-trivial; `piece.state` verification elevated to Story 39 first action (prerequisite, not a pre-Story 40 check); `zoomToPlace` + Enter conflict documented as §9.9 (Enter = spiral only, separate preview key TBD in Story 39); Story 41 split into 41a (pick-up/put-down model) and 41b (arrow-key movement).
+
+---
 
 ### Story 37d (2026-04-05)
 
