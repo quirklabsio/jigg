@@ -17,7 +17,7 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading } from './tray';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading } from './bench';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
 import { initAriaLabels } from '../utils/aria';

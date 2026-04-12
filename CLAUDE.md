@@ -23,12 +23,12 @@ summarise decisions and compress context.
 
 # JIGG-SPEC
 Spec submodule lives at `/jigg-spec` (public repo).
+Files: `types.ts` (source of truth), `spec.md` (rationale + structure).
 
 When touching anything related to save, load, or export:
-- Read `jigg-spec/draft/` docs first
-- If implementation requires a spec change: update jigg-spec first, 
+- Read `jigg-spec/spec.md` first
+- If implementation requires a spec change: update jigg-spec first,
   commit and push there, then update the implementation
-- Spec version tracked in `jigg-spec/CHANGELOG.md`
 
 # RULES
 - Never create memory files. Use `docs/` only.
