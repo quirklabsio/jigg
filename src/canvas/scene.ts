@@ -16,11 +16,11 @@ import {
 import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
-import { usePuzzleStore } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading } from './bench';
+import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter } from './bench';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
-import { initAriaLabels } from '../utils/aria';
+import { initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton } from '../utils/aria';
 import {
   loadPreferences,
   applyPreferences,
@@ -67,6 +67,66 @@ function updateSnapHighlight(highContrast: boolean, reducedMotion: boolean): voi
 }
 
 // SNAP_HIGHLIGHT_THICKNESS_DEFAULT / _HC reserved for a future Graphics stroke overlay.
+
+// ─── Focus ring state ─────────────────────────────────────────────────────────
+// Single shared Graphics on app.stage, redrawn every frame at the focused piece's
+// screen-space bounds. Lives above viewport and benchContainer (zIndex 1000).
+// Screen-space (not inside viewport) so thickness never scales with zoom.
+// See docs/spike-keyboard-focus.md §3 and docs/accessibility.md §9.6.
+
+const FOCUS_RING_COLOR     = 0xff00ff; // neon magenta — matches SNAP_HIGHLIGHT_COLOR_HC
+const FOCUS_RING_THICKNESS = 2;        // screen-space px, non-scaling
+const FOCUS_RING_PADDING   = 4;        // px outside piece bounding box
+
+let _focusRing: Graphics | null = null;
+let _focusedPieceId: string | null = null;
+
+// Track whether the most recent input was keyboard or pointer.
+// Focus ring and guardFocusWithinApp are suppressed after pointer events —
+// the ring should only appear from keyboard navigation (Tab / arrow keys).
+let _lastInputWasKeyboard = false;
+
+function setFocusedPiece(pieceId: string | null): void {
+  if (pieceId !== null && !_lastInputWasKeyboard) {
+    // Pointer-initiated focus — suppress ring entirely
+    return;
+  }
+  _focusedPieceId = pieceId;
+  if (!pieceId) _focusRing?.clear();
+}
+
+/**
+ * Create the focus ring Graphics and attach it to app.stage as the topmost child.
+ * Must be called AFTER initTray (which adds benchContainer at zIndex 500).
+ * zIndex 1000 + sortableChildren=true guarantees ring renders above all other stage children.
+ * Also registers the per-frame redraw ticker.
+ */
+function initFocusRing(app: Application, spriteMap: Map<string, Sprite>): void {
+  _focusRing         = new Graphics();
+  _focusRing.zIndex  = 1000; // above benchContainer (500) and viewport (0)
+  app.stage.addChild(_focusRing);
+
+  app.ticker.add(() => {
+    if (!_focusRing) return;
+    if (_focusedPieceId) {
+      const sprite = spriteMap.get(_focusedPieceId);
+      if (sprite) {
+        const bounds = sprite.getBounds(); // screen-space bounds
+        _focusRing.clear();
+        _focusRing
+          .rect(
+            bounds.x      - FOCUS_RING_PADDING,
+            bounds.y      - FOCUS_RING_PADDING,
+            bounds.width  + FOCUS_RING_PADDING * 2,
+            bounds.height + FOCUS_RING_PADDING * 2,
+          )
+          .stroke({ color: FOCUS_RING_COLOR, width: FOCUS_RING_THICKNESS });
+      }
+    } else {
+      _focusRing.clear();
+    }
+  });
+}
 
 // ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
 
@@ -168,6 +228,35 @@ function buildGridSprites(
   return { sprites, containers };
 }
 
+// ─── Extension defence ───────────────────────────────────────────────────────
+
+/**
+ * Intercept focus landing outside app-owned elements and redirect it to the
+ * first tabbable bench button. Works against any extension regardless of id or
+ * class, and handles extensions that inject after load (unlike a one-shot
+ * silencing pass). Add new legitimate focusable regions to `isOurs` as needed.
+ * See docs/gotchas.md §Browser extension interference.
+ */
+function guardFocusWithinApp(): void {
+  document.addEventListener('focusin', (e) => {
+    if (!_lastInputWasKeyboard) return; // pointer-driven focus — never redirect
+    const target = e.target as HTMLElement;
+    const isOurs =
+      target.closest('#landmark-bench') ||
+      target.closest('#landmark-table') ||
+      target.id === 'bench-strip-handle' ||
+      target === document.body;
+    if (!isOurs) {
+      setTimeout(() => {
+        const first = document.querySelector<HTMLButtonElement>(
+          '#landmark-bench button[tabindex="0"]',
+        );
+        first?.focus();
+      }, 0);
+    }
+  });
+}
+
 // ─── Scene entry point ────────────────────────────────────────────────────────
 
 export async function loadScene(app: Application, imageUrl: string): Promise<void> {
@@ -187,6 +276,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
+
+  // Track last input method — keyboard vs pointer.
+  // Used to suppress the focus ring and focus guard on pointer interaction.
+  document.addEventListener('keydown',     () => { _lastInputWasKeyboard = true;  }, { capture: true });
+  document.addEventListener('pointerdown', () => { _lastInputWasKeyboard = false; }, { capture: true });
+
+  // Remove the canvas from tab order — keyboard navigation uses DOM buttons in
+  // #landmark-bench and #landmark-table instead of the raw canvas element.
+  (app.canvas as HTMLCanvasElement).tabIndex = -1;
 
   // ── Viewport (infinite canvas) ─────────────────────────────────────────────
   const viewport = new Viewport({
@@ -260,6 +358,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const shadowMap = new Map<string, DropShadowFilter>();
 
   setDragStartCallback((groupId) => {
+    // Clear bench focus ring immediately on drag start — don't leave a bench piece
+    // highlighted while the user is interacting with the table.
+    _focusedPieceId = null;
+    _focusRing?.clear();
+
     const group = usePuzzleStore.getState().groupsById[groupId];
     if (!group) return;
     for (const pid of group.pieceIds) {
@@ -342,6 +445,22 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   initTray(app, viewport, spriteMap, containerMap, scale, piecePixelW, piecePixelH);
   setTrayLoading(true);
 
+  // ── Focus ring ─────────────────────────────────────────────────────────────
+  // Stage layer order: viewport (added above) → benchContainer (added by initTray)
+  // → focusRing (added here, last = topmost). Order is non-negotiable.
+  // See docs/accessibility.md §9.5 and docs/spike-keyboard-focus.md §3.
+  initFocusRing(app, spriteMap);
+
+  // ── Bench keyboard handler registration ───────────────────────────────────
+  // Register callbacks that bench buttons call on focus/blur/activate.
+  // Must run after initFocusRing (setFocusedPiece uses _focusRing).
+  // Must run before initBenchButtons (buttons created below fire these on interaction).
+  registerBenchHandlers(
+    (id) => { setFocusedPiece(id); scrollBenchToId(id); },
+    ()   => setFocusedPiece(null),
+    (id) => spiralExtractPiece(id),
+  );
+
   // ── Preferences ───────────────────────────────────────────────────────────
   // 1. Sample image luminance for adaptive background (async; resolves quickly
   //    since the image was already loaded above via PixiJS Assets).
@@ -369,7 +488,28 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   applyPreferences(prefs, usePuzzleStore.getState().pieces, spriteMap, imageLuminance);
   applyTrayPreferences();
-  initAriaLabels(usePuzzleStore.getState().pieces);
+
+  // Initialise ARIA landmark structure and bench buttons.
+  // spriteMap is fully populated at this point (buildGridSprites ran above).
+  // TODO: Story 55 — call initLandmarks() + initBenchButtons() after session restore.
+  // Guard against browser extension elements stealing focus.
+  // Intercepts at focus time — works against late-injected elements too.
+  guardFocusWithinApp();
+
+  initLandmarks();
+  initBenchButtons(usePuzzleStore.getState().pieces);
+  // Buttons were created in piece-index order (store order). Reorder DOM to match
+  // _trayDisplayOrder (the shuffled visual layout order) so Tab follows the grid
+  // left→right, top→bottom rather than creation order.
+  syncButtonDOMOrder(getTrayDisplayOrder());
+  // Wire filter callbacks and create the ARIA radiogroup inside #landmark-bench.
+  // Must run after initBenchButtons so piece buttons are already in the DOM
+  // (initFilterButtons appends the group after them).
+  registerFilterHandlers(
+    (id) => applyBenchFilter(id as TrayFilter),
+    (dir) => cycleFilter(dir as 1 | -1),
+  );
+  initFilterButtons(getFilterDefs());
 
   // AC-4: Initialise snap highlight state from loaded prefs, then subscribe
   // so it stays in sync whenever highContrast or reducedMotion changes.
@@ -415,7 +555,25 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     if (e.key === 't' || e.key === 'T') {
-      setTrayOpen(!usePuzzleStore.getState().trayOpen);
+      const isOpen = usePuzzleStore.getState().trayOpen;
+      setTrayOpen(!isOpen);
+      // When opening, jump focus to the first visible bench piece.
+      // rAF defers until after layoutTrayPieces has synced tabIndices.
+      if (!isOpen) {
+        requestAnimationFrame(() => {
+          const firstId = getFirstVisibleBenchPieceId();
+          if (firstId) focusButton(firstId);
+        });
+      }
+      return;
+    }
+    // [/] — cycle bench filter strip. Works whenever bench is open, regardless of focus.
+    // Focus handling (keep/move/jump-to-first) is owned by applyBenchFilter in bench.ts.
+    // Arrow keys are reserved for piece movement on the table (Story 41b).
+    if (e.key === '[' || e.key === ']') {
+      if (!usePuzzleStore.getState().trayOpen) return;
+      e.preventDefault();
+      cycleFilter(e.key === ']' ? 1 : -1);
       return;
     }
     // Shift+B cycles background presets: off-white → gray → charcoal → off-white

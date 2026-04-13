@@ -97,6 +97,121 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ---
 
+### Story 40 — Keyboard polish pass (2026-04-13)
+
+**`src/utils/aria.ts`**
+- `FilterDef = { id: string; label: string }` type exported.
+- `registerFilterHandlers(onActivate, getFirstVisible)` registered from scene.ts — breaks dep cycle same way as bench handlers.
+- `initFilterButtons(filters)` — creates `role="radiogroup"` div inside `#landmark-bench` (appended after piece buttons, kept last by `syncButtonDOMOrder`). Each filter is a `role="radio"` button. ArrowLeft/Right/Up/Down cycle and activate; click and Enter/Space activate; Tab exits group. On activate, rAF focuses first visible bench piece.
+- `updateFilterButtonLabels(filters)` — updates label text + `data-filter-id` on existing radio buttons; no-op if group not initialised.
+- `setActiveFilterButton(filterId)` — syncs `aria-checked` and `tabIndex` (active=0, others=-1).
+- `syncButtonDOMOrder` updated: always re-appends `_filterGroup` after all piece buttons so it stays last regardless of piece reordering.
+
+**`src/canvas/bench.ts`**
+- `applyBenchFilter` made `export` (was private).
+- New imports from aria.ts: `updateFilterButtonLabels`, `setActiveFilterButton`, `FilterDef`.
+- `getFilterDefs()` exported — returns `FilterDef[]` with live counts: All, Corners, Edges, Interior, plus Zone N entries for any palette zone with ≥1 bench piece.
+- `getFirstVisibleBenchPieceId()` exported — returns `visibleInTray()[0] ?? null`.
+- `layoutTrayPieces` calls `updateFilterButtonLabels(getFilterDefs())` at end of every layout.
+- `applyBenchFilter` calls `setActiveFilterButton(filter)` after layout.
+- Strip handle: `tabIndex=-1` on creation (bench starts open). `aria-label` updated to `'Open piece bench — or press T'`. `setTrayOpen` now also sets `_benchStripHandle.tabIndex = open ? -1 : 0` alongside `pointerEvents`.
+
+**`src/canvas/scene.ts`**
+- `(app.canvas as HTMLCanvasElement).tabIndex = -1` — removes canvas from tab order; keyboard nav uses DOM buttons.
+- Imports: `TrayFilter` from store; `registerFilterHandlers`, `initFilterButtons`, `focusButton` from aria.ts; `getFilterDefs`, `getFirstVisibleBenchPieceId`, `applyBenchFilter` from bench.ts.
+- After `syncButtonDOMOrder`: `registerFilterHandlers((id) => applyBenchFilter(id as TrayFilter), getFirstVisibleBenchPieceId)` then `initFilterButtons(getFilterDefs())`.
+- T key handler: reads `isOpen` before toggling; when opening (`!isOpen`), rAF calls `getFirstVisibleBenchPieceId()` and `focusButton(firstId)` to jump focus to first bench piece.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
+### Story 40 — Bench keyboard navigation (2026-04-13)
+
+**`src/utils/aria.ts`** — complete rewrite.
+- Old `role=list` / `role=listitem` / `initAriaLabels` / `setAriaLabel` API removed.
+- New two-landmark structure: `#landmark-bench` (`role="application"`, visually hidden, `tabIndex=-1`) + `#landmark-table` (same). DOM order bench-first. Both suppress Space scroll via `keydown` listener.
+- `_buttonMap: Map<string, HTMLButtonElement>` for O(1) pieceId lookup.
+- Registration pattern: `registerBenchHandlers(onFocus, onBlur, onActivate)` — aria.ts never imports scene.ts or bench.ts; callbacks break the circular dep.
+- Public API: `initLandmarks`, `initBenchButtons`, `createBenchButton`, `updateButtonLabel`, `removeButton`, `setButtonTabIndex`, `focusButton`.
+- Button label format: `"Piece {index} — Palette {paletteIndex+1}, row {row+1}, column {col+1}, {stageLabel}"`.
+
+**`src/canvas/bench.ts`**
+- New imports from aria.ts: `LANDMARK_BENCH_ID`, `removeButton`, `focusButton`, `setButtonTabIndex`.
+- New module state: `_benchStripHandle: HTMLButtonElement | null`, `_scrollTarget: number | null`.
+- `scrollBenchToId(pieceId)` — exported; snaps (reducedMotion) or lerps (smooth); uses `visibleInTray()` to compute column position.
+- `animateScrollTo(targetX)` — internal; sets `_scrollTarget` for ticker lerp at 0.15 factor/frame.
+- Ticker updated: scroll animation runs before reducedMotion height-snap early return.
+- `applyBenchFilter(filter)` — replaces inline `setActiveFilter + layoutTrayPieces` in filter strip + swatch pointerdown handlers. Implements focus-drop prevention: moves focus to `findNextFocusableAfter` BEFORE setting `tabIndex=-1`. Falls back to `#landmark-bench.focus()` if visible set is empty.
+- `findNextFocusableAfter(pieceId, visibleSet)` — searches forward then backward in bench display order.
+- `handleExtractionFocusHandoff(extractedPieceId, prevOrder)` — only acts when extracted button was active element (drag extraction leaves focus alone); removes button, moves focus to next visible or landmark.
+- `spiralExtractPiece(pieceId)` — exported thin wrapper around `spiralPlace`; called by bench button keydown via registered `onActivate` callback.
+- `layoutTrayPieces` updated: syncs `setButtonTabIndex` for all bench buttons at end of every layout pass.
+- `setTrayOpen` updated: syncs `_benchStripHandle.style.pointerEvents` (none when open, auto when closed); moves focus to strip handle if bench piece was focused on close.
+- `initTray` updated: creates `_benchStripHandle` — opacity-0 fixed button over strip, z-index 600, opens bench on click/Enter/Space. Starts with `pointer-events:none` (bench opens open).
+
+**`src/canvas/scene.ts`**
+- Import updated: `initAriaLabels` removed; `initLandmarks`, `initBenchButtons`, `registerBenchHandlers` added from aria.ts. `scrollBenchToId`, `spiralExtractPiece` added from bench.ts.
+- Focus ring: `FOCUS_RING_COLOR = 0xff00ff`, `FOCUS_RING_THICKNESS = 2`, `FOCUS_RING_PADDING = 4` constants. `_focusRing: Graphics | null`, `_focusedPieceId: string | null` module state. `setFocusedPiece(pieceId | null)` local function. `initFocusRing(app, spriteMap)` — creates Graphics at `zIndex: 1000`, adds to `app.stage`, registers per-frame ticker using `sprite.getBounds()` for screen-space rect.
+- Stage layer order: `viewport` (added first) → `benchContainer` (added by initTray) → `focusRing` (initFocusRing, always last).
+- `registerBenchHandlers` called after `initFocusRing`, before first interaction: `onFocus = setFocusedPiece(id) + scrollBenchToId(id)`, `onBlur = setFocusedPiece(null)`, `onActivate = spiralExtractPiece(id)`.
+- `initAriaLabels(pieces)` replaced with `initLandmarks(); initBenchButtons(pieces);` with TODO comment for Story 55 resume path.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
+### Story 40 — Filter cycling + persistent focus tracking (2026-04-13)
+
+**Problem**: `]`/`[` were originally per-button keydown handlers (ArrowRight/ArrowLeft). Two issues: (1) Arrow keys conflict with Story 41b piece movement; (2) per-button handler fires only when a bench button has focus — pressing `]` with focus anywhere else was a no-op.
+
+**`src/utils/aria.ts`**
+- Added `_trackedPieceId: string | null` module-level variable. Exports `getFocusedPieceId()` and `clearFocusedPieceId()`.
+- `initLandmarks()` resets `_trackedPieceId = null`.
+- `createBenchButton` focus handler: sets `_trackedPieceId = piece.id` (persists).
+- `createBenchButton` blur handler: does NOT clear `_trackedPieceId` — survives `syncButtonDOMOrder` DOM reorders.
+- Button keydown: removed `]`/`[` handling. Only Enter/Space remain (spiral extraction).
+- Comment: `[/] filter cycling is global (scene.ts window handler) — not on individual buttons`.
+
+**`src/canvas/bench.ts`**
+- Added `getFocusedPieceId`, `clearFocusedPieceId` to imports from aria.ts.
+- New `handleFilterChangeFocus()`: reads `_trackedPieceId`, checks `btn.tabIndex === 0` (survives filter?). If yes → `focusButton(previousId)`. If no → `focusButton(getFirstVisibleBenchPieceId())`. Falls back to `#landmark-bench.focus()` if bench is empty.
+- `applyBenchFilter`: removed pre-tabIndex focus move; calls `handleFilterChangeFocus()` at end, after `layoutTrayPieces` has settled tabIndices.
+- `handleExtractionFocusHandoff`: uses `getFocusedPieceId() === extractedPieceId` to determine if extracted piece was focused; calls `clearFocusedPieceId()` unconditionally on extraction.
+- Store subscription: calls `clearFocusedPieceId()` when a piece leaves the bench (placed or extracted to table).
+
+**`src/canvas/scene.ts`**
+- `]`/`[` handler moved to global `window` keydown listener. Guard: `!trayOpen → return`. No rAF, no focus logic — just `cycleFilter(direction)`.
+
+**`docs/accessibility.md`**
+- Key binding table: `]`/`[` documented as global-when-bench-open. ArrowLeft/Right/Up/Down marked "Table context only (Story 41b)".
+
+**Root cause of two "doesn't work" reports**:
+1. First: `document.activeElement` was read AFTER `cycleFilter` → `layoutTrayPieces` → `syncButtonDOMOrder` which silently blurs the focused element via `appendChild`. Fix: moved focus logic to `handleFilterChangeFocus()` called post-layout.
+2. Second: `element.focus()` in an unfocused browser tab does NOT fire the `focus` event — `_trackedPieceId` was never set during eval tests. Code was correct; eval-based focus testing is structurally unreliable. Confirmed via spy test: `focusCount: 0` despite `btn.tabIndex === 0`.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
+### Story 40 — Filter focus simplification (2026-04-13)
+
+**Decision reversed**: `handleFilterChangeFocus` was simplified to always clear `_trackedPieceId` and jump to the first visible piece — no "does piece survive filter" check.
+
+**Removed**:
+- `previousId` / `btn.tabIndex === 0` survive-check in `handleFilterChangeFocus`
+- `handleFilterChangeFocus` no longer reads `_trackedPieceId` at all
+
+**Kept**:
+- `_trackedPieceId` / `getFocusedPieceId()` / `clearFocusedPieceId()` still exist and are used only for extraction (`handleExtractionFocusHandoff` — was the extracted piece keyboard-focused?) and placement cleanup (store subscription)
+- `handleFilterChangeFocus` now calls `clearFocusedPieceId()` as its first line, then `focusButton(firstId)` + `scrollBenchToId(firstId)` unconditionally
+
+**Why**: The "survive" check relied on `_trackedPieceId` being set via `focus` events, which do not fire when `element.focus()` is called in an unfocused browser tab (a structural limitation of eval-based testing). The deterministic "always first" behaviour is simpler and predictable — no edge cases.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 39 — config cleanup + refine (2026-04-13)
 
 **Alias consolidation**

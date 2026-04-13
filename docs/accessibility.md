@@ -270,9 +270,9 @@ const defaults: Preferences = {
 
 Samples the media query **once at module evaluation time** and persists to `localStorage`. If the user changes their OS accessibility setting mid-session without reloading, the in-memory Zustand state will not update. A `MediaQueryList.addEventListener('change', ...)` listener would be needed for live-update support.
 
-### 7.6 ARIA list is never updated after initial load (Informational)
+### 7.6 ARIA button labels update on state change (Informational)
 
-`setAriaLabel` must be called on every state transition (`stageId` change or `placed` set). Until Story 40 wires this up, screen-reader users hear stale state ("In bench") for pieces that have since been extracted or placed.
+Story 40: bench buttons call `updateButtonLabel(piece)` on state transitions. `removeButton` is called on extraction. Labels no longer go stale for bench→table transitions. Table and placed-piece labels deferred to Stories 41a/42.
 
 ### 7.7 No keyboard navigation on canvas (Informational)
 
@@ -288,8 +288,8 @@ Stories 38–42 (keyboard focus epic) are unscheduled beyond the spike in Story 
 
 | Priority | Issue | Story |
 |---|---|---|
-| P1 | `setAriaLabel` never called on state transitions — screen reader state is always stale | Story 40 |
-| P2 | No keyboard navigation — canvas is pointer-only | Stories 40–42 |
+| P1 | Bench button labels update on extraction (Story 40 ✓); table/placed label updates deferred to Stories 41a/42 | Stories 41a/42 |
+| P2 | Table keyboard navigation — canvas is pointer-only | Stories 41a/41b/42 |
 | P2 | Snap pulse thickness not applied (`SNAP_HIGHLIGHT_THICKNESS_HC = 4` wired to nothing) | Post-37d follow-up |
 | P3 | Labels unreadable below ~0.3× zoom | Post-launch (low priority) |
 | P3 | Greyscale filter doesn't reach tray chrome or color-zone swatches | Story 37a follow-up |
@@ -355,14 +355,16 @@ Cluster = single tab stop. Primary piece = lowest `PieceDefinition.index`. All o
 | `Shift+Tab` | Previous bench piece | Previous table piece/cluster | Browser native |
 | `Enter` | Spiral extract | Pick up / put down | Never zoom-to-place |
 | `Space` | Spiral extract | Pick up / put down | `preventDefault()` required |
-| `ArrowLeft/Right` | Scroll bench | Move held piece | Context-sensitive |
-| `ArrowUp/Down` | Navigate bench rows | Move held piece | Context-sensitive |
+| `]` | Next bench filter | — | Global when bench open; focuses first visible piece if bench not focused |
+| `[` | Previous bench filter | — | Global when bench open; focuses first visible piece if bench not focused |
+| `ArrowLeft/Right` | — | Move held piece | Table context only (Story 41b) |
+| `ArrowUp/Down` | — | Move held piece | Table context only (Story 41b) |
 | `Escape` | Deselect, return to landmark | Drop piece, return to table button | |
 | `T` | Toggle bench | Toggle bench | Safe in `role="application"` |
 | `R` | — | Rotate focused piece 90° CW | No bench action |
 | `Shift+B` | Background cycle | Background cycle | No AT conflict |
 
-Arrow key snap: no snap mid-movement. Snap evaluated on put-down (Enter/Space) only — matches pointer drag model.
+`[`/`]` cycle the bench filter strip globally whenever the bench is open (handled in `scene.ts` window keydown, not on individual buttons). First press when no bench piece is focused cycles the filter and jumps focus to the first visible piece. Subsequent presses cycle without losing bench focus. Arrow keys are reserved for piece movement on the table (Story 41b). Arrow key snap: no snap mid-movement. Snap evaluated on put-down (Enter/Space) only — matches pointer drag model.
 
 `Enter` always triggers spiral extraction. `zoomToPlacePiece()` is pointer-only. Dedicated zoom-preview key deferred post-Story 42.
 

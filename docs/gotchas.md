@@ -237,6 +237,32 @@
 - **Fix — extraction**: `tray.ts` extraction paths had `label.rotation = 0; label.scale.set(1)` to kill tray counter-rotation. The `0` is wrong if the sprite already has a canvas rotation. Change to `label.rotation = -sprite.rotation`.
 - **Rule**: Labels are children of sprites; they inherit the sprite's rotation. Every code path that mutates `sprite.rotation` must follow with `syncLabelRotation(sprite)`. The invariant is always `label.rotation === -sprite.rotation`.
 
+## Keyboard / Focus (Story 40)
+
+### `syncButtonDOMOrder` (appendChild) silently blurs the focused bench button
+
+- **Symptom**: After a filter change, `document.activeElement` is `document.body`, not the bench button that was focused before the filter. Focus seems to "fall off" during cycling.
+- **Root cause**: `syncButtonDOMOrder` reorders bench buttons by calling `_landmarkBench.appendChild(btn)` for each button. `appendChild` on a currently-focused element fires a `blur` event and moves `document.activeElement` to `document.body`. By the time `handleFilterChangeFocus` (or any caller) reads `document.activeElement`, it is stale.
+- **Fix**: Track the focused piece ID in a module-level variable (`_trackedPieceId` in `aria.ts`) that is set on `focus` and explicitly **not** cleared on `blur`. Use this for focus-restore decisions, not `document.activeElement`. Only clear it on explicit actions (extraction, placement, `initLandmarks` reset).
+- **Rule**: Never rely on `document.activeElement` for focus decisions made _after_ any call to `layoutTrayPieces` or `syncButtonDOMOrder`. Read the persisted variable before the layout runs.
+
+---
+
+### `element.focus()` in an unfocused tab changes `document.activeElement` but does not fire the `focus` event
+
+- **Symptom**: `preview_eval` tests of keyboard focus appear broken — `document.activeElement` shows the expected element but focus event handlers (and anything they set, such as `_trackedPieceId`) never fire.
+- **Root cause**: Browsers suppress focus events when the window/tab does not have user focus. `element.focus()` still moves `document.activeElement` (so tab-order works for AT), but the `focus` DOM event is withheld. This is standard cross-browser behaviour.
+- **Rule**: Do not use `preview_eval` to test code paths that depend on `focus` events firing (e.g. `_trackedPieceId` tracking, `scrollBenchToId`, `setFocusedPiece`). These only work in real interaction with the window active. `document.activeElement` checks are reliable; event-based side-effects are not.
+
+---
+
+### `window.dispatchEvent(new KeyboardEvent(...))` does not trigger `document` capture-phase listeners
+
+- **Symptom**: Tests dispatching keydown on `window` don't set `_lastInputWasKeyboard = true`, so the focus ring never draws in eval tests.
+- **Root cause**: The capture-phase listener `document.addEventListener('keydown', ..., { capture: true })` is on `document`, not `window`. Events dispatched on `window` via `window.dispatchEvent` originate at `window` and never flow _through_ `document` in the capture phase — the document capture listener is skipped entirely.
+- **Fix** (test only): Accept that `_lastInputWasKeyboard` cannot be set via `window.dispatchEvent`. If testing ring visibility is required, click on the page first (to give window focus) and use real user keypresses, or inject `_lastInputWasKeyboard = true` via a temporary debug export.
+- **Rule**: `window.dispatchEvent` bypasses document capture listeners. Use `document.dispatchEvent` or an element's `dispatchEvent` if capture handlers must fire.
+
 ## Tool Invocation / Claude Agent SDK
 
 ### Typed tool parameters fail if the tool schema is not in context — load with `ToolSearch` first
@@ -293,3 +319,16 @@
 
 ## replace_all prefix misses
 - **`replace_all` only matches the exact string.** In a file with `piece.actual.x`, `anchorPiece.actual.x`, and `p.actual.x`, replacing `piece.actual.x` leaves the other two untouched. After any bulk rename, grep for the old field name (`\.actual\.`, `\.groupId`, etc.) to confirm zero remaining occurrences before running typecheck.
+
+## Browser extension interference with keyboard tab order
+
+Symptom: First Tab press lands on an invisible element, focus ring never appears, `document.activeElement.getAttribute('aria-label')` returns null.
+
+Cause: Browser extensions (password managers, ad blockers, dev tools) inject focusable `<div>` elements into the page before bench buttons in DOM order.
+
+Diagnosis: Check `document.activeElement.id` after Tab — if it's something like `jsExtensionMenuParent` it's an extension, not app code.
+
+Confirm: Test in incognito (extensions disabled). If keyboard nav works correctly there, the extension is the culprit.
+
+Fix: `guardFocusWithinApp()` in `scene.ts` listens for `focusin` and redirects to `#landmark-bench button[tabindex="0"]` whenever focus lands outside owned regions. Works against late-injected elements too (unlike a one-shot silencing pass). Add new legitimate focusable regions to the `isOurs` check as the app grows.
+

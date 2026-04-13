@@ -14,6 +14,18 @@ import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
 import { isInBench, isOnTable } from '../puzzle/types';
 import { hexToRgb } from '../puzzle/cutter';
 import {
+  LANDMARK_BENCH_ID,
+  removeButton,
+  focusButton,
+  setButtonTabIndex,
+  syncButtonDOMOrder,
+  updateFilterButtonLabels,
+  setActiveFilterButton,
+  getFocusedPieceId,
+  clearFocusedPieceId,
+  type FilterDef,
+} from '../utils/aria';
+import {
   isDraggingCanvas,
   insertGroupAABB,
   startDragForPiece,
@@ -69,7 +81,8 @@ let _piecePixelH = 0;
 // Per-piece original filters — cleared in tray, restored on extraction
 const _originalFilters = new Map<string, Filter[]>();
 
-// Shuffled display order — randomised once on init, updated as pieces extract
+// Shuffled display order — randomised once on init, updated as pieces extract.
+// Also serves as keyboard tab order: Tab follows the visual bench layout left→right.
 let _trayDisplayOrder: string[] = [];
 
 // Animation state
@@ -110,6 +123,12 @@ let _loadingTickerFn: (() => void) | null = null;
 
 // HC store subscription — unsubscribed on teardown, replaced on re-init (AC-2)
 let _unsubscribeHC: (() => void) | null = null;
+
+// DOM bench strip handle — focusable element for keyboard open, focus handoff on close
+let _benchStripHandle: HTMLButtonElement | null = null;
+
+// Smooth scroll animation target — null when no animation in flight
+let _scrollTarget: number | null = null;
 
 // Greyscale store subscription — unsubscribed on teardown (Story 37e)
 let _unsubscribeGreyscale: (() => void) | null = null;
@@ -152,6 +171,163 @@ function maxScroll(): number {
 
 function clampScroll(v: number): number {
   return Math.max(0, Math.min(v, maxScroll()));
+}
+
+// ─── Scroll animation ─────────────────────────────────────────────────────────
+
+function animateScrollTo(targetX: number): void {
+  _scrollTarget = targetX;
+}
+
+/**
+ * Scroll the bench to reveal the piece at `pieceId`.
+ * No-op if the piece is already fully visible.
+ * Respects reducedMotion: snaps immediately when active, otherwise lerps via ticker.
+ * Exported for aria.ts focus handler wiring in scene.ts.
+ */
+export function scrollBenchToId(pieceId: string): void {
+  const inTray = visibleInTray();
+  const idx = inTray.indexOf(pieceId);
+  if (idx === -1) return;
+
+  const availH = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING;
+  const rows   = Math.max(1, Math.floor(availH / (THUMBNAIL_SIZE + PADDING)));
+  const col    = Math.floor(idx / rows);
+
+  const targetScrollX = PADDING + col * (THUMBNAIL_SIZE + PADDING);
+  const pieceScreenX  = targetScrollX - _scrollX;
+  const visibleWidth  = screenW();
+
+  const alreadyVisible =
+    pieceScreenX >= 0 && pieceScreenX + THUMBNAIL_SIZE <= visibleWidth;
+  if (alreadyVisible) return;
+
+  const newScrollX = Math.max(
+    0,
+    Math.min(
+      targetScrollX - visibleWidth / 2 + THUMBNAIL_SIZE / 2,
+      maxScroll(),
+    ),
+  );
+
+  if (usePuzzleStore.getState().reducedMotion) {
+    _scrollX = newScrollX;
+    _scrollTarget = null;
+    if (_gridContainer) _gridContainer.x = -_scrollX;
+  } else {
+    animateScrollTo(newScrollX);
+  }
+}
+
+// ─── Keyboard focus helpers ───────────────────────────────────────────────────
+
+/**
+ * Find the next piece in bench display order after `pieceId` that is in
+ * `visibleSet`. If none found forward, tries backward. Returns null if empty.
+ */
+function findNextFocusableAfter(pieceId: string, visibleSet: Set<string>): string | null {
+  const { piecesById } = usePuzzleStore.getState();
+  const allInBench = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
+  const idx = allInBench.indexOf(pieceId);
+  if (idx === -1) {
+    // Piece not found in display order — return first visible
+    return [...visibleSet][0] ?? null;
+  }
+  for (let i = idx + 1; i < allInBench.length; i++) {
+    if (visibleSet.has(allInBench[i])) return allInBench[i];
+  }
+  for (let i = idx - 1; i >= 0; i--) {
+    if (visibleSet.has(allInBench[i])) return allInBench[i];
+  }
+  return null;
+}
+
+/**
+ * After extraction, move focus to the next visible bench piece.
+ * Must be called BEFORE updating _trayDisplayOrder (uses prevOrder to find position).
+ * After focus handoff, removes the extracted piece's button from DOM.
+ *
+ * Only moves focus when the extracted button was the active element —
+ * drag-initiated extraction leaves focus alone.
+ */
+function handleExtractionFocusHandoff(extractedPieceId: string, prevOrder: string[]): void {
+  // Use persistent tracking rather than document.activeElement — more reliable.
+  // activeElement drops to body on drag start; _trackedPieceId persists until explicit clear.
+  const wasFocused = getFocusedPieceId() === extractedPieceId;
+  clearFocusedPieceId(); // always clear — extracted piece is leaving the bench
+  if (!wasFocused) {
+    removeButton(extractedPieceId);
+    return;
+  }
+
+  const { piecesById } = usePuzzleStore.getState();
+  const extractedIdx = prevOrder.indexOf(extractedPieceId);
+
+  // Find next visible bench piece after extracted position (forward then backward)
+  const currentVisible = new Set(visibleInTray()); // re-evaluated after extraction
+
+  let nextId: string | null = null;
+  for (let i = extractedIdx + 1; i < prevOrder.length; i++) {
+    if (currentVisible.has(prevOrder[i])) { nextId = prevOrder[i]; break; }
+  }
+  if (!nextId) {
+    for (let i = extractedIdx - 1; i >= 0; i--) {
+      if (currentVisible.has(prevOrder[i])) { nextId = prevOrder[i]; break; }
+    }
+  }
+  // Fallback: any remaining bench piece
+  if (!nextId) {
+    for (const id of prevOrder) {
+      if (id !== extractedPieceId && isInBench(piecesById[id]!)) {
+        nextId = id;
+        break;
+      }
+    }
+  }
+
+  removeButton(extractedPieceId);
+  if (nextId) {
+    focusButton(nextId);
+  } else {
+    document.getElementById(LANDMARK_BENCH_ID)?.focus();
+  }
+}
+
+/**
+ * After a filter change, resolve keyboard focus to the right bench piece.
+ * Called after layoutTrayPieces — always jumps to the first visible piece.
+ */
+function handleFilterChangeFocus(): void {
+  clearFocusedPieceId();
+  const firstId = getFirstVisibleBenchPieceId();
+  if (firstId) {
+    focusButton(firstId);
+    scrollBenchToId(firstId);
+  } else {
+    document.getElementById(LANDMARK_BENCH_ID)?.focus();
+  }
+}
+
+/**
+ * Apply a filter change and resolve keyboard focus.
+ * tabIndex values are updated by layoutTrayPieces, then handleFilterChangeFocus
+ * jumps focus to the first visible piece in the new filter.
+ */
+export function applyBenchFilter(filter: TrayFilter): void {
+  // Apply the filter and reset scroll
+  usePuzzleStore.getState().setActiveFilter(filter);
+  _scrollX = 0;
+  if (_gridContainer) _gridContainer.x = 0;
+  _scrollTarget = null;
+
+  // layoutTrayPieces syncs tabIndices for all bench buttons
+  layoutTrayPieces();
+
+  // Sync ARIA radio state to reflect the active filter
+  setActiveFilterButton(filter);
+
+  // Resolve focus after tabIndex values have settled
+  handleFilterChangeFocus();
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
@@ -371,10 +547,7 @@ function renderFilterStrip(): void {
     const capturedKey = key;
     btn.on('pointerdown', (e: FederatedPointerEvent) => {
       e.stopPropagation();
-      usePuzzleStore.getState().setActiveFilter(capturedKey);
-      _scrollX = 0;
-      if (_gridContainer) _gridContainer.x = 0;
-      layoutTrayPieces();
+      applyBenchFilter(capturedKey);
     });
 
     _filterContainer.addChild(btn);
@@ -454,10 +627,7 @@ function renderFilterStrip(): void {
     const capturedZ = z;
     swatch.on('pointerdown', (e: FederatedPointerEvent) => {
       e.stopPropagation();
-      usePuzzleStore.getState().setActiveFilter(`palette-${capturedZ}` as TrayFilter);
-      _scrollX = 0;
-      if (_gridContainer) _gridContainer.x = 0;
-      layoutTrayPieces();
+      applyBenchFilter(`palette-${capturedZ}` as TrayFilter);
     });
 
     _filterContainer.addChild(swatch);
@@ -547,7 +717,21 @@ function layoutTrayPieces(): void {
 
   // Clamp scroll and apply
   _scrollX = clampScroll(_scrollX);
+
+  // Sync bench button tabIndex: visible pieces get 0, filtered-out pieces get -1.
+  // Runs on every layout (filter change, extraction, load).
+  const inTraySet = new Set(inTray);
+  for (const id of allInTray) {
+    setButtonTabIndex(id, inTraySet.has(id) ? 0 : -1);
+  }
+
+  // Sync DOM button order to match visual bench layout (left→right = _trayDisplayOrder order).
+  // inTray is already in _trayDisplayOrder order filtered to the active filter set.
+  syncButtonDOMOrder(inTray);
   _gridContainer.x = -_scrollX;
+
+  // Update filter radio button labels with current piece counts.
+  updateFilterButtonLabels(getFilterDefs());
 
   // Refresh clip mask — covers the full _piecesContainer area
   const w = screenW();
@@ -561,6 +745,7 @@ function layoutTrayPieces(): void {
 
   // Empty state — shown only when all pieces have left the tray
   updateEmptyState(allInTray.length === 0);
+
 }
 
 // ─── Tray open / close ────────────────────────────────────────────────────────
@@ -574,6 +759,23 @@ export function setTrayOpen(open: boolean): void {
   if (usePuzzleStore.getState().reducedMotion) {
     currentTrayHeight = targetTrayHeight;
     applyTrayLayout();
+  }
+
+  // Sync strip handle pointer-events and tab reachability:
+  // - open: pointer-events none (PixiJS _stripHitArea handles close); tabIndex -1 (bench open, handle irrelevant)
+  // - closed: pointer-events auto (DOM button handles open); tabIndex 0 (reachable via Tab)
+  if (_benchStripHandle) {
+    _benchStripHandle.style.pointerEvents = open ? 'none' : 'auto';
+    _benchStripHandle.tabIndex = open ? -1 : 0;
+  }
+
+  // Focus handoff: if a bench button was focused when the bench closes,
+  // move focus to the strip handle so the user can reopen with Enter/Space.
+  if (!open) {
+    const focusedInBench = document.activeElement?.closest(`#${LANDMARK_BENCH_ID}`);
+    if (focusedInBench && _benchStripHandle) {
+      _benchStripHandle.focus();
+    }
   }
 }
 
@@ -695,8 +897,13 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
     if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
   }
 
+  // Focus handoff — must run before _trayDisplayOrder is updated so prevOrder
+  // is intact for finding the next piece. Only moves focus when button was active.
+  const prevOrder = [..._trayDisplayOrder];
+
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  handleExtractionFocusHandoff(pieceId, prevOrder);
   layoutTrayPieces();
 }
 
@@ -795,8 +1002,14 @@ function extractToCanvas(
   // Hand off to drag.ts using POINTER world position (not sprite centre)
   startDragForPiece(pieceId, pointerId, pointerWorldX, pointerWorldY);
 
+  // Focus handoff — must run before _trayDisplayOrder is updated.
+  // handleExtractionFocusHandoff checks whether this button was focused;
+  // drag extraction won't have keyboard focus, so focus won't move.
+  const prevOrder = [..._trayDisplayOrder];
+
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  handleExtractionFocusHandoff(pieceId, prevOrder);
   layoutTrayPieces();
 }
 
@@ -1083,6 +1296,8 @@ function subscribeToStore(): void {
         const before = _trayDisplayOrder.length;
         _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== piece.id);
         if (_trayDisplayOrder.length !== before) changed = true;
+        // Clear persistent focus tracking when a piece leaves the bench via placement.
+        if (getFocusedPieceId() === piece.id) clearFocusedPieceId();
       }
     }
     if (changed) layoutTrayPieces();
@@ -1113,6 +1328,7 @@ export function initTray(
 
   // Randomise display order for the tray
   _trayDisplayOrder = shuffle(pieces.filter((p) => isInBench(p)).map((p) => p.id));
+
 
   // Set up in-tray sprites: clear filters, set eventMode.
   // Scale is set in layoutTrayPieces() — no need to set here.
@@ -1188,6 +1404,7 @@ export function initTray(
     setTrayOpen(!usePuzzleStore.getState().trayOpen);
   });
 
+
   // ── Wheel scroll — horizontal scroll, no viewport propagation ───────────────
   tray.on('wheel', (e: FederatedWheelEvent) => {
     if (!usePuzzleStore.getState().trayOpen) return;
@@ -1245,7 +1462,21 @@ export function initTray(
 
   // ── Animation ticker (lerp / snap) ─────────────────────────────────────────
   app.ticker.add(() => {
-    // Reduced motion: skip lerp — snap to target on any frame where they differ.
+    // Smooth scroll animation for scrollBenchToId — runs regardless of reducedMotion
+    // (reducedMotion path calls animateScrollTo never; the _scrollTarget guard is
+    // sufficient — no mid-animation reducedMotion toggle handling needed here).
+    if (_scrollTarget !== null) {
+      const diff = _scrollTarget - _scrollX;
+      if (Math.abs(diff) < 0.5) {
+        _scrollX = _scrollTarget;
+        _scrollTarget = null;
+      } else {
+        _scrollX += diff * 0.15;
+      }
+      if (_gridContainer) _gridContainer.x = -_scrollX;
+    }
+
+    // Reduced motion: skip height lerp — snap to target on any frame where they differ.
     if (usePuzzleStore.getState().reducedMotion) {
       if (currentTrayHeight !== targetTrayHeight) {
         currentTrayHeight = targetTrayHeight;
@@ -1290,9 +1521,10 @@ export function initTray(
     'cursor:pointer',
   ].join(';');
   const zoomCheckbox = document.createElement('input');
-  zoomCheckbox.type    = 'checkbox';
-  zoomCheckbox.checked = usePuzzleStore.getState().zoomToPlace;
+  zoomCheckbox.type     = 'checkbox';
+  zoomCheckbox.checked  = usePuzzleStore.getState().zoomToPlace;
   zoomCheckbox.style.margin = '0';
+  zoomCheckbox.tabIndex = -1; // dev scaffold — excluded from keyboard tab flow (Story 52)
   zoomCheckbox.addEventListener('change', () => {
     usePuzzleStore.getState().setZoomToPlace(zoomCheckbox.checked);
   });
@@ -1337,9 +1569,10 @@ export function initTray(
       'cursor:pointer',
     ].join(';');
     const cb = document.createElement('input');
-    cb.type    = 'checkbox';
-    cb.checked = usePuzzleStore.getState()[key] as boolean;
+    cb.type     = 'checkbox';
+    cb.checked  = usePuzzleStore.getState()[key] as boolean;
     cb.style.margin = '0';
+    cb.tabIndex = -1; // dev scaffold — excluded from keyboard tab flow (Story 52)
     cb.addEventListener('change', () => {
       usePuzzleStore.getState().setPreference(key, cb.checked);
     });
@@ -1390,6 +1623,7 @@ export function initTray(
       'background:#252545',
       'color:#ddddf0',
     ].join(';');
+    btn.tabIndex = -1; // dev scaffold — excluded from keyboard tab flow (Story 52)
     btn.addEventListener('click', () => {
       usePuzzleStore.getState().setPreference('backgroundPreset', preset);
     });
@@ -1405,6 +1639,36 @@ export function initTray(
   // Hide pieces immediately — cuts aren't applied yet; setTrayLoading(false) in CUTS_COMPLETE
   _gridContainer!.visible   = false;
   _filterContainer!.visible = false;
+
+  // ── Bench strip handle (keyboard accessibility) ────────────────────────────
+  // A visually-transparent DOM button that sits over the closed-bench strip.
+  // Focusable — receives focus when bench closes while a bench button was active.
+  // pointer-events disabled when bench is open so PixiJS _stripHitArea gets clicks.
+  if (_benchStripHandle) _benchStripHandle.remove();
+  const stripHandle = document.createElement('button');
+  stripHandle.id = 'bench-strip-handle';
+  stripHandle.setAttribute('aria-label', 'Open piece bench — or press T');
+  stripHandle.tabIndex = -1; // bench starts open — not reachable via Tab until closed
+  stripHandle.style.cssText = [
+    'position:fixed',
+    'bottom:0',
+    'left:0',
+    'width:100%',
+    `height:${TRAY_HEIGHT_CLOSED}px`,
+    'opacity:0',
+    'cursor:pointer',
+    `z-index:600`,
+    'pointer-events:none', // bench starts open — disable until closed
+  ].join(';');
+  stripHandle.addEventListener('click', () => setTrayOpen(true));
+  stripHandle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setTrayOpen(true);
+    }
+  });
+  document.body.appendChild(stripHandle);
+  _benchStripHandle = stripHandle;
 
   // Initial viewport resize to account for open tray
   viewport.resize(screenW(), app.screen.height - TRAY_HEIGHT_OPEN);
@@ -1507,9 +1771,88 @@ export function teardownTray(): void {
   _unsubscribeGreyscale = null;
 }
 
+/**
+ * Return a copy of the current bench display order (the shuffled visual layout).
+ * Used by scene.ts to pass ordered IDs to syncButtonDOMOrder after initBenchButtons,
+ * ensuring initial DOM button order matches visual layout order.
+ */
+export function getTrayDisplayOrder(): string[] {
+  return [..._trayDisplayOrder];
+}
+
+/**
+ * Compute filter definitions with live counts of matching in-bench pieces.
+ * Used by aria.ts to label the filter radiogroup buttons.
+ * Label format: "All (16)", "Corners (4)", "Edges (8)", etc.
+ */
+export function getFilterDefs(): FilterDef[] {
+  const { piecesById, activeFilter: _ } = usePuzzleStore.getState();
+  const allInBench = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
+
+  const count = (filterFn: (id: string) => boolean) =>
+    allInBench.filter(filterFn).length;
+
+  const cornerCount   = count((id) => piecesById[id]?.edgeType === 'corner');
+  const edgeCount     = count((id) => piecesById[id]?.edgeType === 'edge');
+  const interiorCount = count((id) => piecesById[id]?.edgeType === 'interior');
+
+  const defs: FilterDef[] = [
+    { id: 'all',      label: `All (${allInBench.length})` },
+    { id: 'corner',   label: `Corners (${cornerCount})` },
+    { id: 'edge',     label: `Edges (${edgeCount})` },
+    { id: 'interior', label: `Interior (${interiorCount})` },
+  ];
+
+  // Palette zones — only include if at least one piece belongs to that zone
+  for (let z = 0; z < 5; z++) {
+    const zCount = count((id) => piecesById[id]?.paletteIndex === z);
+    if (zCount > 0) {
+      defs.push({ id: `palette-${z}`, label: `Zone ${z + 1} (${zCount})` });
+    }
+  }
+
+  return defs;
+}
+
+/**
+ * Return the first currently-visible bench piece ID, or null if the bench is empty.
+ * Used by scene.ts for focus handoff on T key open.
+ */
+export function getFirstVisibleBenchPieceId(): string | null {
+  return visibleInTray()[0] ?? null;
+}
+
+/**
+ * Cycle the active bench filter by `direction` (+1 = next, -1 = prev).
+ * Wraps at both ends. Uses getFilterDefs() for the current available filter list
+ * so sparse palette zones are skipped automatically.
+ *
+ * Wired via registerFilterHandlers from scene.ts — called by the ArrowLeft/Right
+ * handler on #landmark-bench when a piece button has focus.
+ */
+export function cycleFilter(direction: 1 | -1): void {
+  const filters = getFilterDefs();
+  const { activeFilter } = usePuzzleStore.getState();
+  const idx  = filters.findIndex((f) => f.id === activeFilter);
+  const next = filters[(idx + direction + filters.length) % filters.length];
+  applyBenchFilter(next.id as TrayFilter);
+}
+
 /** Call from both window resize and renderer resize events in scene.ts. */
 export function onTrayResize(_app: Application): void {
   if (!_trayContainer) return;
   applyTrayLayout();
   layoutTrayPieces();
+}
+
+/**
+ * Keyboard Enter extraction — trigger spiral placement for an in-bench piece.
+ * Same code path as pointer click (spiralPlace). zoomToPlacePiece() is never
+ * called from keyboard handlers. See docs/spike-keyboard-focus.md §9.9.
+ */
+export function spiralExtractPiece(pieceId: string): void {
+  const sprite    = _spriteMap?.get(pieceId);
+  const container = _containerMap?.get(pieceId);
+  if (!sprite || !container) return;
+  spiralPlace(pieceId, sprite, container);
 }

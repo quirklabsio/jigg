@@ -66,7 +66,7 @@ When a story closes: add session notes to `stories.md`, mark `[x]` here, remove 
   Document: ARIA landmark structure, ARIA label format (index + zone + coords + state), key bindings, group focus model (group = single tab stop, primary piece = lowest `piece.index`).
   **HARD GATE — Story 40 does not open until Story 39 is confirmed.**
 
-- [ ] **Story 40** — Tray keyboard nav; refactor `aria.ts` into two-landmark structure (`role="application"` × 2), create DOM buttons for all in-tray pieces (Approach A). Wire button `focus` → PixiJS focus ring reposition. Auto-scroll tray on button focus via `scrollTrayToId()` export from `tray.ts`. Filter change: move focus programmatically to next visible button *before* setting `tabIndex="-1"` on filtered-out buttons — prevents focus drop to `<body>`. Extraction: remove button immediately, move focus to next in tray order. Tray handle must have a focusable DOM element (required for Story 42 tray-close focus handoff).
+- [x] **Story 40** — Bench keyboard nav + keyboard polish. `aria.ts` refactored into two-landmark structure (`role="application"` × 2). DOM buttons for all bench pieces (Approach A). Focus ring on `app.stage` (zIndex 1000, neon magenta, screen-space, `sprite.getBounds()` per frame). Filter focus-drop prevention via `applyBenchFilter`. Extraction focus handoff via `handleExtractionFocusHandoff`. `scrollBenchToId` exported. `_benchStripHandle` keyboard-focusable strip element (tabIndex=-1 when open, 0 when closed). `spiralExtractPiece` exported. Registration pattern breaks circular dep. Filter radiogroup (`role="radiogroup"` + `role="radio"`, ArrowLeft/Right cycling, live counts). Canvas `tabIndex=-1`. T key focus-jumps to first bench piece on open.
 
 - [ ] **Story 41a** — Canvas pick-up/put-down model; Enter/Space picks up and puts down focused canvas piece or group. Group = single tab stop (primary piece = lowest `piece.index`, member buttons `tabIndex="-1"`). Focus ring wraps full group AABB in screen space. Placed pieces: `tabIndex="-1"`, aria-label reads "Placed" for reference.
 
@@ -157,7 +157,8 @@ DONE     Story 29         (Cleanup)                                   ✓
          Story 38         (Keyboard spike)                            ✓
          Stories 32–37e   (Tray epic)                                 ✓
 
-NEXT     Story 40         (Tray keyboard nav)
+         Story 40         (Bench keyboard nav)                         ✓
+NEXT     Story 41a        (Canvas pick-up/put-down model)
          Stories 41a+41b  (Canvas keyboard — re-estimate after Story 39 closes)
          Story 42         (Focus coordination)
          Story 44         (File picker — unblocks real playtesting)
