@@ -194,21 +194,22 @@ Previously the tray used two separate rects (main bg + strip colour). 37d simpli
 
 ### 5.1 Data sourcing (hallucination check)
 
-`setAriaLabel` in `aria.ts`:
+`setAriaLabel` in `aria.ts` (updated Story 39):
 
 ```ts
-`Piece row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1} — ${stateLabel}`
+`Piece ${piece.index} — Palette ${piece.paletteIndex + 1}, row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1}, ${stageLabel}`
 ```
 
 - Uses `piece.gridCoord.row` and `piece.gridCoord.col` ✓ — no `piece.row` reference.
 - `piece.gridCoord` is defined in `types.ts` as `{ col: number; row: number }` ✓.
-- No reference to `piece.sprite` anywhere ✓ — spec-correct.
+- State derived from `isInBench`/`isOnTable`/`isPlaced` helpers — no reference to removed `piece.state` field ✓.
+- No reference to `piece.sprite` anywhere ✓.
 
 ### 5.2 State-transition gap
 
-`initAriaLabels` is called once in `scene.ts` after `CUTS_COMPLETE`. `setAriaLabel` is **never called on state transitions** (in-tray → on-canvas → placed). The `setAriaLabel` docstring says "Call on every piece state transition" but no call site exists in `tray.ts` (extraction) or `snap.ts`/`scene.ts` (placement).
+`initAriaLabels` is called once in `scene.ts` after `CUTS_COMPLETE`. `setAriaLabel` is **never called on state transitions** (bench → table → placed). The `setAriaLabel` docstring says "Call on every piece state transition" but no call site exists in `bench.ts` (extraction) or `snap.ts`/`scene.ts` (placement).
 
-Screen readers announce the initial state correctly for all pieces, but will never announce that a piece has been extracted or placed. Must be wired as part of Story 38.
+Screen readers announce the initial state correctly for all pieces, but will never announce that a piece has been extracted or placed. Must be wired as part of Story 40.
 
 ### 5.3 piece.index vs. ARIA label
 
@@ -271,7 +272,7 @@ Samples the media query **once at module evaluation time** and persists to `loca
 
 ### 7.6 ARIA list is never updated after initial load (Informational)
 
-`setAriaLabel` must be called on every `piece.state` transition. Until Story 38 wires this up, screen-reader users hear stale state ("In tray") for pieces that have since been extracted or placed.
+`setAriaLabel` must be called on every state transition (`stageId` change or `placed` set). Until Story 40 wires this up, screen-reader users hear stale state ("In bench") for pieces that have since been extracted or placed.
 
 ### 7.7 No keyboard navigation on canvas (Informational)
 
@@ -287,8 +288,8 @@ Stories 38–42 (keyboard focus epic) are unscheduled beyond the spike in Story 
 
 | Priority | Issue | Story |
 |---|---|---|
-| P1 | `setAriaLabel` never called on state transitions — screen reader state is always stale | Story 38 |
-| P2 | No keyboard navigation — canvas is pointer-only | Stories 38–42 |
+| P1 | `setAriaLabel` never called on state transitions — screen reader state is always stale | Story 40 |
+| P2 | No keyboard navigation — canvas is pointer-only | Stories 40–42 |
 | P2 | Snap pulse thickness not applied (`SNAP_HIGHLIGHT_THICKNESS_HC = 4` wired to nothing) | Post-37d follow-up |
 | P3 | Labels unreadable below ~0.3× zoom | Post-launch (low priority) |
 | P3 | Greyscale filter doesn't reach tray chrome or color-zone swatches | Story 37a follow-up |
@@ -297,3 +298,112 @@ Stories 38–42 (keyboard focus epic) are unscheduled beyond the spike in Story 
 **Resolved this session:**
 - ~~P1: `applyReducedMotion` is a stub~~ — fully implemented (Story 37c)
 - ~~P1: Zoom-to-piece reads `window.matchMedia` directly~~ — replaced with Zustand flag (Story 37c)
+
+---
+
+## 9. Keyboard Navigation Model
+
+**Status:** Spec complete (Story 39). Implementation begins Story 40.
+**Spike:** `docs/spike-keyboard-focus.md` (Story 38).
+
+### 9.1 ARIA Landmark Structure
+
+```html
+<div role="application"
+     aria-label="Piece bench — 5 Palette Groups"
+     id="landmark-bench">
+  <!-- hidden buttons for bench pieces -->
+</div>
+<div role="application"
+     aria-label="Puzzle table — N pieces on table"
+     id="landmark-table">
+  <!-- hidden buttons for on-table pieces -->
+</div>
+```
+
+`role="application"` suppresses AT shortcut keys — correct for canvas-driven widgets where the app owns all key events. `role="region"` does not suppress AT shortcuts. `role="grid"` carries implicit ARIA semantics (`gridcell`, `row`) that would need DOM mirroring — unnecessary complexity.
+
+`#landmark-bench` DOM order before `#landmark-table` — natural tab flow from bench into table. No intermediary "switch region" button needed. When the bench is closed, bench buttons get `tabIndex="-1"` — the landmark is skipped in tab order.
+
+### 9.2 ARIA Label Format — Single Pieces
+
+```
+"Piece {index} — Palette {paletteIndex + 1}, row {gridRow + 1}, column {gridCol + 1}, {stageLabel}"
+```
+
+Where `stageLabel`: `isInBench` → `"In bench"` / `isOnTable` → `"On table"` / `isPlaced` → `"Placed"`
+
+Field order: `index` first (matches visual label), Palette second (bridges greyscale/auditory), grid coords third, state last.
+
+### 9.3 ARIA Label Format — Clusters
+
+```typescript
+// ≤5 members — list piece numbers:
+"Group of {n} — pieces {index1}, {index2}, {index3}, On table"
+
+// >5 members — summarise spatially:
+"Group of {n} — rows {minRow}–{maxRow}, columns {minCol}–{maxCol}, On table"
+```
+
+Cluster = single tab stop. Primary piece = lowest `PieceDefinition.index`. All other member buttons: `tabIndex="-1"`. Focus ring wraps full cluster AABB in screen space.
+
+### 9.4 Key Binding Map
+
+| Key | Bench context | Table context | Notes |
+|---|---|---|---|
+| `Tab` | Next bench piece | Next table piece/cluster | Browser native |
+| `Shift+Tab` | Previous bench piece | Previous table piece/cluster | Browser native |
+| `Enter` | Spiral extract | Pick up / put down | Never zoom-to-place |
+| `Space` | Spiral extract | Pick up / put down | `preventDefault()` required |
+| `ArrowLeft/Right` | Scroll bench | Move held piece | Context-sensitive |
+| `ArrowUp/Down` | Navigate bench rows | Move held piece | Context-sensitive |
+| `Escape` | Deselect, return to landmark | Drop piece, return to table button | |
+| `T` | Toggle bench | Toggle bench | Safe in `role="application"` |
+| `R` | — | Rotate focused piece 90° CW | No bench action |
+| `Shift+B` | Background cycle | Background cycle | No AT conflict |
+
+Arrow key snap: no snap mid-movement. Snap evaluated on put-down (Enter/Space) only — matches pointer drag model.
+
+`Enter` always triggers spiral extraction. `zoomToPlacePiece()` is pointer-only. Dedicated zoom-preview key deferred post-Story 42.
+
+### 9.5 Stage Layer Order
+
+```
+app.stage children (render order):
+  1. viewport          (world space  — zIndex: 0)
+  2. benchContainer    (screen space — zIndex: 500)
+  3. focusRing         (screen space — zIndex: 1000, always topmost)
+```
+
+`focusRing` added to `app.stage` after both `viewport` and `benchContainer`.
+
+### 9.6 Focus Ring Specification
+
+```typescript
+const FOCUS_RING_COLOR     = 0xff00ff  // neon magenta — matches SNAP_HIGHLIGHT_COLOR_HC
+const FOCUS_RING_THICKNESS = 2         // screen-space pixels, non-scaling
+const FOCUS_RING_PADDING   = 4         // pixels outside piece bounding box
+```
+
+Single shared `Graphics` on `app.stage`, redrawn each frame at focused piece screen position. Non-scaling (screen space, not inside `viewport`). Table pieces: `viewport.toGlobal(sprite.getGlobalPosition())`. Bench pieces: `sprite.getGlobalPosition()` directly.
+
+### 9.7 Story 40 Target API
+
+```typescript
+// src/utils/aria.ts
+initLandmarks(): void
+initBenchButtons(pieces: Piece[]): void
+initTableButtons(pieces: Piece[]): void
+updateButtonLabel(piece: Piece): void
+removeButton(pieceId: string): void
+setButtonTabIndex(pieceId: string, n: 0 | -1): void
+focusButton(pieceId: string): void
+scrollBenchToId(pieceId: string): void
+```
+
+### 9.8 Deferred
+
+- **zoomToPlace preview key** — non-Enter key TBD post-Story 42
+- **`aria-description` colour hint per palette group** — e.g. "Palette 1: predominantly blue". Requires HSL + colour naming heuristic. Post-launch.
+- **Return-to-bench mechanic** — post-launch pending user feedback
+- **`@jigg-spec` npm package** — publish when spec stabilises post-launch

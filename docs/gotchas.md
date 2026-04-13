@@ -279,13 +279,14 @@
 
 - **Symptom**: `error TS2307: Cannot find module 'path'` / `Cannot find module 'url'` when `vite.config.ts` uses `import path from 'path'` and `import { fileURLToPath } from 'url'`.
 - **Root cause**: `path` and `url` are Node.js built-ins. Without `@types/node` installed, TypeScript has no declarations for them. The standard tsconfig for a browser app (no `@types/node`) will always fail.
-- **Fix**: Use the Web URL API (available via DOM lib) instead of Node's path module:
+- **Fix**: Install `@types/node` as a devDependency (`npm install --save-dev @types/node`) then use `path.resolve`:
   ```ts
-  // No node imports — uses import.meta.url (ESNext module) + URL (DOM lib)
-  '@jigg/spec': new URL('./jigg-spec/types.ts', import.meta.url).pathname,
+  import path from 'path'
+  // ...
+  '@jigg-spec': path.resolve(__dirname, './jigg-spec')
   ```
-  This requires `"module": "ESNext"` (for `import.meta`) and `"lib"` containing `"DOM"` (for `URL`). Both are already present in this tsconfig.
-- **Rule**: Avoid `import path from 'path'` in `vite.config.ts` unless `@types/node` is a declared devDependency. Use `new URL(..., import.meta.url).pathname` instead.
+  `skipLibCheck: true` in tsconfig prevents `@types/node` from polluting browser source type checking.
+- **Rule**: `import path from 'path'` in `vite.config.ts` requires `@types/node` as a devDependency. Add it — `skipLibCheck` keeps it safe. The earlier workaround using `new URL(..., import.meta.url).pathname` works but is less readable and doesn't support `__dirname`-style directory resolution.
 
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.
