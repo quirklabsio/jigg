@@ -1,5 +1,6 @@
 import { Graphics } from 'pixi.js';
-import type { CutPath, CutPoint, EdgeType, Piece } from './types';
+import type { Point } from '@jigg/spec';
+import type { CutPath, EdgeType, Piece } from './types';
 
 /**
  * Edge influence for cut routing: 0.0 = classic seeded variation only,
@@ -162,9 +163,9 @@ export function gridCut(
 // ─── Mask building ────────────────────────────────────────────────────────────
 
 /** Reverse a Bezier path stored as [start, cp1, cp2, end, cp1, cp2, end, ...]. */
-function reverseCutPoints(pts: CutPoint[]): CutPoint[] {
+function reversePoints(pts: Point[]): Point[] {
   // Number of segments = (pts.length - 1) / 3
-  const result: CutPoint[] = [pts[pts.length - 1]];
+  const result: Point[] = [pts[pts.length - 1]];
   for (let i = pts.length - 4; i >= 0; i -= 3) {
     result.push(pts[i + 2]); // cp2 → cp1 in reverse
     result.push(pts[i + 1]); // cp1 → cp2 in reverse
@@ -173,15 +174,15 @@ function reverseCutPoints(pts: CutPoint[]): CutPoint[] {
   return result;
 }
 
-/** Convert an image-space CutPoint to sprite-local coordinates.
+/** Convert an image-space Point to sprite-local coordinates.
  *  Sprite anchor is 0.5, so local origin = centre of piece. */
-function toLocal(pt: CutPoint, col: number, row: number, pw: number, ph: number): [number, number] {
+function toLocal(pt: Point, col: number, row: number, pw: number, ph: number): [number, number] {
   return [pt.x - col * pw - pw / 2, pt.y - row * ph - ph / 2];
 }
 
 function drawCutSegments(
   g: Graphics,
-  pts: CutPoint[],
+  pts: Point[],
   col: number,
   row: number,
   pw: number,
@@ -260,7 +261,7 @@ export function buildPieceMask(
   // ── Bottom edge: right → left (reversed) ───────────────────────────────
   const bottomCut = row < rows - 1 ? hCut.get(`${col},${row}`) : undefined;
   if (bottomCut) {
-    const revBottom = reverseCutPoints(bottomCut.points);
+    const revBottom = reversePoints(bottomCut.points);
     const [b0x, b0y] = toLocal(revBottom[0], col, row, pw, ph);
     g.lineTo(b0x, b0y);
     drawCutSegments(g, revBottom, col, row, pw, ph);
@@ -271,7 +272,7 @@ export function buildPieceMask(
   // ── Left edge: bottom → top (reversed) ─────────────────────────────────
   const leftCut = col > 0 ? vCut.get(`${col - 1},${row}`) : undefined;
   if (leftCut) {
-    const revLeft = reverseCutPoints(leftCut.points);
+    const revLeft = reversePoints(leftCut.points);
     const [l0x, l0y] = toLocal(revLeft[0], col, row, pw, ph);
     g.lineTo(l0x, l0y);
     drawCutSegments(g, revLeft, col, row, pw, ph);

@@ -42,6 +42,34 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ## Session Notes
 
+### Type alignment — spec import wiring (2026-04-12)
+
+Pre-implementation audit (file-by-file divergence tables) produced, confirmed, then implemented. `npm run typecheck` passes clean.
+
+**`tsconfig.json`**
+- Added `"baseUrl": "."` and `"paths": { "@jigg/spec": ["./jigg-spec/types.ts"] }`. Both required: `paths` silently fails to resolve without a `baseUrl` anchor.
+
+**`vite.config.ts`**
+- Added `resolve.alias` for `@jigg/spec` using `new URL('./jigg-spec/types.ts', import.meta.url).pathname` — Web URL API only, no `@types/node` needed.
+
+**`src/puzzle/types.ts`**
+- Import `EdgeType`, `Point` from `@jigg/spec`; re-export both.
+- Deleted local `EdgeType` type alias (was identical to spec's).
+- Deleted `CutPoint` interface (structurally identical to spec `Point`); `CutPath.points` re-typed as `Point[]`.
+- `PieceGroup.position` typed as `Point` (was inline `{ x: number; y: number }`).
+
+**`src/store/puzzleStore.ts`**
+- Renamed `type PieceState = Piece['state']` → `type PieceLifecycle` — preventive rename to avoid shadowing spec's `PieceState` interface when it's imported for the persistence epic. Two cast sites updated.
+
+**`src/puzzle/cutter.ts`**
+- Import `Point` from `@jigg/spec`; removed `CutPoint` from local import. All `CutPoint` references replaced with `Point`.
+
+**Persistence epic flags recorded (no action):** `Piece.groupId` / `clusterId`, `Piece.actual` / `PieceState.pos`, `Transform.rotation` (radians) / `PieceState.rot` (degrees), `PieceGroup` (whole type), `Piece.colorVector` / `meanColor: HexCode`, `Piece.state` lifecycle / `stageId`, `Piece extends PieceDefinition` blocked by `canonical` incompatibility.
+
+**Build note:** `npm run build` fails with pre-existing top-level `await` error in entry point (unrelated to this change). `typecheck` is the correct verification for a type-only pass.
+
+---
+
 ### Story 38 (2026-04-07)
 
 Keyboard focus spike. No source files modified. Output: `docs/spike-keyboard-focus.md`.

@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Filter, Graphics, Text } from 'pixi.js';
 import { ColorMatrixFilter } from 'pixi.js';
 import { BevelFilter, OutlineFilter } from 'pixi-filters';
 import { Viewport } from 'pixi-viewport';
@@ -7,6 +7,16 @@ import type { Sprite } from 'pixi.js';
 import type { Piece } from '../puzzle/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * PixiJS Filter extended with a runtime tag used to identify managed filters
+ * (sandwich stroke, greyscale) for idempotent add/remove without touching
+ * unrelated filters (e.g. BevelFilter at index 0).
+ * The tag is not part of the Filter API; we attach it at runtime.
+ */
+interface TaggedFilter extends Filter {
+  _tag?: string;
+}
 
 const PREFS_KEY = 'jigg:preferences';
 
@@ -108,14 +118,14 @@ const HC_FILTER_TAG              = 'hc-sandwich';
 
 function addSandwichStroke(sprite: Sprite): void {
   // Guard — never stack if already applied
-  if (sprite.filters?.some((f) => (f as any)._tag === HC_FILTER_TAG)) return;
+  if (sprite.filters?.some((f) => (f as TaggedFilter)._tag === HC_FILTER_TAG)) return;
 
   const inner = new OutlineFilter({ thickness: HC_INNER_OUTLINE_THICKNESS, color: HC_INNER_OUTLINE_COLOR, quality: 0.15 });
   const outer = new OutlineFilter({ thickness: HC_OUTER_OUTLINE_THICKNESS, color: HC_OUTER_OUTLINE_COLOR, quality: 0.15 });
 
   // Tag both filters — required for clean removal and leak prevention
-  (inner as any)._tag = HC_FILTER_TAG;
-  (outer as any)._tag = HC_FILTER_TAG;
+  (inner as TaggedFilter)._tag = HC_FILTER_TAG;
+  (outer as TaggedFilter)._tag = HC_FILTER_TAG;
 
   // Filter order is mandatory:
   //   Index 0:   BevelFilter — internal piece depth, must render before outlines
@@ -127,10 +137,10 @@ function addSandwichStroke(sprite: Sprite): void {
 
 function removeSandwichStroke(sprite: Sprite): void {
   // Collect tagged filters before removal so they can be destroyed
-  const toDestroy = sprite.filters?.filter((f) => (f as any)._tag === HC_FILTER_TAG) ?? [];
+  const toDestroy = sprite.filters?.filter((f) => (f as TaggedFilter)._tag === HC_FILTER_TAG) ?? [];
 
   // Remove from sprite
-  sprite.filters = sprite.filters?.filter((f) => (f as any)._tag !== HC_FILTER_TAG) ?? [];
+  sprite.filters = sprite.filters?.filter((f) => (f as TaggedFilter)._tag !== HC_FILTER_TAG) ?? [];
 
   // Destroy to release GPU resources — prevents memory leaks
   toDestroy.forEach((f) => f.destroy());
@@ -187,11 +197,11 @@ const GREYSCALE_FILTER_TAG = 'greyscale';
 
 export function addGreyscaleFilter(sprite: Sprite): void {
   // Guard — never stack if already applied
-  if (sprite.filters?.some((f) => (f as any)._tag === GREYSCALE_FILTER_TAG)) return;
+  if (sprite.filters?.some((f) => (f as TaggedFilter)._tag === GREYSCALE_FILTER_TAG)) return;
 
   const matrix = new ColorMatrixFilter();
   matrix.matrix = GREYSCALE_MATRIX;
-  (matrix as any)._tag = GREYSCALE_FILTER_TAG;
+  (matrix as TaggedFilter)._tag = GREYSCALE_FILTER_TAG;
 
   // Mandatory filter order:
   // Index 0:   BevelFilter           — never moved
@@ -202,11 +212,11 @@ export function addGreyscaleFilter(sprite: Sprite): void {
 
 function removeGreyscaleFilter(sprite: Sprite): void {
   const toDestroy = sprite.filters?.filter(
-    (f) => (f as any)._tag === GREYSCALE_FILTER_TAG,
+    (f) => (f as TaggedFilter)._tag === GREYSCALE_FILTER_TAG,
   ) ?? [];
 
   sprite.filters = sprite.filters?.filter(
-    (f) => (f as any)._tag !== GREYSCALE_FILTER_TAG,
+    (f) => (f as TaggedFilter)._tag !== GREYSCALE_FILTER_TAG,
   ) ?? [];
 
   // Destroy to release GPU resources
@@ -237,7 +247,7 @@ export function applyGreyscale(
           `Piece ${piece.id}: BevelFilter must be at index 0`,
         );
       }
-      const greyIdx = filters.findIndex((f) => (f as any)._tag === GREYSCALE_FILTER_TAG);
+      const greyIdx = filters.findIndex((f) => (f as TaggedFilter)._tag === GREYSCALE_FILTER_TAG);
       if (greyIdx !== -1) {
         console.assert(
           greyIdx === filters.length - 1,
@@ -381,6 +391,10 @@ export function applyReducedMotion(active: boolean): void {
   if (!_viewport) return;
   const decelerate = _viewport.plugins.get('decelerate');
   if (decelerate) {
+    // pixi-viewport: plugins.get() returns the Plugin base type, which does not
+    // expose DeceleratePlugin.friction. The property exists at runtime — this is
+    // a typing gap in the library, not an unknown value.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (decelerate as any).friction = active ? DECELERATE_FRICTION_REDUCED : DECELERATE_FRICTION_DEFAULT;
   }
   // Cancel any in-flight viewport animation immediately on enable.

@@ -257,5 +257,35 @@
 - **Fix**: Use `drawRadius + 3` instead of `SWATCH_RADIUS + 3` for the ring so it always sits 3 px outside the current fill radius, regardless of active state.
 - **Rule**: Any decorative ring that must appear outside a fill circle should be expressed as `fillRadius + gap`, not as a constant, when the fill radius can change.
 
+## TypeScript path alias: `paths` without `baseUrl` silently fails to resolve
+
+- **Symptom**: `error TS2307: Cannot find module '@jigg/spec'` even though the `paths` entry is in tsconfig.
+- **Root cause**: TypeScript `paths` are relative to `baseUrl`. Without `"baseUrl": "."`, the resolver has no anchor directory and the alias is never matched.
+- **Fix**: Add `"baseUrl": "."` alongside `"paths"` in `compilerOptions`. Both must be present:
+  ```json
+  "baseUrl": ".",
+  "paths": { "@jigg/spec": ["./jigg-spec/types.ts"] }
+  ```
+- **Rule**: `paths` without `baseUrl` = broken alias. Always add `"baseUrl": "."` when introducing `paths`.
+
+## Unresolved import produces `any` — cascades into unrelated files
+
+- **Symptom**: `error TS7053: Element implicitly has an 'any' type because expression of type 'EdgeType' can't be used to index type 'Record<"corner"|"edge"|"interior"|"all", number>'` in a file that was never touched.
+- **Root cause**: `EdgeType` was imported from `@jigg/spec` which couldn't be resolved. TypeScript fell back to `any` for the entire import. `record[anyValue]++` is rejected by strict mode (TS7053).
+- **Fix**: Fix the broken import first. Once `@jigg/spec` resolves correctly, `EdgeType` is a proper `'corner' | 'edge' | 'interior'` union and the indexing error disappears.
+- **Rule**: A TS7053 "can't be used to index" error in a file you didn't touch almost always means a type upstream resolved to `any` due to a broken import or missing path alias.
+
+## `vite.config.ts` in tsconfig `include` without `@types/node`
+
+- **Symptom**: `error TS2307: Cannot find module 'path'` / `Cannot find module 'url'` when `vite.config.ts` uses `import path from 'path'` and `import { fileURLToPath } from 'url'`.
+- **Root cause**: `path` and `url` are Node.js built-ins. Without `@types/node` installed, TypeScript has no declarations for them. The standard tsconfig for a browser app (no `@types/node`) will always fail.
+- **Fix**: Use the Web URL API (available via DOM lib) instead of Node's path module:
+  ```ts
+  // No node imports — uses import.meta.url (ESNext module) + URL (DOM lib)
+  '@jigg/spec': new URL('./jigg-spec/types.ts', import.meta.url).pathname,
+  ```
+  This requires `"module": "ESNext"` (for `import.meta`) and `"lib"` containing `"DOM"` (for `URL`). Both are already present in this tsconfig.
+- **Rule**: Avoid `import path from 'path'` in `vite.config.ts` unless `@types/node` is a declared devDependency. Use `new URL(..., import.meta.url).pathname` instead.
+
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.

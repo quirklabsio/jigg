@@ -5,9 +5,14 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
+    "noImplicitAny": true,
     "noEmit": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@jigg/spec": ["./jigg-spec/types.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"],
   "exclude": ["src/workers"]

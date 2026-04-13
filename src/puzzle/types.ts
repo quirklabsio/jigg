@@ -1,11 +1,13 @@
+import type { EdgeType, Point } from '@jigg/spec';
+
+export type { EdgeType, Point };
+
 export interface Transform {
   x: number;
   y: number;
   rotation: number; // radians internally; degrees in .jigg files (convert at boundary)
   scale: number;    // 1.0 = native size
 }
-
-export type EdgeType = 'corner' | 'edge' | 'interior';
 
 export interface Piece {
   id: string;
@@ -34,7 +36,7 @@ export interface Piece {
 export interface PieceGroup {
   id: string;
   pieceIds: string[];
-  position: { x: number; y: number };
+  position: Point;
   rotation: number; // radians, multiples of π/2, incremented on group rotate
 }
 
@@ -51,18 +53,13 @@ export interface EdgeMap {
   height: number;
 }
 
-export interface CutPoint {
-  x: number;
-  y: number;
-}
-
 export interface CutPath {
   colA: number;
   rowA: number;
   colB: number;
   rowB: number;
   direction: 'horizontal' | 'vertical';
-  points: CutPoint[]; // [start, cp1, cp2, end, cp1, cp2, end, ...] — 1 + 5×3 = 16 points
+  points: Point[]; // [start, cp1, cp2, end, cp1, cp2, end, ...] — 1 + 5×3 = 16 points
   hasTab: 'A' | 'B';  // which piece carries the protruding tab
 }
 

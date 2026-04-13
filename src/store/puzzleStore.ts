@@ -9,7 +9,7 @@ import {
 
 export type TrayFilter = 'all' | EdgeType | 'zone-0' | 'zone-1' | 'zone-2' | 'zone-3' | 'zone-4';
 
-type PieceState = Piece['state'];
+type PieceLifecycle = Piece['state'];
 
 function toRecord<T extends { id: string }>(arr: T[]): Record<string, T> {
   const rec: Record<string, T> = {};
@@ -111,7 +111,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       if (!group) return state;
       const pieceIdSet = new Set(group.pieceIds);
       const pieces = state.pieces.map((p) =>
-        pieceIdSet.has(p.id) ? { ...p, placed: true, state: 'placed' as PieceState } : p,
+        pieceIdSet.has(p.id) ? { ...p, placed: true, state: 'placed' as PieceLifecycle } : p,
       );
       const piecesById = toRecord(pieces);
       let puzzleComplete = false;
@@ -148,7 +148,7 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
     set((state) => {
       const pieces = state.pieces.map((p) =>
         p.id === pieceId
-          ? { ...p, groupId, state: 'on-canvas' as PieceState }
+          ? { ...p, groupId, state: 'on-canvas' as PieceLifecycle }
           : p,
       );
       const newGroup: PieceGroup = {
