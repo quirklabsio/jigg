@@ -1,67 +1,82 @@
-import type { EdgeType, Point } from '@jigg/spec';
+import type { PieceDefinition, PieceState, HexCode, Point, EdgeType, StageId } from '@jigg-spec/types';
+export type { EdgeType, Point, StageId, HexCode };
+export { STAGE_BENCH, STAGE_TABLE } from '@jigg-spec/types';
 
-export type { EdgeType, Point };
+// ─── Runtime Piece ────────────────────────────────────────────────────────────
+//
+// Extends spec interfaces directly.  All spec fields (id, templateId,
+// edgeType, canonical, index, meanColor, stageId, pos, rot, z, clusterId,
+// placed) are inherited — do not redeclare them here.
+//
+// paletteIndex: runtime mapping of this piece's meanColor to the nearest
+//   centroid in JiggAssembly.palette[].  0-based.  Computed at game creation
+//   via k-means, stored here for O(1) bench filter and ARIA label access.
+//   Not persisted to the spec — palette mapping is recomputed on load.
+//
+// initialRotation: bench display rotation in degrees.  Assigned at game
+//   creation alongside rot.  Carried over unchanged on extraction.
+//
+// textureRegion: source-image pixel rectangle for this piece.  Engine concern;
+//   not in the interchange format.
+//
+// gridCoord: {col, row} derived at cut time from the grid layout.  Used for
+//   snap neighbour lookup and sprite construction.  Not in the spec —
+//   serialisation will derive row/col from piece.index + stored cols (a future
+//   puzzle-store field) at hydration time.
 
-export interface Transform {
-  x: number;
-  y: number;
-  rotation: number; // radians internally; degrees in .jigg files (convert at boundary)
-  scale: number;    // 1.0 = native size
-}
-
-export interface Piece {
-  id: string;
-  metadata?: Record<string, unknown>;
-  edgeType: EdgeType;
-  colorVector: [number, number, number]; // dominant RGB, computed at cut time
-  colorZone: number;                      // 0–4, assigned after k-means clustering
-
-  canonical: Readonly<Transform>; // image space, immutable, set once on creation
-  actual: Transform & {
-    z: number;                    // layering in play space
-  };
-
-  groupId: string | null;         // topology, not geometry
-  state: 'in-tray' | 'on-canvas' | 'placed';
-
-  index: number;           // 1-based, left-to-right top-to-bottom
-
-  // retained from current implementation
-  gridCoord: { col: number; row: number };
+export interface Piece extends PieceDefinition, PieceState {
+  paletteIndex:  number;
+  initialRotation: number;   // degrees — bench display rotation
   textureRegion: { x: number; y: number; w: number; h: number };
-  placed: boolean;
-  touched: boolean;
+  gridCoord:     { col: number; row: number };
 }
+
+// ─── Stage derivation helpers ─────────────────────────────────────────────────
+// Use these everywhere instead of comparing piece.stageId directly.
+
+import { STAGE_BENCH, STAGE_TABLE } from '@jigg-spec/types';
+
+export const isInBench = (p: Piece): boolean => p.stageId === STAGE_BENCH;
+export const isOnTable = (p: Piece): boolean => p.stageId === STAGE_TABLE && !p.placed;
+export const isPlaced  = (p: Piece): boolean => p.placed === true;
+
+// ─── PieceGroup (engine concept — not a spec type) ────────────────────────────
 
 export interface PieceGroup {
-  id: string;
+  id:       string;
   pieceIds: string[];
   position: Point;
-  rotation: number; // radians, multiples of π/2, incremented on group rotate
+  rotation: number; // radians, multiples of π/2 — engine-internal, not spec rot
 }
 
+// ─── Puzzle config ────────────────────────────────────────────────────────────
+
 export interface PuzzleConfig {
-  imageUrl: string;
+  imageUrl:   string;
   pieceCount: number; // 12–200
-  surface: 'matte' | 'glossy' | 'canvas' | 'wood';
+  surface:    'matte' | 'glossy' | 'canvas' | 'wood';
   lightAngle: number; // degrees
 }
 
+// ─── Cut geometry ─────────────────────────────────────────────────────────────
+
 export interface EdgeMap {
-  data: Float32Array;
-  width: number;
+  data:   Float32Array;
+  width:  number;
   height: number;
 }
 
 export interface CutPath {
-  colA: number;
-  rowA: number;
-  colB: number;
-  rowB: number;
+  colA:      number;
+  rowA:      number;
+  colB:      number;
+  rowB:      number;
   direction: 'horizontal' | 'vertical';
-  points: Point[]; // [start, cp1, cp2, end, cp1, cp2, end, ...] — 1 + 5×3 = 16 points
-  hasTab: 'A' | 'B';  // which piece carries the protruding tab
+  points:    Point[]; // [start, cp1, cp2, end, cp1, cp2, end, …] — 1 + 5×3 = 16 points
+  hasTab:    'A' | 'B';
 }
+
+// ─── Worker messages ──────────────────────────────────────────────────────────
 
 export type WorkerMessageType =
   | 'ANALYZE_IMAGE'
@@ -71,6 +86,6 @@ export type WorkerMessageType =
   | 'ERROR';
 
 export interface WorkerMessage<T = unknown> {
-  type: WorkerMessageType;
+  type:    WorkerMessageType;
   payload: T;
 }

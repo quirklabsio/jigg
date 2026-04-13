@@ -4,7 +4,7 @@ import { syncLabelRotation } from '../utils/preferences';
 
 /**
  * Rotate a group 90° clockwise in place.
- * - Bakes the new actual positions and actual.rotation into the store
+ * - Bakes the new pos and rot into the store (rot in degrees, pos as local offset)
  * - Syncs sprite positions and rotations to match the updated store state
  * - Group origin (group.position) is unchanged — pieces orbit around it
  */
@@ -20,9 +20,10 @@ export function rotateGroup(groupId: string, spriteMap: Map<string, Sprite>): vo
     const piece = piecesById[pid];
     const sprite = spriteMap.get(pid);
     if (!piece || !sprite) continue;
-    sprite.x = group.position.x + piece.actual.x;
-    sprite.y = group.position.y + piece.actual.y;
-    sprite.rotation = piece.actual.rotation;
+    sprite.x = group.position.x + piece.pos!.x;
+    sprite.y = group.position.y + piece.pos!.y;
+    // piece.rot is degrees; Pixi sprite.rotation is radians
+    sprite.rotation = (piece.rot * Math.PI) / 180;
     syncLabelRotation(sprite);
   }
 }

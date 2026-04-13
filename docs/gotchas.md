@@ -289,3 +289,6 @@
 
 ## Circular Imports
 - **`puzzleStore` ↔ `completion.ts` circular dep**: `puzzleStore.ts` needed `isComplete` from `completion.ts`; `completion.ts` originally imported `usePuzzleStore` for the total piece count. This created a cycle and TypeScript/bundler module resolution fails silently or throws at runtime. Fix: inline the completion check directly in `markGroupPlaced` in the store (it's three lines); remove the `usePuzzleStore` import from `completion.ts`; pass `totalCount` as a parameter to `onComplete` from the call site (`scene.ts`) which already has access to the store. Rule: `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/`.
+
+## replace_all prefix misses
+- **`replace_all` only matches the exact string.** In a file with `piece.actual.x`, `anchorPiece.actual.x`, and `p.actual.x`, replacing `piece.actual.x` leaves the other two untouched. After any bulk rename, grep for the old field name (`\.actual\.`, `\.groupId`, etc.) to confirm zero remaining occurrences before running typecheck.

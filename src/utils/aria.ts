@@ -1,8 +1,10 @@
 import type { Piece } from '../puzzle/types';
+import { isInBench, isOnTable, isPlaced } from '../puzzle/types';
 
 // ─── Hidden ARIA container ────────────────────────────────────────────────────
 // Screen readers traverse this DOM tree; PixiJS canvas is invisible to AT.
-// Stories 38–42 build keyboard navigation on top of this groundwork.
+// Stories 40–42 replace this placeholder with the two-landmark structure
+// (role="application" × 2 — see jigg-spec/accessibility.md §1).
 
 const ariaContainer = document.createElement('div');
 ariaContainer.setAttribute('role', 'list');
@@ -21,7 +23,10 @@ document.body.appendChild(ariaContainer);
 
 /**
  * Create or update the ARIA listitem for a single piece.
- * Call on every piece state transition (in-tray → on-canvas → placed).
+ * Call on every piece state transition (bench → table → placed).
+ *
+ * Label format (spec — jigg-spec/accessibility.md §2):
+ *   "Piece {index} — Palette {paletteIndex + 1}, row {row + 1}, column {col + 1}, {stageLabel}"
  */
 export function setAriaLabel(piece: Piece): void {
   let el = document.getElementById(`piece-${piece.id}`);
@@ -31,13 +36,17 @@ export function setAriaLabel(piece: Piece): void {
     el.setAttribute('role', 'listitem');
     ariaContainer.appendChild(el);
   }
-  const stateLabel =
-    piece.state === 'in-tray'  ? 'In tray'        :
-    piece.state === 'placed'   ? 'Placed on board' :
-                                 'On canvas';
+
+  const stageLabel =
+    isPlaced(piece)   ? 'Placed'    :
+    isOnTable(piece)  ? 'On table'  :
+    isInBench(piece)  ? 'In bench'  :
+                        'Unknown';
+
   el.setAttribute(
     'aria-label',
-    `Piece row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1} — ${stateLabel}`,
+    `Piece ${piece.index} — Palette ${piece.paletteIndex + 1}, ` +
+    `row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1}, ${stageLabel}`,
   );
 }
 

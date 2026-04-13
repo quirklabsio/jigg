@@ -11,6 +11,8 @@ import {
 } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
 import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
+import { isInBench, isOnTable } from '../puzzle/types';
+import { hexToRgb } from '../puzzle/cutter';
 import {
   isDraggingCanvas,
   insertGroupAABB,
@@ -211,11 +213,11 @@ function redrawBackground(): void {
 /** Returns the subset of in-tray piece IDs that match the active filter. */
 function visibleInTray(): string[] {
   const { piecesById, activeFilter } = usePuzzleStore.getState();
-  const all = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
+  const all = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
   if (activeFilter === 'all') return all;
-  if (activeFilter.startsWith('zone-')) {
-    const zone = parseInt(activeFilter.slice(5), 10);
-    return all.filter((id) => piecesById[id]?.colorZone === zone);
+  if (activeFilter.startsWith('palette-')) {
+    const zone = parseInt(activeFilter.slice(8), 10);
+    return all.filter((id) => piecesById[id]?.paletteIndex === zone);
   }
   return all.filter((id) => piecesById[id]?.edgeType === activeFilter);
 }
@@ -239,7 +241,7 @@ const ZONE_LABEL_STROKE_THICK      = 2;
 const ZONE_LABEL_NAME              = 'zoneLabel';
 
 /**
- * Add a centred zone index label (Z1–Z5) to a swatch container.
+ * Add a centred palette index label (P1–P5) to a swatch container.
  * Idempotent — removes any existing label first.
  * Also hides the glowDot on the active swatch to avoid clash with text.
  */
@@ -248,7 +250,7 @@ function addZoneLabel(swatchContainer: Container, zoneIndex: number, active: boo
 
   const fontSize = active ? ZONE_LABEL_FONT_SIZE_ACTIVE : ZONE_LABEL_FONT_SIZE_DEFAULT;
   const label = new Text({
-    text: `Z${zoneIndex + 1}`,
+    text: `P${zoneIndex + 1}`,
     style: {
       fontSize,
       fontWeight: 'bold',
@@ -280,19 +282,20 @@ function removeZoneLabel(swatchContainer: Container): void {
 }
 
 /**
- * Compute the mean colorVector of all pieces (all states) in each zone.
- * Used as the swatch fill colour — stable regardless of tray state.
+ * Compute the mean RGB of all pieces (all states) in each palette group.
+ * Used as the swatch fill colour — stable regardless of bench state.
  */
-function zoneMeanColors(): [number, number, number][] {
+function paletteMeanColors(): [number, number, number][] {
   const { pieces } = usePuzzleStore.getState();
   const sums: [number, number, number][] = Array.from({ length: NUM_ZONES }, () => [0, 0, 0]);
   const counts = new Array<number>(NUM_ZONES).fill(0);
   for (const p of pieces) {
-    const z = p.colorZone;
+    const z = p.paletteIndex;
     if (z >= 0 && z < NUM_ZONES) {
-      sums[z][0] += p.colorVector[0];
-      sums[z][1] += p.colorVector[1];
-      sums[z][2] += p.colorVector[2];
+      const [r, g, b] = hexToRgb(p.meanColor);
+      sums[z][0] += r;
+      sums[z][1] += g;
+      sums[z][2] += b;
       counts[z]++;
     }
   }
@@ -327,10 +330,10 @@ function renderFilterStrip(): void {
   const zoneCounts = new Array<number>(NUM_ZONES).fill(0);
   for (const id of _trayDisplayOrder) {
     const p = piecesById[id];
-    if (!p || p.state !== 'in-tray') continue;
+    if (!p || !isInBench(p)) continue;
     edgeCounts.all++;
     edgeCounts[p.edgeType]++;
-    const z = p.colorZone;
+    const z = p.paletteIndex;
     if (z >= 0 && z < NUM_ZONES) zoneCounts[z]++;
   }
 
@@ -378,19 +381,19 @@ function renderFilterStrip(): void {
   }
 
   // ── Color zone swatches ──────────────────────────────────────────────────
-  const meanColors  = zoneMeanColors();
+  const meanColors  = paletteMeanColors();
   const swatchCY    = FILTER_STRIP_HEIGHT / 2;
   const { highContrast: hcSwatches, greyscale } = usePuzzleStore.getState();
   // Place swatches starting from right of text area, centred in strip
   const swatchStartX = textAreaW + (SWATCH_AREA_W - NUM_ZONES * SWATCH_SPACING) / 2 + SWATCH_RADIUS;
 
-  // TODO: Story 52 — add zone index labels to preferences color zone buttons
-  // when greyscale active (AC-3). The filter strip swatches below receive Z1–Z5
+  // TODO: Story 52 — add palette index labels to preferences palette buttons
+  // when greyscale active (AC-3). The filter strip swatches below receive P1–P5
   // labels via addZoneLabel, but a future settings panel (Story 52) must also
-  // propagate zone indices to any DOM color zone filter buttons it introduces.
+  // propagate palette indices to any DOM palette filter buttons it introduces.
 
   for (let z = 0; z < NUM_ZONES; z++) {
-    const filterKey = `zone-${z}` as TrayFilter;
+    const filterKey = `palette-${z}` as TrayFilter;
     const isActive  = activeFilter === filterKey;
     const inTrayCount = zoneCounts[z];
     const dimmed    = inTrayCount === 0;
@@ -451,7 +454,7 @@ function renderFilterStrip(): void {
     const capturedZ = z;
     swatch.on('pointerdown', (e: FederatedPointerEvent) => {
       e.stopPropagation();
-      usePuzzleStore.getState().setActiveFilter(`zone-${capturedZ}` as TrayFilter);
+      usePuzzleStore.getState().setActiveFilter(`palette-${capturedZ}` as TrayFilter);
       _scrollX = 0;
       if (_gridContainer) _gridContainer.x = 0;
       layoutTrayPieces();
@@ -491,7 +494,7 @@ function layoutTrayPieces(): void {
   const { piecesById } = usePuzzleStore.getState();
 
   // All in-tray pieces (for empty state + hide pass)
-  const allInTray = _trayDisplayOrder.filter((id) => piecesById[id]?.state === 'in-tray');
+  const allInTray = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
   // Filtered subset — only these are shown in the grid
   const inTray    = visibleInTray();
 
@@ -601,6 +604,9 @@ function resetSpiralOnPan(): void {
   spiralIndex = 0;
 }
 
+// Keyboard Enter always triggers spiral extraction — never zoom-to-place.
+// zoomToPlacePiece() is a pointer-only preview action.
+// See docs/spike-keyboard-focus.md §9.9
 function spiralPlace(pieceId: string, sprite: Sprite, container: Container): void {
   if (!_viewport || !_trayContainer) return;
 
@@ -637,9 +643,9 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
     for (const group of Object.values(groupsById)) {
       for (const pid of group.pieceIds) {
         const p = piecesById[pid];
-        if (!p || p.state !== 'on-canvas') continue;
-        const px = group.position.x + p.actual.x;
-        const py = group.position.y + p.actual.y;
+        if (!p || !isOnTable(p)) continue;
+        const px = group.position.x + p.pos!.x;
+        const py = group.position.y + p.pos!.y;
         if (Math.abs(cx - px) < hw + p.textureRegion.w / 2 &&
             Math.abs(cy - py) < hh + p.textureRegion.h / 2) {
           occupied = true;
@@ -1072,8 +1078,8 @@ function subscribeToStore(): void {
     let changed = false;
     for (const piece of state.pieces) {
       const prev = prevState.piecesById[piece.id];
-      if (!prev || prev.state === piece.state) continue;
-      if (piece.state === 'on-canvas' || piece.state === 'placed') {
+      if (!prev || (prev.stageId === piece.stageId && prev.placed === piece.placed)) continue;
+      if (!isInBench(piece)) {
         const before = _trayDisplayOrder.length;
         _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== piece.id);
         if (_trayDisplayOrder.length !== before) changed = true;
@@ -1106,12 +1112,12 @@ export function initTray(
   const { pieces } = usePuzzleStore.getState();
 
   // Randomise display order for the tray
-  _trayDisplayOrder = shuffle(pieces.filter((p) => p.state === 'in-tray').map((p) => p.id));
+  _trayDisplayOrder = shuffle(pieces.filter((p) => isInBench(p)).map((p) => p.id));
 
   // Set up in-tray sprites: clear filters, set eventMode.
   // Scale is set in layoutTrayPieces() — no need to set here.
   for (const piece of pieces) {
-    if (piece.state !== 'in-tray') continue;
+    if (!isInBench(piece)) continue;
     const sprite = spriteMap.get(piece.id);
     if (!sprite) continue;
     // Save existing filters (e.g. BevelFilter applied by scene.ts) and clear them

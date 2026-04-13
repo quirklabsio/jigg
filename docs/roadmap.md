@@ -59,7 +59,7 @@ When a story closes: add session notes to `stories.md`, mark `[x]` here, remove 
 
 - [x] **Story 38** — Spike: keyboard focus model complete. See `docs/spike-keyboard-focus.md`.
 
-- [ ] **Story 39** — Spec: keyboard nav impact on `jigg-spec`.
+- [x] **Story 39** — Spec: keyboard nav impact on `jigg-spec`.
   **FIRST ACTION:** verify `piece.state: 'in-tray' | 'on-canvas' | 'placed'` exists on `Piece` type in `types.ts`. Add and wire all construction/transition sites if absent. Run `npm run typecheck`. This is a prerequisite for all keyboard code — do not proceed until confirmed.
   Confirm `zoomToPlace` + Enter decision (Enter = spiral extract only; zoom preview key TBD).
   Confirm arrow-key snap-on-drop decision.
@@ -157,8 +157,7 @@ DONE     Story 29         (Cleanup)                                   ✓
          Story 38         (Keyboard spike)                            ✓
          Stories 32–37e   (Tray epic)                                 ✓
 
-NEXT     Story 39         (Keyboard spec — HARD GATE before Story 40)
-         Story 40         (Tray keyboard nav)
+NEXT     Story 40         (Tray keyboard nav)
          Stories 41a+41b  (Canvas keyboard — re-estimate after Story 39 closes)
          Story 42         (Focus coordination)
          Story 44         (File picker — unblocks real playtesting)

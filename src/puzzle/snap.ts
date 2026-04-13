@@ -66,9 +66,9 @@ export function checkAndApplySnap(
       if (!nId) continue; // no piece at that grid coord (edge of puzzle)
 
       const nPiece = state.piecesById[nId];
-      if (!nPiece || nPiece.groupId == null || nPiece.groupId === draggedGroupId) continue; // same group
+      if (!nPiece || nPiece.clusterId == null || nPiece.clusterId === draggedGroupId) continue; // same group
 
-      const nGroup = state.groupsById[nPiece.groupId];
+      const nGroup = state.groupsById[nPiece.clusterId];
       if (!nGroup) continue;
 
       const rotMatch = Math.abs(normRot(nGroup.rotation) - draggedRot) <= 0.01;
@@ -103,8 +103,8 @@ export function checkAndApplySnap(
         const dp = state.piecesById[dpid];
         const ds = spriteMap.get(dpid);
         if (!dp || !ds) continue;
-        ds.x = newGroupPos.x + dp.actual.x;
-        ds.y = newGroupPos.y + dp.actual.y;
+        ds.x = newGroupPos.x + dp.pos!.x;
+        ds.y = newGroupPos.y + dp.pos!.y;
       }
 
       // Commit snapped position then merge
@@ -113,8 +113,8 @@ export function checkAndApplySnap(
       const survivorId =
         draggedGroup.pieceIds.length >= nGroup.pieceIds.length
           ? draggedGroupId
-          : nPiece.groupId;
-      const absorbedId = survivorId === draggedGroupId ? nPiece.groupId : draggedGroupId;
+          : nPiece.clusterId!;
+      const absorbedId = survivorId === draggedGroupId ? nPiece.clusterId! : draggedGroupId;
 
       usePuzzleStore.getState().mergeGroups(survivorId, absorbedId);
 
@@ -126,8 +126,8 @@ export function checkAndApplySnap(
           const sp = updState.piecesById[spid];
           const ss = spriteMap.get(spid);
           if (sp && ss) {
-            ss.x = survivor.position.x + sp.actual.x;
-            ss.y = survivor.position.y + sp.actual.y;
+            ss.x = survivor.position.x + sp.pos!.x;
+            ss.y = survivor.position.y + sp.pos!.y;
           }
         }
         console.log('MERGED:', absorbedId, '→', survivorId, 'new piece count:', survivor.pieceIds.length);
@@ -171,15 +171,15 @@ export function checkAndApplyBoardSnap(
   for (const pid of group.pieceIds) {
     const piece = state.piecesById[pid];
     if (!piece) continue;
-    const wx = group.position.x + piece.actual.x;
-    const wy = group.position.y + piece.actual.y;
+    const wx = group.position.x + piece.pos!.x;
+    const wy = group.position.y + piece.pos!.y;
     const dSq = (wx - piece.canonical.x) ** 2 + (wy - piece.canonical.y) ** 2;
     if (dSq < BOARD_SNAP_THRESHOLD_SQ && !snapPiece) snapPiece = piece;
   }
 
   if (snapPiece) {
-    const wx = group.position.x + snapPiece.actual.x;
-    const wy = group.position.y + snapPiece.actual.y;
+    const wx = group.position.x + snapPiece.pos!.x;
+    const wy = group.position.y + snapPiece.pos!.y;
     const offsetX = snapPiece.canonical.x - wx;
     const offsetY = snapPiece.canonical.y - wy;
     const newGroupPos = {
@@ -192,8 +192,8 @@ export function checkAndApplyBoardSnap(
       const p = state.piecesById[pid];
       const s = spriteMap.get(pid);
       if (!p || !s) continue;
-      s.x = newGroupPos.x + p.actual.x;
-      s.y = newGroupPos.y + p.actual.y;
+      s.x = newGroupPos.x + p.pos!.x;
+      s.y = newGroupPos.y + p.pos!.y;
     }
 
     usePuzzleStore.getState().moveGroup(groupId, newGroupPos);

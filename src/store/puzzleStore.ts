@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import type { EdgeType, Piece, PieceGroup } from '../puzzle/types';
+import { STAGE_TABLE } from '../puzzle/types';
 import {
   savePreferences,
   fireApplyPreferences,
@@ -7,9 +8,14 @@ import {
   type BackgroundPreset,
 } from '../utils/preferences';
 
-export type TrayFilter = 'all' | EdgeType | 'zone-0' | 'zone-1' | 'zone-2' | 'zone-3' | 'zone-4';
-
-type PieceLifecycle = Piece['state'];
+export type TrayFilter =
+  | 'all'
+  | EdgeType
+  | 'palette-0'
+  | 'palette-1'
+  | 'palette-2'
+  | 'palette-3'
+  | 'palette-4';
 
 function toRecord<T extends { id: string }>(arr: T[]): Record<string, T> {
   const rec: Record<string, T> = {};
@@ -40,7 +46,8 @@ interface PuzzleState {
   setPieces: (pieces: Piece[]) => void;
   setGroups: (groups: PieceGroup[]) => void;
   setGridIndex: (index: Map<string, string>) => void;
-  updatePieceRotation: (id: string, rotation: number) => void;
+  /** Update a piece's rot (degrees) in the store — kept for future use. */
+  updatePieceRotation: (id: string, rot: number) => void;
   moveGroup: (groupId: string, position: { x: number; y: number }) => void;
   rotateGroup: (groupId: string) => void;
   mergeGroups: (survivorId: string, absorbedId: string) => void;
@@ -48,7 +55,7 @@ interface PuzzleState {
   setTrayOpen: (open: boolean) => void;
   setActiveFilter: (filter: TrayFilter) => void;
   setZoomToPlace: (value: boolean) => void;
-  /** Move a piece from tray to canvas: sets state, assigns groupId, adds PieceGroup. */
+  /** Move a piece from bench to table: sets stageId, assigns clusterId, adds PieceGroup. */
   extractPieceToCanvas: (
     pieceId: string,
     groupId: string,
@@ -75,10 +82,10 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   setPieces: (pieces) => set({ pieces, piecesById: toRecord(pieces), activeFilter: 'all' }),
   setGroups: (groups) => set({ groups, groupsById: toRecord(groups) }),
   setGridIndex: (gridIndex) => set({ gridIndex }),
-  updatePieceRotation: (id, rotation) =>
+  updatePieceRotation: (id, rot) =>
     set((state) => {
       const pieces = state.pieces.map((p) =>
-        p.id === id ? { ...p, actual: { ...p.actual, rotation } } : p,
+        p.id === id ? { ...p, rot } : p,
       );
       return { pieces, piecesById: toRecord(pieces) };
     }),
@@ -93,12 +100,13 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const targetGroup = state.groupsById[groupId];
       if (!targetGroup) return state;
       const pieceIdSet = new Set(targetGroup.pieceIds);
-      // Bake 90° CW into actual position: newX = -y, newY = x
-      // Also increment actual.rotation so sprites rebuild correctly from store state
+      // Bake 90° CW into pos: newX = -y, newY = x
+      // Also increment rot (degrees) so rotate.ts can rebuild sprites from store state
       const pieces = state.pieces.map((p) => {
         if (!pieceIdSet.has(p.id)) return p;
-        const { x: lx, y: ly } = p.actual;
-        return { ...p, actual: { ...p.actual, x: -ly, y: lx, rotation: p.actual.rotation + HALF_PI } };
+        const lx = p.pos!.x;
+        const ly = p.pos!.y;
+        return { ...p, pos: { x: -ly, y: lx }, rot: p.rot + 90 };
       });
       const groups = state.groups.map((g) =>
         g.id === groupId ? { ...g, rotation: g.rotation + HALF_PI } : g,
@@ -110,8 +118,9 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const group = state.groupsById[groupId];
       if (!group) return state;
       const pieceIdSet = new Set(group.pieceIds);
+      // placed === true implies clusterId absent — spec invariant enforced here
       const pieces = state.pieces.map((p) =>
-        pieceIdSet.has(p.id) ? { ...p, placed: true, state: 'placed' as PieceLifecycle } : p,
+        pieceIdSet.has(p.id) ? { ...p, placed: true, clusterId: undefined } : p,
       );
       const piecesById = toRecord(pieces);
       let puzzleComplete = false;
@@ -146,13 +155,15 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
   },
   extractPieceToCanvas: (pieceId, groupId, groupPosition) =>
     set((state) => {
+      // pos: {x:0, y:0} = local offset within group (zero at extraction time)
+      // Spec note: pos will become global coords when persistence epic lands.
       const pieces = state.pieces.map((p) =>
         p.id === pieceId
-          ? { ...p, groupId, state: 'on-canvas' as PieceLifecycle }
+          ? { ...p, clusterId: groupId, stageId: STAGE_TABLE, pos: { x: 0, y: 0 } }
           : p,
       );
       const newGroup: PieceGroup = {
-        id: groupId,
+        id:       groupId,
         pieceIds: [pieceId],
         position: groupPosition,
         rotation: 0,
@@ -170,16 +181,15 @@ export const usePuzzleStore = createStore<PuzzleState>((set) => ({
       const survivor = state.groupsById[survivorId];
       const absorbed = state.groupsById[absorbedId];
       if (!survivor || !absorbed) return state;
-      // Re-express absorbed pieces' actual positions relative to survivor's origin
+      // Re-express absorbed pieces' pos (local offset) relative to survivor's origin
       const pieces = state.pieces.map((p) => {
-        if (p.groupId !== absorbedId) return p;
+        if (p.clusterId !== absorbedId) return p;
         return {
           ...p,
-          groupId: survivorId,
-          actual: {
-            ...p.actual,
-            x: absorbed.position.x + p.actual.x - survivor.position.x,
-            y: absorbed.position.y + p.actual.y - survivor.position.y,
+          clusterId: survivorId,
+          pos: {
+            x: absorbed.position.x + p.pos!.x - survivor.position.x,
+            y: absorbed.position.y + p.pos!.y - survivor.position.y,
           },
         };
       });

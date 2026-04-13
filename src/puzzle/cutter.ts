@@ -1,5 +1,6 @@
 import { Graphics } from 'pixi.js';
-import type { Point } from '@jigg/spec';
+import type { Point, HexCode } from '@jigg-spec/types';
+import { STAGE_BENCH } from '@jigg-spec/types';
 import type { CutPath, EdgeType, Piece } from './types';
 
 /**
@@ -11,12 +12,9 @@ import type { CutPath, EdgeType, Piece } from './types';
  */
 export const EDGE_INFLUENCE = 0.5;
 
-// ─── Color zone helpers ───────────────────────────────────────────────────────
+// ─── Color helpers ────────────────────────────────────────────────────────────
 
-/**
- * Compute the dominant color of a rectangular pixel region by averaging a
- * sample of pixels (every 4th pixel in each axis for performance).
- */
+/** Arithmetic mean of sampled pixels in a rectangular region (every 4th pixel). */
 function dominantColor(
   data: Uint8ClampedArray,
   rx: number,
@@ -39,14 +37,26 @@ function dominantColor(
   return [Math.round(r / count), Math.round(g / count), Math.round(b / count)];
 }
 
+function rgbToHex(r: number, g: number, b: number): HexCode {
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+export function hexToRgb(hex: HexCode): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
 /**
- * K-means clustering on piece colorVectors.
- * Returns a zone index (0–k-1) for each piece.
+ * K-means clustering on piece meanColors.
+ * Returns a paletteIndex (0–k-1) for each piece.
  * Max 20 iterations, random initialisation.
  */
 function clusterPieces(pieces: Piece[], k: number): number[] {
   const n = pieces.length;
   if (n === 0) return [];
+
+  // Parse meanColor hex → RGB once for all pieces
+  const rgbValues = pieces.map((p) => hexToRgb(p.meanColor));
 
   // Random init — pick k random pieces as initial centroids
   const shuffled = Array.from({ length: n }, (_, i) => i);
@@ -56,26 +66,26 @@ function clusterPieces(pieces: Piece[], k: number): number[] {
   }
   const centroids: [number, number, number][] = [];
   for (let i = 0; i < k; i++) {
-    const src = pieces[shuffled[i % n]].colorVector;
+    const src = rgbValues[shuffled[i % n]];
     centroids.push([src[0], src[1], src[2]]);
   }
 
-  const zones = new Array<number>(n).fill(0);
+  const indices = new Array<number>(n).fill(0);
 
   for (let iter = 0; iter < 20; iter++) {
     let changed = false;
 
     // Assignment step
     for (let i = 0; i < n; i++) {
-      const [pr, pg, pb] = pieces[i].colorVector;
+      const [pr, pg, pb] = rgbValues[i];
       let bestDist = Infinity;
-      let bestZone = 0;
+      let bestIdx  = 0;
       for (let z = 0; z < k; z++) {
         const [cr, cg, cb] = centroids[z];
         const d = (pr - cr) ** 2 + (pg - cg) ** 2 + (pb - cb) ** 2;
-        if (d < bestDist) { bestDist = d; bestZone = z; }
+        if (d < bestDist) { bestDist = d; bestIdx = z; }
       }
-      if (zones[i] !== bestZone) { zones[i] = bestZone; changed = true; }
+      if (indices[i] !== bestIdx) { indices[i] = bestIdx; changed = true; }
     }
 
     if (!changed) break;
@@ -84,17 +94,17 @@ function clusterPieces(pieces: Piece[], k: number): number[] {
     for (let z = 0; z < k; z++) {
       let sr = 0, sg = 0, sb = 0, count = 0;
       for (let i = 0; i < n; i++) {
-        if (zones[i] !== z) continue;
-        sr += pieces[i].colorVector[0];
-        sg += pieces[i].colorVector[1];
-        sb += pieces[i].colorVector[2];
+        if (indices[i] !== z) continue;
+        sr += rgbValues[i][0];
+        sg += rgbValues[i][1];
+        sb += rgbValues[i][2];
         count++;
       }
       if (count > 0) centroids[z] = [Math.round(sr / count), Math.round(sg / count), Math.round(sb / count)];
     }
   }
 
-  return zones;
+  return indices;
 }
 
 // ─── Grid cut ─────────────────────────────────────────────────────────────────
@@ -112,48 +122,51 @@ export function gridCut(
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const x = col * pieceW;
-      const y = row * pieceH;
+      const x  = col * pieceW;
+      const y  = row * pieceH;
       const id = `piece-${row}-${col}`;
 
-      // Flat sides: border edges of the grid (no tab or blank — straight cut).
       const flatSides =
-        (row === 0 ? 1 : 0) +
-        (row === rows - 1 ? 1 : 0) +
-        (col === 0 ? 1 : 0) +
-        (col === cols - 1 ? 1 : 0);
+        (row === 0           ? 1 : 0) +
+        (row === rows - 1    ? 1 : 0) +
+        (col === 0           ? 1 : 0) +
+        (col === cols - 1    ? 1 : 0);
       const edgeType: EdgeType =
         flatSides >= 2 ? 'corner' : flatSides === 1 ? 'edge' : 'interior';
 
-      const colorVector: [number, number, number] = pixelData
-        ? dominantColor(pixelData, x, y, pieceW, pieceH, imageWidth)
-        : [128, 128, 128];
+      const rgb      = pixelData ? dominantColor(pixelData, x, y, pieceW, pieceH, imageWidth) : [128, 128, 128] as [number, number, number];
+      const meanColor = rgbToHex(rgb[0], rgb[1], rgb[2]);
 
-      // PieceGroup creation is deferred to extraction time (Story 32).
-      // groupId is null until the piece is pulled out of the tray.
+      // PieceGroup creation is deferred to extraction time.
+      // clusterId is absent until the piece is extracted — spec invariant.
       pieces.push({
+        // ── PieceDefinition fields ──
         id,
-        groupId: null,
-        state: 'in-tray',
+        templateId:   id,    // placeholder — real templates come with dissection format
         edgeType,
-        colorVector,
-        colorZone: 0,
-        index: row * cols + col + 1,
-        canonical: { x, y, rotation: 0, scale: 1.0 },
-        actual: { x: 0, y: 0, rotation: 0, scale: 1.0, z: 0 },
-        gridCoord: { col, row },
+        canonical:    { x, y, rot: 0 },
+        index:        row * cols + col + 1,
+        meanColor,
+        // ── PieceState fields ──
+        stageId:      STAGE_BENCH,
+        // pos absent for STAGE_BENCH — spec invariant
+        rot:          0,     // degrees; random cardinal assigned at game creation (persistence epic)
+        placed:       false,
+        // clusterId absent — spec invariant at game creation
+        // ── Implementation-only fields ──
+        paletteIndex:    0,  // assigned below after k-means
+        initialRotation: 0,  // degrees; set equal to rot at game creation
         textureRegion: { x, y, w: pieceW, h: pieceH },
-        placed: false,
-        touched: false,
+        gridCoord:     { col, row },
       });
     }
   }
 
-  // Assign color zones via k-means (k=5) when pixel data is available
+  // Assign palette indices via k-means (k=5) when pixel data is available
   if (pixelData && pieces.length > 0) {
-    const zones = clusterPieces(pieces, 5);
+    const indices = clusterPieces(pieces, 5);
     for (let i = 0; i < pieces.length; i++) {
-      pieces[i].colorZone = zones[i];
+      pieces[i].paletteIndex = indices[i];
     }
   }
 
@@ -239,8 +252,6 @@ export function buildPieceMask(
   // ── Top edge: left → right ──────────────────────────────────────────────
   const topCut = row > 0 ? hCut.get(`${col},${row - 1}`) : undefined;
   if (topCut) {
-    // lineTo pts[0] first: guarantees the cursor is at the exact cut start
-    // before the bezier segments are drawn (pts[0] is skipped by drawCutSegments).
     const [t0x, t0y] = toLocal(topCut.points[0], col, row, pw, ph);
     g.lineTo(t0x, t0y);
     drawCutSegments(g, topCut.points, col, row, pw, ph);

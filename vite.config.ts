@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
   resolve: {
     alias: {
-      '@jigg/spec': new URL('./jigg-spec/types.ts', import.meta.url).pathname,
+      '@jigg-spec': path.resolve(__dirname, './jigg-spec'),
     },
   },
 });

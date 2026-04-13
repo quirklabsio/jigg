@@ -5,6 +5,7 @@ import { Viewport } from 'pixi-viewport';
 import type { ColorMatrix } from 'pixi.js';
 import type { Sprite } from 'pixi.js';
 import type { Piece } from '../puzzle/types';
+import { isInBench } from '../puzzle/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -341,9 +342,10 @@ export function applyPieceLabels(
 
     if (active && !existing) {
       const label = createPieceLabel(piece, bgAlpha);
-      if (piece.state === 'in-tray') {
-        label.rotation = -(piece.actual.rotation * Math.PI) / 180;
-        // Counter-scale so label renders at native size regardless of tray thumbnail scale
+      if (isInBench(piece)) {
+        // piece.rot is degrees — convert to radians for Pixi counter-rotation
+        label.rotation = -(piece.rot * Math.PI) / 180;
+        // Counter-scale so label renders at native size regardless of bench thumbnail scale
         if (sprite.scale.x > 0) label.scale.set(1 / sprite.scale.x);
       } else {
         label.rotation = -sprite.rotation;
@@ -357,8 +359,8 @@ export function applyPieceLabels(
     } else if (active && existing) {
       // Already has label — update counter-rotation and backing box alpha
       const label = existing as Container;
-      label.rotation = piece.state === 'in-tray'
-        ? -(piece.actual.rotation * Math.PI) / 180
+      label.rotation = isInBench(piece)
+        ? -(piece.rot * Math.PI) / 180
         : -sprite.rotation;
       updateLabelBgAlpha(label, bgAlpha);
     }

@@ -42,6 +42,61 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ## Session Notes
 
+### Story 39 — Spec + prerequisites (2026-04-12)
+
+`jigg-spec/accessibility.md` created and pushed first (before any `src/` changes). Submodule pointer updated.
+
+**`tsconfig.json` + `vite.config.ts`**
+- Added `@jigg-spec/*` → `./jigg-spec/*` alias alongside existing `@jigg/spec`. Both aliases coexist. New imports use `@jigg-spec/types`; existing uses `@jigg/spec`.
+
+**`src/puzzle/types.ts`**
+- `Piece` now `extends PieceDefinition, PieceState`. Removed `Transform` interface, `colorVector`, `groupId`, `state`, `actual`, `touched` (dead code per confirmation), `metadata`. Added impl-only: `paletteIndex`, `initialRotation`, `textureRegion`, `gridCoord`. `STAGE_BENCH`, `STAGE_TABLE`, `StageId`, `HexCode` exported. Helpers `isInBench`, `isOnTable`, `isPlaced` exported.
+- Note: `gridCoord` stays as impl field; spec derives row/col from `index + cols` at hydration — `cols` needs a puzzle-store home before that happens (separate story).
+
+**`src/puzzle/cutter.ts`**
+- `colorVector: [r,g,b]` → `meanColor: HexCode` (via new `rgbToHex` helper). `hexToRgb` exported for bench.ts.
+- k-means (`clusterPieces`) now parses `meanColor` hex → RGB once upfront, then runs assignment/update steps on the pre-parsed array.
+- Piece construction: `groupId/state/actual/colorZone/touched/canonical{rotation,scale}` removed; `stageId: STAGE_BENCH`, `rot: 0`, `placed: false`, `paletteIndex: 0`, `initialRotation: 0`, `canonical: {x, y, rot: 0}`, `templateId: id` (placeholder) added. `pos` absent for bench pieces — spec invariant.
+
+**`src/puzzle/snap.ts`**
+- `piece.groupId` → `piece.clusterId` throughout. `piece.actual.x/y` → `piece.pos!.x/y` throughout.
+
+**`src/puzzle/drag.ts`**
+- Same renames as snap.ts. Missed `anchorPiece.actual.x/y` in first pass — caught and fixed by typecheck.
+
+**`src/puzzle/rotate.ts`** (not in "Touch only" list but required for typecheck)
+- `piece.actual.x/y` → `piece.pos!.x/y`. `piece.actual.rotation` → `piece.rot * Math.PI / 180` (degrees → radians for Pixi sprite.rotation).
+
+**`src/store/puzzleStore.ts`**
+- `TrayFilter`: `zone-0..4` → `palette-0..4`. `PieceLifecycle` type removed.
+- `rotateGroup`: `actual.x/y/rotation` → `pos.x/y` and `rot + 90` (degrees).
+- `markGroupPlaced`: sets `clusterId: undefined` alongside `placed: true` — spec invariant (placed implies clusterId absent).
+- `extractPieceToCanvas`: sets `stageId: STAGE_TABLE`, `clusterId: groupId`, `pos: {x:0, y:0}` (local offset at extraction). Known semantic note: `pos` stores local group offset, not global coord — will converge to spec semantics in persistence epic.
+- `mergeGroups`: `p.groupId` → `p.clusterId`; `actual.x/y` → `pos.x/y`.
+
+**`src/canvas/bench.ts`**
+- `piece.state` comparisons → `isInBench`/`isOnTable` helpers.
+- `colorZone` → `paletteIndex`; `colorVector` → `hexToRgb(meanColor)`.
+- `zoneMeanColors()` renamed `paletteMeanColors()`.
+- Filter keys: `zone-N` → `palette-N`; `activeFilter.slice(5)` → `activeFilter.slice(8)`.
+- Greyscale swatch labels: `Z${n}` → `P${n}`.
+- Spiral extraction comment added: "Keyboard Enter always triggers spiral extraction — never zoom-to-place."
+
+**`src/canvas/scene.ts`**
+- No changes required. `canonical` spread already correct — old `rotation`/`scale` fields disappear cleanly with the type change.
+
+**`src/utils/preferences.ts`**
+- `piece.state === 'in-tray'` → `isInBench(piece)`. `piece.actual.rotation` → `piece.rot` (now degrees, formula unchanged: `-(rot * Math.PI) / 180` converts to radians for Pixi).
+
+**`src/utils/aria.ts`**
+- `piece.state` → `isInBench`/`isOnTable`/`isPlaced` helpers. State labels updated: "In tray" → "In bench", "On canvas" → "On table", "Placed on board" → "Placed". Label format updated to spec: `"Piece {index} — Palette {paletteIndex+1}, row {row+1}, column {col+1}, {stageLabel}"`.
+
+**Gotcha recorded:** `replace_all` on `piece.actual.x` missed `anchorPiece.actual.x` — different prefix, different token. Always grep for `\.actual\.` after each file edit rather than relying on replace_all to catch all variants.
+
+`npm run typecheck` passes clean. No suppressions.
+
+---
+
 ### Type alignment — spec import wiring (2026-04-12)
 
 Pre-implementation audit (file-by-file divergence tables) produced, confirmed, then implemented. `npm run typecheck` passes clean.

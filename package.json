@@ -11,6 +11,7 @@
     "wasm:build": "cd crates/jigg-analysis && wasm-pack build --target web && cp pkg/jigg_analysis.js pkg/jigg_analysis.d.ts pkg/jigg_analysis_bg.wasm pkg/jigg_analysis_bg.wasm.d.ts ../../src/wasm-pkg/"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "eslint": "^10.2.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.58.1",

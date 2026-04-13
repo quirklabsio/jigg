@@ -191,8 +191,8 @@ function initAABB(
     const th = s.texture.frame.height * s.scale.y;
     const hw = (tw * ac + th * as) / 2;
     const hh = (tw * as + th * ac) / 2;
-    const cx = group.position.x + piece.actual.x;
-    const cy = group.position.y + piece.actual.y;
+    const cx = group.position.x + piece.pos!.x;
+    const cy = group.position.y + piece.pos!.y;
     if (cx - hw < minX) minX = cx - hw;
     if (cy - hh < minY) minY = cy - hh;
     if (cx + hw > maxX) maxX = cx + hw;
@@ -419,12 +419,12 @@ export function initDragListeners(
     for (const pid of group.pieceIds) {
       const s = spriteMap.get(pid);
       const p = st.piecesById[pid];
-      if (s && p) groupEntries.push({ sprite: s, localX: p.actual.x, localY: p.actual.y });
+      if (s && p) groupEntries.push({ sprite: s, localX: p.pos!.x, localY: p.pos!.y });
     }
 
     baseScale = anchorRef.scale.x;
-    anchorLocalX = anchorPiece.actual.x;
-    anchorLocalY = anchorPiece.actual.y;
+    anchorLocalX = anchorPiece.pos!.x;
+    anchorLocalY = anchorPiece.pos!.y;
     anchorSprite = anchorRef;
     preDragRotation = anchorRef.rotation; // store before tween
 
@@ -441,7 +441,7 @@ export function initDragListeners(
     app.stage.sortChildren(); // force z-sort so dragged piece renders on top immediately
     hl.cursor = 'grabbing';
 
-    const origin = getVisualGroupOrigin(anchorRef, anchorPiece.actual.x, anchorPiece.actual.y);
+    const origin = getVisualGroupOrigin(anchorRef, anchorPiece.pos!.x, anchorPiece.pos!.y);
     dragOffsetX = origin.x - px;
     dragOffsetY = origin.y - py;
 
@@ -523,18 +523,18 @@ export function startDragForPiece(
 
   const st = usePuzzleStore.getState();
   const piece = st.piecesById[pieceId];
-  if (!piece || piece.groupId == null) return;
+  if (!piece || piece.clusterId == null) return;
 
-  const group = st.groupsById[piece.groupId];
+  const group = st.groupsById[piece.clusterId!];
   if (!group) return;
 
   const anchorRef = _spriteMap.get(pieceId);
   if (!anchorRef) return;
 
-  groupEntries = [{ sprite: anchorRef, localX: piece.actual.x, localY: piece.actual.y }];
+  groupEntries = [{ sprite: anchorRef, localX: piece.pos!.x, localY: piece.pos!.y }];
   baseScale = anchorRef.scale.x;
-  anchorLocalX = piece.actual.x;
-  anchorLocalY = piece.actual.y;
+  anchorLocalX = piece.pos!.x;
+  anchorLocalY = piece.pos!.y;
   anchorSprite = anchorRef;
   preDragRotation = anchorRef.rotation;
 
@@ -550,7 +550,7 @@ export function startDragForPiece(
   _hitLayer.cursor = 'grabbing';
 
   // Drag offset: keep the piece under the pointer at the same relative position
-  const origin = getVisualGroupOrigin(anchorRef, piece.actual.x, piece.actual.y);
+  const origin = getVisualGroupOrigin(anchorRef, piece.pos!.x, piece.pos!.y);
   dragOffsetX = origin.x - worldX;
   dragOffsetY = origin.y - worldY;
 
