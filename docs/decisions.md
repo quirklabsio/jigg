@@ -182,3 +182,23 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.
+
+## Extraction reconciliation pattern (Story 41a)
+
+Three concerns, always separated:
+
+1. Mutation        — `extractPieceFromBench()` owns the state change
+2. Reconciliation  — `reconcileBenchState()` lives inside mutation, never at call sites
+3. Focus continuation — keyboard handler only, never inside mutation
+
+Bench collapse = single event via `applyBenchCollapseEffects()`.
+`inert` + `keyboardMode` + `benchOpen` all derive from one call — never set independently.
+`applyBenchCollapseEffects()` is idempotent — safe to call multiple times via `_benchCollapsed` guard.
+
+`isBenchEmpty()` is the sole collapse trigger — not input method.
+Focus fallback: next only, no reverse. Linear traversal, predictable.
+
+This pattern repeats in Story 41b for table interactions.
+`applyBenchCollapseEffects()` is a terminal transition — not a general utility.
+`setKeyboardMode` inside collapse is intentional but scoped — 41b must not create
+circular transitions by calling `setKeyboardMode` from table collapse into bench.

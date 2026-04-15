@@ -1,5 +1,6 @@
 import type { Piece } from '../puzzle/types';
 import { isInBench, isOnTable, isPlaced } from '../puzzle/types';
+import { usePuzzleStore } from '../store/puzzleStore';
 
 // ─── Landmark IDs ─────────────────────────────────────────────────────────────
 
@@ -38,6 +39,12 @@ let _onBenchActivate: (pieceId: string) => void = () => {};
 let _onFilterActivate: (filterId: string) => void    = () => {};
 let _onCycleFilter:    (direction: 1 | -1) => void   = () => {};
 
+// Bench navigation helpers — wired from bench.ts via registerBenchNavHelpers.
+// Used in createBenchButton keydown for keyboard focus continuation (Fix 2, Story 41a).
+// bench.ts already imports aria.ts so it can call registerBenchNavHelpers during initTray.
+let _getVisibleBenchOrder: () => string[]         = () => [];
+let _scrollBenchToId:      (id: string) => void   = () => {};
+
 // Filter group DOM element — lives inside #landmark-bench, after all piece buttons
 let _filterGroup: HTMLDivElement | null = null;
 
@@ -70,6 +77,21 @@ export function registerFilterHandlers(
 ): void {
   _onFilterActivate = onActivate;
   _onCycleFilter    = onCycleFilter;
+}
+
+/**
+ * Register bench navigation helpers for keyboard focus continuation.
+ * Called from bench.ts (initTray) — bench.ts already imports aria.ts so no circular dep.
+ *
+ * getVisibleOrder: returns the current filter's visible bench piece IDs (snapshot source).
+ * scrollTo:        scrolls the bench to reveal a piece by ID.
+ */
+export function registerBenchNavHelpers(
+  getVisibleOrder: () => string[],
+  scrollTo: (id: string) => void,
+): void {
+  _getVisibleBenchOrder = getVisibleOrder;
+  _scrollBenchToId      = scrollTo;
 }
 
 // ─── Visually hidden style ─────────────────────────────────────────────────────
@@ -179,10 +201,35 @@ export function createBenchButton(piece: Piece): HTMLButtonElement {
   // Enter / Space — spiral extraction. See docs/spike-keyboard-focus.md §9.9.
   // [/] filter cycling is global (scene.ts window handler) — not on individual buttons.
   btn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      _onBenchActivate(piece.id);
-    }
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+
+    // Snapshot pre-mutation order — immune to DOM reflow and filter updates
+    const snapshotOrder = _getVisibleBenchOrder();
+    const currentIdx    = snapshotOrder.indexOf(piece.id);
+
+    // Next only — no reverse fallback (linear, predictable).
+    // If extracting the last piece, nextId is null — reconciliation handles the rest.
+    const nextId: string | null = currentIdx === -1
+      ? snapshotOrder[0] ?? null
+      : snapshotOrder[currentIdx + 1] ?? null;
+
+    // Extract — reconcileBenchState fires inside extractPieceFromBench
+    _onBenchActivate(piece.id);
+
+    // Focus continuation — keyboard only, never fires for mouse or drag.
+    requestAnimationFrame(() => {
+      if (nextId) {
+        const p = usePuzzleStore.getState().piecesById[nextId];
+        if (p && isInBench(p)) {
+          focusButton(nextId);
+          _scrollBenchToId(nextId);
+          return;
+        }
+      }
+      // nextId null or piece no longer in bench —
+      // reconciliation already handled mode switch and collapse.
+    });
   });
 
   _landmarkBench.appendChild(btn);

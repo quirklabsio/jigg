@@ -23,6 +23,7 @@ import {
   setActiveFilterButton,
   getFocusedPieceId,
   clearFocusedPieceId,
+  registerBenchNavHelpers,
   type FilterDef,
 } from '../utils/aria';
 import {
@@ -153,6 +154,10 @@ let _bgPresetLabel: HTMLElement | null = null;
 // Called once when the last piece leaves the bench.
 let _onBenchCollapse: () => void = () => {};
 
+// Idempotency guard for applyBenchCollapseEffects — reset on new puzzle load.
+// Prevents double-firing during bulk extraction (each piece goes through extractPieceFromBench).
+let _benchCollapsed = false;
+
 export function registerBenchCollapseHandler(fn: () => void): void {
   _onBenchCollapse = fn;
 }
@@ -230,9 +235,10 @@ function seededPieceRotation(
 /**
  * Filter view over the master bench order.
  * Called by layoutTrayPieces, syncButtonDOMOrder, and scrollBenchToId.
+ * Exported for aria.ts nav helper registration (keyboard focus continuation).
  * Never reorders — only filters pieces that match `filter` and are still in bench.
  */
-function getVisibleBenchOrder(filter: TrayFilter): string[] {
+export function getVisibleBenchOrder(filter: TrayFilter): string[] {
   const { piecesById } = usePuzzleStore.getState();
   const all = _trayDisplayOrder.filter((id) => {
     const piece = piecesById[id];
@@ -306,78 +312,48 @@ export function scrollBenchToId(pieceId: string): void {
   }
 }
 
-// ─── Keyboard focus helpers ───────────────────────────────────────────────────
+// ─── Bench reconciliation ─────────────────────────────────────────────────────
 
-/**
- * Find the next piece in bench display order after `pieceId` that is in
- * `visibleSet`. If none found forward, tries backward. Returns null if empty.
- */
-function findNextFocusableAfter(pieceId: string, visibleSet: Set<string>): string | null {
-  const { piecesById } = usePuzzleStore.getState();
-  const allInBench = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
-  const idx = allInBench.indexOf(pieceId);
-  if (idx === -1) {
-    // Piece not found in display order — return first visible
-    return [...visibleSet][0] ?? null;
-  }
-  for (let i = idx + 1; i < allInBench.length; i++) {
-    if (visibleSet.has(allInBench[i])) return allInBench[i];
-  }
-  for (let i = idx - 1; i >= 0; i--) {
-    if (visibleSet.has(allInBench[i])) return allInBench[i];
-  }
-  return null;
+function isBenchEmpty(): boolean {
+  return usePuzzleStore.getState().pieces.every((p) => !isInBench(p));
 }
 
 /**
- * After extraction, move focus to the next visible bench piece.
- * Must be called BEFORE updating _trayDisplayOrder (uses prevOrder to find position).
- * After focus handoff, removes the extracted piece's button from DOM.
- *
- * Only moves focus when the extracted button was the active element —
- * drag-initiated extraction leaves focus alone.
+ * Single-event bench collapse: inert, keyboard mode, and close all fire together.
+ * Idempotent — _benchCollapsed guard prevents double-firing during bulk extraction.
+ * Terminal transition — never reversed until next puzzle load.
  */
-function handleExtractionFocusHandoff(extractedPieceId: string, prevOrder: string[]): void {
-  // Use persistent tracking rather than document.activeElement — more reliable.
-  // activeElement drops to body on drag start; _trackedPieceId persists until explicit clear.
-  const wasFocused = getFocusedPieceId() === extractedPieceId;
+function applyBenchCollapseEffects(): void {
+  if (_benchCollapsed) return;
+  _benchCollapsed = true;
+  const benchLandmark = document.getElementById(LANDMARK_BENCH_ID) as HTMLElement | null;
+  if (benchLandmark) benchLandmark.inert = true;
+  _onBenchCollapse(); // fires setKeyboardMode('table') + setBenchCollapsed() in scene.ts
+  setTrayOpen(false);
+}
+
+function reconcileBenchState(): void {
+  if (!isBenchEmpty()) return;
+  applyBenchCollapseEffects();
+}
+
+/**
+ * Shared extraction tail — called at the end of every extraction path.
+ * Owns: ARIA button removal, focus tracking clear, tray order update,
+ * reconciliation, and grid reflow.
+ *
+ * Does NOT own keyboard focus continuation — that lives in the keydown handler
+ * in aria.ts so mouse and drag extraction never touch keyboard focus.
+ *
+ * Lives here (not at call sites) so no new extraction path can forget reconciliation.
+ */
+function extractPieceFromBench(pieceId: string): void {
   clearFocusedPieceId(); // always clear — extracted piece is leaving the bench
-  if (!wasFocused) {
-    removeButton(extractedPieceId);
-    return;
-  }
-
-  const { piecesById } = usePuzzleStore.getState();
-  const extractedIdx = prevOrder.indexOf(extractedPieceId);
-
-  // Find next visible bench piece after extracted position (forward then backward)
-  const currentVisible = new Set(visibleInTray()); // re-evaluated after extraction
-
-  let nextId: string | null = null;
-  for (let i = extractedIdx + 1; i < prevOrder.length; i++) {
-    if (currentVisible.has(prevOrder[i])) { nextId = prevOrder[i]; break; }
-  }
-  if (!nextId) {
-    for (let i = extractedIdx - 1; i >= 0; i--) {
-      if (currentVisible.has(prevOrder[i])) { nextId = prevOrder[i]; break; }
-    }
-  }
-  // Fallback: any remaining bench piece
-  if (!nextId) {
-    for (const id of prevOrder) {
-      if (id !== extractedPieceId && isInBench(piecesById[id]!)) {
-        nextId = id;
-        break;
-      }
-    }
-  }
-
-  removeButton(extractedPieceId);
-  if (nextId) {
-    focusButton(nextId);
-  } else {
-    document.getElementById(LANDMARK_BENCH_ID)?.focus();
-  }
+  removeButton(pieceId);
+  _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  // Reconcile after mutation — unconditional. Idempotent if bench is still non-empty.
+  reconcileBenchState();
+  layoutTrayPieces();
 }
 
 /**
@@ -1014,15 +990,7 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
     if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
   }
 
-  // Focus handoff — must run before _trayDisplayOrder is updated so prevOrder
-  // is intact for finding the next piece. Only moves focus when button was active.
-  const prevOrder = [..._trayDisplayOrder];
-
-  // Remove from display order and reflow grid
-  _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
-  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
-  handleExtractionFocusHandoff(pieceId, prevOrder);
-  layoutTrayPieces();
+  extractPieceFromBench(pieceId);
 }
 
 // ─── Pointer hit test ─────────────────────────────────────────────────────────
@@ -1120,16 +1088,7 @@ function extractToCanvas(
   // Hand off to drag.ts using POINTER world position (not sprite centre)
   startDragForPiece(pieceId, pointerId, pointerWorldX, pointerWorldY);
 
-  // Focus handoff — must run before _trayDisplayOrder is updated.
-  // handleExtractionFocusHandoff checks whether this button was focused;
-  // drag extraction won't have keyboard focus, so focus won't move.
-  const prevOrder = [..._trayDisplayOrder];
-
-  // Remove from display order and reflow grid
-  _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
-  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
-  handleExtractionFocusHandoff(pieceId, prevOrder);
-  layoutTrayPieces();
+  extractPieceFromBench(pieceId);
 }
 
 // ─── Zoom-to-place (Story 36) ─────────────────────────────────────────────────
@@ -1210,10 +1169,7 @@ function completeZoomAnimation(
     if (label) { label.rotation = -sprite.rotation; label.scale.set(1); }
   }
 
-  // Remove from display order and reflow
-  _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
-  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
-  layoutTrayPieces();
+  extractPieceFromBench(pieceId);
 
   _zoomInFlight      = false;
   _zoomFlightPieceId = null;
@@ -1435,14 +1391,15 @@ export function initTray(
   piecePixelW: number,
   piecePixelH: number,
 ): Container {
-  _app          = app;
-  _viewport     = viewport;
-  _spriteMap    = spriteMap;
-  _containerMap = containerMap;
-  _canvasScale  = canvasScale;
-  _piecePixelW  = piecePixelW;
-  _piecePixelH  = piecePixelH;
-  _scrollX      = 0;
+  _app            = app;
+  _viewport       = viewport;
+  _spriteMap      = spriteMap;
+  _containerMap   = containerMap;
+  _canvasScale    = canvasScale;
+  _piecePixelW    = piecePixelW;
+  _piecePixelH    = piecePixelH;
+  _scrollX        = 0;
+  _benchCollapsed = false; // reset on each puzzle load — idempotency guard
 
   const { pieces } = usePuzzleStore.getState();
 
@@ -1823,6 +1780,14 @@ export function initTray(
   _unsubscribeGreyscale = usePuzzleStore.subscribe((state, prev) => {
     if (state.greyscale !== prev.greyscale) layoutTrayPieces();
   });
+
+  // Wire bench navigation helpers into aria.ts for keyboard focus continuation.
+  // bench.ts already imports aria.ts — no circular dep.
+  // scrollBenchToId is defined in this file; getVisibleBenchOrder is exported above.
+  registerBenchNavHelpers(
+    () => getVisibleBenchOrder(usePuzzleStore.getState().activeFilter),
+    scrollBenchToId,
+  );
 
   return tray;
 }

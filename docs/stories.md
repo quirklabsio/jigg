@@ -661,3 +661,29 @@ Rule: **never call drawCutSegments without first lineTo to pts[0]** — the curs
 - `onComplete(app, hitLayer, totalCount)` — disables hit layer, logs, triggers fade-in message
 - `showCompletionMessage` in `ui.ts` — PixiJS Container at zIndex 9999, dark panel + white 32px text, Ticker fade 0→1 over 2s
 - Completion checked in `setBoardSnapCallback` in `scene.ts` after board snap fires
+
+---
+
+### Story 41a — Bench keyboard: focus continuation + reconciliation (2026-04-15)
+
+**`src/canvas/bench.ts`**
+- `let _benchCollapsed = false` — idempotency guard added at module level. Reset in `initTray` on each puzzle load.
+- `getVisibleBenchOrder` made `export` — required by aria.ts nav helper registration.
+- Removed `findNextFocusableAfter` and `handleExtractionFocusHandoff` — replaced by the three-concern pattern.
+- New `isBenchEmpty()` — `pieces.every(p => !isInBench(p))`, sole collapse trigger.
+- New `applyBenchCollapseEffects()` — idempotent via `_benchCollapsed` guard. Sets `benchLandmark.inert = true`, calls `_onBenchCollapse()` (fires `setKeyboardMode('table')` + `setBenchCollapsed()` in scene.ts), calls `setTrayOpen(false)`. All three fire together — never independently.
+- New `reconcileBenchState()` — calls `applyBenchCollapseEffects()` if bench is empty. Always runs after extraction.
+- New `extractPieceFromBench(pieceId)` — shared extraction tail. Clears focused tracking, removes ARIA button, trims `_trayDisplayOrder`, calls `reconcileBenchState()`, reflowing layout. No focus logic — input-agnostic.
+- `spiralPlace`, `extractToCanvas`, `zoomToPlacePiece` end blocks replaced with `extractPieceFromBench(pieceId)`.
+- `registerBenchNavHelpers(getVisibleOrder, scrollTo)` called at end of `initTray` — wires bench state into aria.ts without circular dep.
+- `registerBenchNavHelpers` added to aria.ts import.
+
+**`src/utils/aria.ts`**
+- `usePuzzleStore` imported from store.
+- `_getVisibleBenchOrder: () => string[]` and `_scrollBenchToId: (id: string) => void` module callbacks added.
+- `registerBenchNavHelpers(getVisibleOrder, scrollTo)` exported — called by bench.ts in `initTray`.
+- `createBenchButton` keydown handler rewritten: snapshots visible order before mutation, computes `nextId` (next-only, no reverse), calls `_onBenchActivate`, then rAF checks `piecesById[nextId]` with `isInBench` guard before moving focus. Mouse and drag extraction unchanged.
+
+**`docs/decisions.md`** — extraction reconciliation pattern appended.
+
+`npm run typecheck` passes clean. Zero suppressions.
