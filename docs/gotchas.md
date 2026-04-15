@@ -320,6 +320,48 @@
 ## replace_all prefix misses
 - **`replace_all` only matches the exact string.** In a file with `piece.actual.x`, `anchorPiece.actual.x`, and `p.actual.x`, replacing `piece.actual.x` leaves the other two untouched. After any bulk rename, grep for the old field name (`\.actual\.`, `\.groupId`, etc.) to confirm zero remaining occurrences before running typecheck.
 
+## `inert=false` does NOT mean "blocked" — it means "accessible"
+
+- **Symptom**: After implementing `inert`-based keyboard mode switching, the initial state `bench.inert = false` looked wrong — as if the bench was not inert (not blocked), implying something was broken.
+- **Root cause**: Misreading of the `inert` attribute semantics. `inert=false` (or absent) means the element IS accessible, IS in tab order, IS interactive. `inert=true` means the element is blocked/hidden from keyboard and AT. The initial bench-mode state correctly has `bench.inert = false` (bench is active) and `table.inert = true` (table is blocked).
+- **Rule**: `inert=true` = blocked. `inert=false` = accessible. Active landmark has `inert=false`, inactive landmark has `inert=true`.
+
+## Redundant `_collapsed || mode !== 'x'` in `inert` derivation
+
+- **Symptom**: spec wrote `benchLandmark.inert = _benchCollapsed || mode !== 'bench'` to permanently inert the bench after collapse. This compiles and runs correctly, but the `_benchCollapsed ||` part is dead code.
+- **Root cause**: Once `_benchCollapsed = true`, `setKeyboardMode('table')` is called immediately. This makes `_keyboardMode === 'table'` permanent. `mode !== 'bench'` is therefore always `true` — `_benchCollapsed ||` adds nothing.
+- **Fix**: `benchLandmark.inert = mode !== 'bench'`. Symmetric with `tableLandmark.inert = mode !== 'table'`. `_benchCollapsed` is still needed as a T key guard (prevents switching back to bench mode), but plays no role in `inert` derivation.
+- **Rule**: Derive `inert` only from the active `mode` variable. Collapsed/permanent state is enforced by preventing mode transitions, not by injecting extra conditions into the inert formula.
+
+## Splitting `t`/`T` by case for different key behaviours silently broke existing UX
+
+- **Symptom**: After assigning keyboard mode switching to uppercase `T` (Shift+T) and tray toggle to lowercase `t`, user reported "t is no longer working to collapse/expand bench". Then when both `t` and `T` were made to do mode switching only, tray open/close broke entirely.
+- **Root cause**: `e.key === 'T'` requires Shift on a QWERTY keyboard. Users pressing the physical T key (no Shift) produce `e.key === 't'`. Assigning different behaviours to the two cases is effectively invisible — the user just sees "T broke".
+- **Fix**: Keep `t`/`T` (both cases) for the same action — tray open/close. Call `setKeyboardMode('bench')` when opening, `setKeyboardMode('table')` when closing. Symmetric coupling: open tray = bench active, close tray = table active. "Close deferred to Story 42" was tried first but left `table.inert` permanently true — fixed by adding the close branch immediately.
+- **Rule**: Do not split `e.key === 't'` and `e.key === 'T'` for semantically different actions. They correspond to the same physical key; users have no reliable way to know which case applies.
+
+## `table.inert` permanently true — second landmark never activated
+
+- **Symptom**: `document.getElementById('landmark-table').inert` stays `true` regardless of user actions. Console audit check "table.inert false ✓" never passes.
+- **Root cause**: `setKeyboardMode('bench')` was called on tray open, but nothing called `setKeyboardMode('table')` on tray close. The "close deferred to Story 42" approach left one half of the symmetric model unimplemented.
+- **Fix**: Add `setKeyboardMode('table')` in the tray-close branch of the T key handler. The inert model must be symmetric — every code path that enters bench mode must have a corresponding path that exits it.
+- **Rule**: For any `inert`-based two-landmark model, every entry point for mode A must have a corresponding exit point (entry for mode B). Never implement one side without the other.
+
+## Mode switch wired only to T key handler — click path silently bypassed
+
+- **Symptom**: Pressing `T` to close the bench correctly sets `table.inert=false`. Clicking the PixiJS bench strip or the DOM strip handle button to close the bench does NOT — `table.inert` stays `true`.
+- **Root cause**: `setKeyboardMode('table')` was called inside the T key `keydown` handler in `scene.ts`. The PixiJS `_stripHitArea.on('pointerdown')` and DOM `_benchStripHandle.addEventListener('click')` both call bench.ts's `setTrayOpen` directly, which mutates the Zustand store but never reaches the T key handler in `scene.ts`.
+- **Fix**: Move `setKeyboardMode` out of the T key handler and into a `usePuzzleStore.subscribe` callback watching `trayOpen`. The subscriber fires synchronously for any `trayOpen` mutation regardless of origin. T key handler becomes `setTrayOpen(!isOpen); return;` — one line.
+  ```typescript
+  usePuzzleStore.subscribe((state, prev) => {
+    if (state.trayOpen !== prev.trayOpen) {
+      if (state.trayOpen) { if (!_benchCollapsed) setKeyboardMode('bench'); }
+      else { setKeyboardMode('table'); }
+    }
+  });
+  ```
+- **Rule**: When a side-effect must fire on a state change, subscribe to the state — never couple it to one specific input path. Any future code that changes `trayOpen` will then automatically trigger the mode switch.
+
 ## Browser extension interference with keyboard tab order
 
 Symptom: First Tab press lands on an invisible element, focus ring never appears, `document.activeElement.getAttribute('aria-label')` returns null.

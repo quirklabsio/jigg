@@ -212,6 +212,38 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ---
 
+### Story 40b — Keyboard foundation: `inert` mode switch + `#landmark-table` (2026-04-15)
+
+**`src/utils/aria.ts`** — no changes. `initLandmarks()` already created `#landmark-table` with correct role, label, DOM order, and Space prevention. The element was wired in the original Story 40 implementation.
+
+**`src/canvas/scene.ts`**
+- Added `type KeyboardMode = 'bench' | 'table'`, `_keyboardMode`, `_benchCollapsed`, `_tHint` module-level vars.
+- Added `isInBench`, `isOnTable` imports from `../puzzle/types`; `LANDMARK_BENCH_ID`, `LANDMARK_TABLE_ID` from `../utils/aria`; `registerBenchCollapseHandler` from `./bench`.
+- `getFirstTablePiece()` — returns lowest-index `isOnTable` piece with a `[data-piece-id]` button inside `#landmark-table`. Always null in Story 40b (no table buttons yet); forward-compatible for Story 41b.
+- `updateTHint(mode, benchExists)` — sets `_tHint.textContent`; hides hint when bench is permanently collapsed.
+- `setKeyboardMode(mode)` exported — single control point for `inert`. `benchLandmark.inert = mode !== 'bench'`; `tableLandmark.inert = mode !== 'table'`. Focus jumps via `requestAnimationFrame` + `focusButton` (bench) or `getFirstTablePiece` (table; falls to browser chrome when null). Note: spec draft had `_benchCollapsed || mode !== 'bench'` — redundant, simplified (see gotchas.md).
+- `getKeyboardMode()` and `setBenchCollapsed()` exported.
+- `t`/`T` key: tray open/close toggle preserved. When OPENING, `setKeyboardMode('bench')` fires (unless `_benchCollapsed`). When CLOSING, `setKeyboardMode('table')` fires. Symmetric coupling: open tray = bench active, close tray = table active. Splitting `t`/`T` by case was tried and broke tray toggle; "close deferred to Story 42" approach left `table.inert` permanently true — fixed by symmetric T key handler.
+- `_tHint` DOM element created in `loadScene` (fixed, bottom-right, monospace, `display:none`). `{ once: true }` keydown listener reveals it on first keyboard interaction.
+- `setKeyboardMode('bench')` called after all bench button init — sets initial `inert` state correctly.
+- `registerBenchCollapseHandler(() => { setBenchCollapsed(); setKeyboardMode('table'); })` registered in `loadScene`.
+
+**`src/canvas/bench.ts`**
+- `_onBenchCollapse: () => void` module-level callback (default no-op). `registerBenchCollapseHandler(fn)` exported.
+- Bench-empty detection: `if (_trayDisplayOrder.length === 0) _onBenchCollapse()` added in all three extraction paths (spiralPlace, drag extraction, completeZoomAnimation). Correct even though the Zustand subscriber removes the piece synchronously during `extractPieceToCanvas` — length check fires after subscriber, so `=== 0` still evaluates correctly for the last piece.
+- Circular dep avoided: bench.ts does not import from scene.ts. scene.ts registers the callback via `registerBenchCollapseHandler`.
+
+**Corrections made during session:**
+1. `_benchCollapsed || mode !== 'bench'` simplified to `mode !== 'bench'` — the former is redundant once collapse triggers `setKeyboardMode('table')`.
+2. T key case-split (`t` = tray toggle, `T` = mode switch) reverted — broke existing tray open/close UX.
+3. `inert=false` semantics clarified: `inert=false` means accessible/active, not broken.
+4. "Close deferred to Story 42" approach left `table.inert` permanently true — fixed by symmetric T key handler coupling.
+5. Mode switch wired only to T key handler — PixiJS strip click and DOM button bypassed it. Fix: moved `setKeyboardMode` into a `usePuzzleStore.subscribe` callback on `trayOpen`. T key handler simplified to `setTrayOpen(!isOpen); return;`. All input paths now covered.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 40d — Empty filter handling (2026-04-14)
 
 **`src/canvas/bench.ts`**

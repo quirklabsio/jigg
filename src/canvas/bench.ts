@@ -148,6 +148,15 @@ let _zoomLabel: HTMLLabelElement | null = null;
 let _prefLabels: HTMLLabelElement[] = [];
 let _bgPresetLabel: HTMLElement | null = null;
 
+// Bench collapse callback — registered by scene.ts after initLandmarks.
+// Avoids a circular import: bench.ts cannot import from scene.ts.
+// Called once when the last piece leaves the bench.
+let _onBenchCollapse: () => void = () => {};
+
+export function registerBenchCollapseHandler(fn: () => void): void {
+  _onBenchCollapse = fn;
+}
+
 // ─── Deterministic PRNG + bench order ────────────────────────────────────────
 
 /**
@@ -1011,6 +1020,7 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
   handleExtractionFocusHandoff(pieceId, prevOrder);
   layoutTrayPieces();
 }
@@ -1117,6 +1127,7 @@ function extractToCanvas(
 
   // Remove from display order and reflow grid
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
   handleExtractionFocusHandoff(pieceId, prevOrder);
   layoutTrayPieces();
 }
@@ -1201,6 +1212,7 @@ function completeZoomAnimation(
 
   // Remove from display order and reflow
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
+  if (_trayDisplayOrder.length === 0) _onBenchCollapse();
   layoutTrayPieces();
 
   _zoomInFlight      = false;

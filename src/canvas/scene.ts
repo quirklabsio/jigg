@@ -2,6 +2,7 @@ import { Application, Assets, Container, Graphics, Rectangle, Sprite, Text, Text
 import { BevelFilter, DropShadowFilter } from 'pixi-filters';
 import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
+import { isInBench, isOnTable } from '../puzzle/types';
 import { createBoard } from './board';
 import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
 import {
@@ -17,10 +18,10 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter } from './bench';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter, registerBenchCollapseHandler } from './bench';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
-import { initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton } from '../utils/aria';
+import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton } from '../utils/aria';
 import {
   loadPreferences,
   applyPreferences,
@@ -126,6 +127,83 @@ function initFocusRing(app: Application, spriteMap: Map<string, Sprite>): void {
       _focusRing.clear();
     }
   });
+}
+
+// ─── Keyboard mode state ──────────────────────────────────────────────────────
+// Single source of truth for which landmark is active for keyboard nav.
+// `inert` is ONLY mutated via setKeyboardMode — never touched directly elsewhere.
+
+type KeyboardMode = 'bench' | 'table';
+let _keyboardMode: KeyboardMode = 'bench';
+let _benchCollapsed = false;  // true once last piece leaves bench — permanent
+let _tHint: HTMLElement | null = null;
+
+/**
+ * Returns the piece ID with the lowest PieceDefinition.index among all isOnTable
+ * pieces that have a button in #landmark-table. Returns null if table is empty.
+ * Forward-compatible: looks for [data-piece-id] buttons in #landmark-table
+ * (Story 41b will populate them).
+ */
+function getFirstTablePiece(): string | null {
+  const { pieces } = usePuzzleStore.getState();
+  const tablePieces = pieces
+    .filter(isOnTable)
+    .sort((a, b) => a.index - b.index);
+  const tableLandmark = document.getElementById(LANDMARK_TABLE_ID);
+  if (!tableLandmark) return null;
+  for (const p of tablePieces) {
+    const btn = tableLandmark.querySelector<HTMLButtonElement>(`[data-piece-id="${p.id}"]`);
+    if (btn) return p.id;
+  }
+  return null;
+}
+
+function updateTHint(mode: KeyboardMode, benchExists: boolean): void {
+  if (!_tHint) return;
+  if (!benchExists) {
+    _tHint.style.display = 'none';
+    return;
+  }
+  _tHint.textContent = mode === 'bench' ? 'T → table' : 'T → piece tray';
+}
+
+/**
+ * Single control point for all keyboard mode switching.
+ * The ONLY place `inert` is set on either landmark — O(1).
+ */
+export function setKeyboardMode(mode: KeyboardMode): void {
+  _keyboardMode = mode;
+
+  const benchLandmark = document.getElementById(LANDMARK_BENCH_ID) as HTMLElement | null;
+  const tableLandmark = document.getElementById(LANDMARK_TABLE_ID) as HTMLElement | null;
+  if (!benchLandmark || !tableLandmark) return;
+
+  benchLandmark.inert = mode !== 'bench';
+  tableLandmark.inert = mode !== 'table';
+
+  if (mode === 'bench') {
+    const firstId = getFirstVisibleBenchPieceId();
+    if (firstId) {
+      requestAnimationFrame(() => focusButton(firstId));
+    }
+  } else {
+    const firstId = getFirstTablePiece();
+    if (firstId) {
+      requestAnimationFrame(() => focusButton(firstId));
+    }
+    // table is empty — intentionally let focus fall to browser chrome
+  }
+
+  updateTHint(mode, !_benchCollapsed);
+}
+
+export function getKeyboardMode(): KeyboardMode {
+  return _keyboardMode;
+}
+
+/** Mark bench as permanently collapsed. Called once — never reversed. */
+export function setBenchCollapsed(): void {
+  _benchCollapsed = true;
 }
 
 // ─── Shadow state helpers (mutate one persistent filter per piece) ────────────
@@ -511,6 +589,40 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   );
   initFilterButtons(getFilterDefs());
 
+  // ── T-key hint ─────────────────────────────────────────────────────────────
+  // Small fixed overlay hinting the T key mode switch. Hidden until first
+  // keyboard interaction — revealed by the { once: true } listener below.
+  _tHint?.remove();
+  _tHint = document.createElement('div');
+  _tHint.style.cssText = [
+    'position:fixed',
+    'bottom:50px',
+    'right:12px',
+    'font-size:11px',
+    'font-family:monospace',
+    'color:#aaaacc',
+    'z-index:601',
+    'user-select:none',
+    'pointer-events:none',
+    'display:none',
+  ].join(';');
+  document.body.appendChild(_tHint);
+  document.addEventListener('keydown', () => {
+    if (_tHint) _tHint.style.display = 'block';
+  }, { once: true });
+
+  // ── Keyboard mode init ────────────────────────────────────────────────────
+  // All pieces start in bench — keyboard mode starts as 'bench'.
+  // setKeyboardMode derives inert state for both landmarks.
+  setKeyboardMode('bench');
+
+  // Bench collapse callback — wired here to avoid circular deps
+  // (bench.ts cannot import from scene.ts; scene.ts imports from bench.ts).
+  registerBenchCollapseHandler(() => {
+    setBenchCollapsed();
+    setKeyboardMode('table');
+  });
+
   // AC-4: Initialise snap highlight state from loaded prefs, then subscribe
   // so it stays in sync whenever highContrast or reducedMotion changes.
   // Story 37c: also call applyReducedMotion on reducedMotion toggle so the
@@ -522,6 +634,13 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
     if (state.reducedMotion !== prev.reducedMotion) {
       applyReducedMotion(state.reducedMotion);
+    }
+    if (state.trayOpen !== prev.trayOpen) {
+      if (state.trayOpen) {
+        if (!_benchCollapsed) setKeyboardMode('bench');
+      } else {
+        setKeyboardMode('table');
+      }
     }
   });
 
@@ -555,16 +674,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     if (e.key === 't' || e.key === 'T') {
-      const isOpen = usePuzzleStore.getState().trayOpen;
-      setTrayOpen(!isOpen);
-      // When opening, jump focus to the first visible bench piece.
-      // rAF defers until after layoutTrayPieces has synced tabIndices.
-      if (!isOpen) {
-        requestAnimationFrame(() => {
-          const firstId = getFirstVisibleBenchPieceId();
-          if (firstId) focusButton(firstId);
-        });
-      }
+      setTrayOpen(!usePuzzleStore.getState().trayOpen);
       return;
     }
     // [/] — cycle bench filter strip. Works whenever bench is open, regardless of focus.
