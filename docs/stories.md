@@ -212,6 +212,26 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ---
 
+### Story 40c — Deterministic bench order + piece rotation (2026-04-14)
+
+**`src/canvas/bench.ts`** — only file touched.
+
+- Removed `shuffle()` (used `Math.random()`). Zero `Math.random()` calls remain in bench order derivation.
+- Added internal PRNG + hash helpers:
+  - `mulberry32(seed)` — seeded PRNG, implemented directly in `bench.ts` (not imported). Returns `() => number` closure.
+  - `hashString(str)` — djb2, maps session URI to unsigned 32-bit seed.
+- Added `deriveBenchOrder(pieces, sessionUri)` — Fisher-Yates with `mulberry32` RNG. Called once in `initTray`, result stored in `_trayDisplayOrder`. Never recomputed on filter change.
+- Added `getVisibleBenchOrder(filter)` — `.filter()` view over `_trayDisplayOrder`. Replaces the inline filter logic. `visibleInTray()` now delegates to it (`return getVisibleBenchOrder(activeFilter)`).
+- Added `seededPieceRotation(pieceId, sessionUri)` — derives 0/90/180/270 from `hash(sessionUri + ':rot:' + pieceId)`. Independent of order derivation.
+- `initTray`: dev sentinel `'dev:session:hardcoded'` for `sessionUri` with TODO Story 53. `piece.initialRotation` set at load. `rotationEnabled` hardcoded `false` with TODO Story 52.
+- Extraction paths (`spiralPlace`, `extractToCanvas`, `zoomToPlacePiece`): verified none reset `sprite.rotation`. Rotation carries over to table unchanged.
+- `Piece` type added to import from `'../puzzle/types'` (was missing — caused first typecheck error).
+- Store cast for `sessionUri` uses double-step `as unknown as Record<string, unknown>` (strict TypeScript requires it when types don't overlap).
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 39 — config cleanup + refine (2026-04-13)
 
 **Alias consolidation**

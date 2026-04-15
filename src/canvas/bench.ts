@@ -11,7 +11,7 @@ import {
 } from 'pixi.js';
 import { Viewport } from 'pixi-viewport';
 import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
-import { isInBench, isOnTable } from '../puzzle/types';
+import { isInBench, isOnTable, type Piece } from '../puzzle/types';
 import { hexToRgb } from '../puzzle/cutter';
 import {
   LANDMARK_BENCH_ID,
@@ -148,15 +148,93 @@ let _zoomLabel: HTMLLabelElement | null = null;
 let _prefLabels: HTMLLabelElement[] = [];
 let _bgPresetLabel: HTMLElement | null = null;
 
-// ─── Fisher-Yates shuffle ─────────────────────────────────────────────────────
+// ─── Deterministic PRNG + bench order ────────────────────────────────────────
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+/**
+ * Mulberry32 — fast, high-quality 32-bit seeded PRNG.
+ * Returns a closure that produces a new float in [0, 1) on each call.
+ * Internal to bench.ts — not exported.
+ */
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s += 0x6d2b79f5;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+  };
+}
+
+/**
+ * djb2 hash — maps an arbitrary string to an unsigned 32-bit integer.
+ * Used to derive a stable seed from the session URI.
+ * Internal to bench.ts — not exported.
+ */
+function hashString(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    hash = hash >>> 0; // keep unsigned 32-bit
   }
-  return a;
+  return hash;
+}
+
+/**
+ * Derive the master bench display order from the session URI.
+ * Called once at puzzle load — result stored in _trayDisplayOrder.
+ * Never called again on filter change.
+ *
+ * Order seed: hash(sessionUri)
+ */
+function deriveBenchOrder(pieces: Piece[], sessionUri: string): string[] {
+  const seed = hashString(sessionUri);
+  const rng  = mulberry32(seed);
+
+  const ids = pieces.filter(isInBench).map((p) => p.id);
+
+  // Fisher-Yates with seeded RNG — deterministic
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+
+  return ids; // master order — stored once, never recomputed on filter change
+}
+
+/**
+ * Return a cardinal rotation (0 / 90 / 180 / 270) for a bench piece.
+ * Derived from a piece-specific suffix on the session URI so it is
+ * completely independent of the order derivation.
+ *
+ * Rotation seed: hash(sessionUri + ':rot:' + pieceId)
+ */
+function seededPieceRotation(
+  pieceId: string,
+  sessionUri: string,
+): 0 | 90 | 180 | 270 {
+  const seed     = hashString(`${sessionUri}:rot:${pieceId}`);
+  const rng      = mulberry32(seed);
+  const cardinals = [0, 90, 180, 270] as const;
+  return cardinals[Math.floor(rng() * 4)];
+}
+
+/**
+ * Filter view over the master bench order.
+ * Called by layoutTrayPieces, syncButtonDOMOrder, and scrollBenchToId.
+ * Never reorders — only filters pieces that match `filter` and are still in bench.
+ */
+function getVisibleBenchOrder(filter: TrayFilter): string[] {
+  const { piecesById } = usePuzzleStore.getState();
+  const all = _trayDisplayOrder.filter((id) => {
+    const piece = piecesById[id];
+    return piece !== undefined && isInBench(piece);
+  });
+  if (filter === 'all') return all;
+  if (filter.startsWith('palette-')) {
+    const zone = parseInt(filter.slice(8), 10);
+    return all.filter((id) => piecesById[id]?.paletteIndex === zone);
+  }
+  return all.filter((id) => piecesById[id]?.edgeType === filter);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -386,16 +464,12 @@ function redrawBackground(): void {
 
 // ─── Filter strip ─────────────────────────────────────────────────────────────
 
-/** Returns the subset of in-tray piece IDs that match the active filter. */
+/**
+ * Returns the subset of in-tray piece IDs that match the active filter.
+ * Delegates to getVisibleBenchOrder — filter is a view, never a reshuffle.
+ */
 function visibleInTray(): string[] {
-  const { piecesById, activeFilter } = usePuzzleStore.getState();
-  const all = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
-  if (activeFilter === 'all') return all;
-  if (activeFilter.startsWith('palette-')) {
-    const zone = parseInt(activeFilter.slice(8), 10);
-    return all.filter((id) => piecesById[id]?.paletteIndex === zone);
-  }
-  return all.filter((id) => piecesById[id]?.edgeType === activeFilter);
+  return getVisibleBenchOrder(usePuzzleStore.getState().activeFilter);
 }
 
 // Color swatch constants
@@ -1326,9 +1400,11 @@ export function initTray(
 
   const { pieces } = usePuzzleStore.getState();
 
-  // Randomise display order for the tray
-  _trayDisplayOrder = shuffle(pieces.filter((p) => isInBench(p)).map((p) => p.id));
-
+  // Derive deterministic master display order from session URI.
+  // TODO: Story 53 — replace dev sentinel with real sessionUri from JiggGlue.uri
+  const sessionUri = ((usePuzzleStore.getState() as unknown) as Record<string, unknown>).sessionUri as string | undefined
+    ?? 'dev:session:hardcoded';
+  _trayDisplayOrder = deriveBenchOrder(pieces, sessionUri);
 
   // Set up in-tray sprites: clear filters, set eventMode.
   // Scale is set in layoutTrayPieces() — no need to set here.
@@ -1342,6 +1418,19 @@ export function initTray(
     sprite.filters   = [];
     sprite.eventMode = 'static';
   }
+
+  // Apply deterministic rotation to bench sprites.
+  // TODO: Story 52 — read rotationEnabled from settings panel (PuzzleState.rotationEnabled)
+  const rotationEnabled = false;
+  pieces.filter(isInBench).forEach((piece) => {
+    const sprite = spriteMap.get(piece.id);
+    if (!sprite) return;
+    const rot = rotationEnabled
+      ? seededPieceRotation(piece.id, sessionUri)
+      : 0;
+    sprite.rotation    = (rot * Math.PI) / 180;
+    piece.initialRotation = rot; // for label counter-rotation (Story 37b)
+  });
 
   // ── Tray container ──────────────────────────────────────────────────────────
   const tray = new Container();

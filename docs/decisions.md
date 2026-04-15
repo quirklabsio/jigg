@@ -142,5 +142,21 @@ Do not revisit without asking.
 - **`handleFilterChangeFocus()` lives in `bench.ts`, not `scene.ts`** — focus logic after a filter change depends on `tabIndex` state that is only settled after `layoutTrayPieces` completes. Putting the focus call after `layoutTrayPieces` inside `applyBenchFilter` (bench.ts) keeps cause and effect adjacent. `scene.ts` `]`/`[` handler becomes a trivial `cycleFilter(direction)` call with no focus logic.
 - **Arrow keys reserved for Story 41b** — ArrowLeft/Right/Up/Down in the table context will move a selected piece by one snap unit. They must not be bound to bench filter cycling or any other action that fires globally, as that would silently swallow movement keys when focus is on the table.
 
+## Deterministic bench order + rotation (Story 40c)
+
+One seed per session. One master order per session. Filters are views — they never reshuffle.
+
+- **Seed source:** `JiggGlue.uri` (session URI, unique per playthrough). Dev sentinel `'dev:session:hardcoded'` until Story 53.
+- **Order seed:** `hash(sessionUri)` — drives `deriveBenchOrder`, stored in `_trayDisplayOrder` once at load.
+- **Rotation seed:** `hash(sessionUri + ':rot:' + pieceId)` — completely independent of order derivation.
+- **`getVisibleBenchOrder(filter)`** replaces the old `visibleInTray()` logic as the canonical filter view. `visibleInTray()` delegates to it.
+- **Filter behaviour:** `.filter()` view over `_trayDisplayOrder` — switching filters never reorders. Corner pieces in Corners filter appear in the same relative positions as in All filter.
+- **Rotation behaviour:** `rotationEnabled: true` → seeded cardinal rotation per piece (0/90/180/270). `rotationEnabled: false` → all pieces upright. Currently hardcoded `false` with TODO pointing to Story 52.
+- **Rotation carries over on extraction** — neither `spiralPlace`, `extractToCanvas`, nor `zoomToPlacePiece` reset `sprite.rotation`. `piece.initialRotation` set at bench load for label counter-rotation.
+- **`mulberry32` implemented directly in `bench.ts`** — not imported from any other module. djb2 `hashString` also internal to `bench.ts`.
+- **Why session URI not puzzle URI:** same puzzle, new game → fresh bench order (new session URI). Resume same game → identical bench order (same session URI). Correct scope: bench order belongs to the playthrough, not the puzzle.
+
+Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:session:hardcoded` at Story 53 time to confirm sentinel removal.
+
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.
