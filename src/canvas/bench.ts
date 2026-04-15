@@ -557,15 +557,38 @@ function paletteMeanColors(): [number, number, number][] {
 }
 
 /**
+ * Single-pass count of in-bench pieces per filter.
+ * Called fresh inside renderFilterStrip on every layout pass — never cached.
+ */
+function getBenchFilterCounts(): Record<TrayFilter, number> {
+  const { piecesById } = usePuzzleStore.getState();
+  const counts: Record<string, number> = {
+    all: 0, corner: 0, edge: 0, interior: 0,
+    'palette-0': 0, 'palette-1': 0, 'palette-2': 0,
+    'palette-3': 0, 'palette-4': 0,
+  };
+  for (const id of _trayDisplayOrder) {
+    const p = piecesById[id];
+    if (!p || !isInBench(p)) continue;
+    counts.all++;
+    counts[p.edgeType]++;
+    counts[`palette-${p.paletteIndex}`]++;
+  }
+  return counts as Record<TrayFilter, number>;
+}
+
+/**
  * Redraw the filter strip buttons with current counts and active state.
  * Called from layoutTrayPieces so counts stay in sync with tray state.
+ * getBenchFilterCounts() called fresh here — not cached from a previous layout.
  */
 function renderFilterStrip(): void {
   if (!_filterContainer) return;
 
   _filterContainer.removeChildren();
 
-  const { piecesById, activeFilter } = usePuzzleStore.getState();
+  const { activeFilter } = usePuzzleStore.getState();
+  const counts = getBenchFilterCounts();
   const w    = screenW();
   const btnH = 26;
   const btnY = (FILTER_STRIP_HEIGHT - btnH) / 2;
@@ -574,29 +597,20 @@ function renderFilterStrip(): void {
   const textAreaW = w - SWATCH_AREA_W;
   const btnW = Math.floor(textAreaW / FILTER_OPTIONS.length);
 
-  // Count in-tray pieces per edge type
-  const edgeCounts: Record<'all' | 'corner' | 'edge' | 'interior', number> =
-    { all: 0, corner: 0, edge: 0, interior: 0 };
-  const zoneCounts = new Array<number>(NUM_ZONES).fill(0);
-  for (const id of _trayDisplayOrder) {
-    const p = piecesById[id];
-    if (!p || !isInBench(p)) continue;
-    edgeCounts.all++;
-    edgeCounts[p.edgeType]++;
-    const z = p.paletteIndex;
-    if (z >= 0 && z < NUM_ZONES) zoneCounts[z]++;
-  }
-
   // ── Edge type buttons ────────────────────────────────────────────────────
+  // All filters follow the same empty-state rules — no special cases.
   for (let i = 0; i < FILTER_OPTIONS.length; i++) {
     const { key, label } = FILTER_OPTIONS[i];
     const isActive = activeFilter === key;
-    const count    = edgeCounts[key as keyof typeof edgeCounts];
-    const dimmed   = count === 0;
+    const count    = counts[key as TrayFilter];
+    const isEmpty  = count === 0;
 
     const btn = new Container();
-    btn.eventMode = 'static';
+    // Empty inactive = non-interactive. Empty active = still interactive (no-op click).
+    btn.eventMode = (isEmpty && !isActive) ? 'none' : 'static';
     btn.cursor    = 'pointer';
+    // Dim empty buttons: active+empty → 55%, inactive+empty → 35%.
+    btn.alpha = isEmpty ? (isActive ? 0.55 : 0.35) : 1.0;
 
     const bg = new Graphics();
     bg.rect(i * btnW + 2, btnY, btnW - 4, btnH)
@@ -607,7 +621,7 @@ function renderFilterStrip(): void {
       text: `${label} (${count})`,
       resolution: window.devicePixelRatio,
       style: {
-        fill:       dimmed ? 0x777799 : isActive ? 0xffffff : 0xddddf0,
+        fill:       isActive ? 0xffffff : 0xddddf0,
         fontSize:   14,
         fontFamily: 'sans-serif',
         fontWeight: isActive ? 'bold' : 'normal',
@@ -640,28 +654,34 @@ function renderFilterStrip(): void {
   // propagate palette indices to any DOM palette filter buttons it introduces.
 
   for (let z = 0; z < NUM_ZONES; z++) {
-    const filterKey = `palette-${z}` as TrayFilter;
-    const isActive  = activeFilter === filterKey;
-    const inTrayCount = zoneCounts[z];
-    const dimmed    = inTrayCount === 0;
+    const filterKey   = `palette-${z}` as TrayFilter;
+    const isActive    = activeFilter === filterKey;
+    const inTrayCount = counts[filterKey];
+    const isEmpty     = inTrayCount === 0;
     const [mr, mg, mb] = meanColors[z];
-    const fillColor = (mr << 16) | (mg << 8) | mb;
+    // Empty swatches show grey — color only when pieces are present.
+    const fillColor = isEmpty ? 0x888888 : (mr << 16) | (mg << 8) | mb;
 
     const cx = swatchStartX + z * SWATCH_SPACING;
 
     // Swatch container positioned at circle center — children draw at (0, 0).
     // This allows zone labels to be placed at (0, 0) with anchor (0.5).
     const swatch = new Container();
-    swatch.eventMode = 'static';
+    // Empty inactive = non-interactive. Empty active = still interactive (no-op click).
+    swatch.eventMode = (isEmpty && !isActive) ? 'none' : 'static';
     swatch.cursor    = 'pointer';
+    // Dim empty swatches: active+empty → 55%, inactive+empty → 40%.
+    swatch.alpha = isEmpty ? (isActive ? 0.55 : 0.4) : 1.0;
     swatch.position.set(cx, swatchCY);
 
     const g = new Graphics();
     // Active swatches always scale up — pops toward the user regardless of HC.
-    const drawRadius = isActive ? SWATCH_RADIUS_ACTIVE : SWATCH_RADIUS;
+    // Empty swatches use inactive radius (no pop — no pieces to filter to).
+    const drawRadius = (isActive && !isEmpty) ? SWATCH_RADIUS_ACTIVE : SWATCH_RADIUS;
 
     // ── Non-HC active ring ───────────────────────────────────────────────────
     // White selection ring 3 px outside the fill — normal mode only.
+    // Retained at reduced opacity via swatch.alpha when empty+active.
     if (isActive && !hcSwatches) {
       g.circle(0, 0, drawRadius + 3).stroke({ color: 0xffffff, width: 2 });
     }
@@ -671,23 +691,37 @@ function renderFilterStrip(): void {
     //   Outer (r+2.5, w=2) → pixel-radii (r+1.5)–(r+3.5)
     //   Inner (r+1,   w=1) → pixel-radii (r+0.5)–(r+1.5)
     // Outer ring: Neon Magenta when active+HC, White otherwise.
+    // Retained at reduced opacity via swatch.alpha when empty+active.
     if (hcSwatches) {
-      const outerColor = (isActive) ? SWATCH_HC_ACTIVE_CLR : 0xffffff;
+      const outerColor = isActive ? SWATCH_HC_ACTIVE_CLR : 0xffffff;
       g.circle(0, 0, drawRadius + 2.5).stroke({ color: outerColor, width: 2 });
       g.circle(0, 0, drawRadius + 1  ).stroke({ color: 0x000000,   width: 1 });
     }
 
     // ── Filled swatch circle ─────────────────────────────────────────────────
-    g.circle(0, 0, drawRadius).fill({ color: fillColor, alpha: dimmed ? 0.35 : 1.0 });
+    g.circle(0, 0, drawRadius).fill({ color: fillColor });
 
     swatch.addChild(g);
 
+    // ── Diagonal slash — shown when empty ────────────────────────────────────
+    // Slightly darker than grey fill, 1.4px — readable but not aggressive.
+    // Signal: "temporarily empty container". Not a checkmark, not strikethrough.
+    if (isEmpty) {
+      const slash = new Graphics();
+      const r = SWATCH_RADIUS;
+      slash
+        .moveTo(r * 0.85, -r * 0.85)
+        .lineTo(-r * 0.85, r * 0.85)
+        .stroke({ color: 0x333333, width: 1.8, alpha: 1.0 });
+      swatch.addChild(slash);
+    }
+
     // ── Active inner glow dot — separate named child for visibility toggle ───
-    // White dot at centre — always created, visible only when active.
+    // White dot at centre — always created, hidden when empty or when zone label present.
     const glowDot = new Graphics();
     glowDot.name = 'glowDot';
     glowDot.circle(0, 0, SWATCH_GLOW_R).fill({ color: 0xffffff });
-    glowDot.visible = isActive;
+    glowDot.visible = isActive && !isEmpty;
     swatch.addChild(glowDot);
 
     // ── Zone label — shown when greyscale active ─────────────────────────────
@@ -1871,33 +1905,25 @@ export function getTrayDisplayOrder(): string[] {
 
 /**
  * Compute filter definitions with live counts of matching in-bench pieces.
- * Used by aria.ts to label the filter radiogroup buttons.
+ * Always returns all 9 entries (4 text + 5 palette) — empty filters included.
+ * Includes count and isActive so aria.ts can derive disabled state and aria-label.
  * Label format: "All (16)", "Corners (4)", "Edges (8)", etc.
  */
 export function getFilterDefs(): FilterDef[] {
-  const { piecesById, activeFilter: _ } = usePuzzleStore.getState();
-  const allInBench = _trayDisplayOrder.filter((id) => isInBench(piecesById[id]!));
-
-  const count = (filterFn: (id: string) => boolean) =>
-    allInBench.filter(filterFn).length;
-
-  const cornerCount   = count((id) => piecesById[id]?.edgeType === 'corner');
-  const edgeCount     = count((id) => piecesById[id]?.edgeType === 'edge');
-  const interiorCount = count((id) => piecesById[id]?.edgeType === 'interior');
+  const { activeFilter } = usePuzzleStore.getState();
+  const counts = getBenchFilterCounts();
 
   const defs: FilterDef[] = [
-    { id: 'all',      label: `All (${allInBench.length})` },
-    { id: 'corner',   label: `Corners (${cornerCount})` },
-    { id: 'edge',     label: `Edges (${edgeCount})` },
-    { id: 'interior', label: `Interior (${interiorCount})` },
+    { id: 'all',      label: `All (${counts.all})`,           count: counts.all,           isActive: activeFilter === 'all' },
+    { id: 'corner',   label: `Corners (${counts.corner})`,   count: counts.corner,         isActive: activeFilter === 'corner' },
+    { id: 'edge',     label: `Edges (${counts.edge})`,       count: counts.edge,           isActive: activeFilter === 'edge' },
+    { id: 'interior', label: `Interior (${counts.interior})`, count: counts.interior,       isActive: activeFilter === 'interior' },
   ];
 
-  // Palette zones — only include if at least one piece belongs to that zone
   for (let z = 0; z < 5; z++) {
-    const zCount = count((id) => piecesById[id]?.paletteIndex === z);
-    if (zCount > 0) {
-      defs.push({ id: `palette-${z}`, label: `Zone ${z + 1} (${zCount})` });
-    }
+    const key = `palette-${z}` as TrayFilter;
+    const zCount = counts[key];
+    defs.push({ id: key, label: `Zone ${z + 1} (${zCount})`, count: zCount, isActive: activeFilter === key });
   }
 
   return defs;
@@ -1913,18 +1939,30 @@ export function getFirstVisibleBenchPieceId(): string | null {
 
 /**
  * Cycle the active bench filter by `direction` (+1 = next, -1 = prev).
- * Wraps at both ends. Uses getFilterDefs() for the current available filter list
- * so sparse palette zones are skipped automatically.
- *
- * Wired via registerFilterHandlers from scene.ts — called by the ArrowLeft/Right
- * handler on #landmark-bench when a piece button has focus.
+ * Steps through the full canonical filter order, skipping empty filters.
+ * Spatial position is preserved — pressing ] from Corners (empty) lands on
+ * Edges, not whatever happens to be first in a compressed list.
+ * If all filters are empty, does nothing.
  */
 export function cycleFilter(direction: 1 | -1): void {
-  const filters = getFilterDefs();
+  const counts = getBenchFilterCounts();
+  const allFilters: TrayFilter[] = [
+    'all', 'corner', 'edge', 'interior',
+    'palette-0', 'palette-1', 'palette-2', 'palette-3', 'palette-4',
+  ];
+
   const { activeFilter } = usePuzzleStore.getState();
-  const idx  = filters.findIndex((f) => f.id === activeFilter);
-  const next = filters[(idx + direction + filters.length) % filters.length];
-  applyBenchFilter(next.id as TrayFilter);
+  let idx = allFilters.indexOf(activeFilter);
+  if (idx === -1) idx = 0;
+
+  for (let i = 0; i < allFilters.length; i++) {
+    idx = (idx + direction + allFilters.length) % allFilters.length;
+    if (counts[allFilters[idx]] > 0) {
+      applyBenchFilter(allFilters[idx]);
+      return;
+    }
+  }
+  // All filters empty — do nothing.
 }
 
 /** Call from both window resize and renderer resize events in scene.ts. */

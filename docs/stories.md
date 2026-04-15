@@ -212,6 +212,28 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ---
 
+### Story 40d — Empty filter handling (2026-04-14)
+
+**`src/canvas/bench.ts`**
+- Added `getBenchFilterCounts()` — single `for` loop over `_trayDisplayOrder`, increments 9 counters (all + 3 edge types + 5 palette zones). Called fresh inside `renderFilterStrip` on every layout pass. Not cached. Replaces the old `edgeCounts` + `zoneCounts` local variables in `renderFilterStrip`.
+- Updated `getFilterDefs()` — always returns all 9 entries (4 text + 5 palette). Previously excluded palette zones with count 0. Now all zones always appear. Added `count: number` and `isActive: boolean` fields to each entry. Uses `getBenchFilterCounts` internally — one shared pass instead of repeated `filter().length` calls.
+- Updated `renderFilterStrip()` text filters — removed old `dimmed` fill-color change (`0x777799`). Now uses `btn.alpha` for empty treatment: `0.55` (empty+active) or `0.35` (empty+inactive). `btn.eventMode = (isEmpty && !isActive) ? 'none' : 'static'`. No special case for "All" — all filters follow the same rules.
+- Updated `renderFilterStrip()` palette swatches — grey fill `0x888888` when empty; diagonal slash added (`0x777777`, 1px, alpha 0.6); `glowDot.visible = isActive && !isEmpty`; `swatch.alpha` for empty dimming (0.55 / 0.4); `swatch.eventMode` matches pointer rule. Empty active swatch uses `SWATCH_RADIUS` (no pop — no pieces). Active ring retained via container alpha. Removed old `alpha: dimmed ? 0.35 : 1.0` on fill.
+- Rewrote `cycleFilter()` — uses `getBenchFilterCounts` to build `available` list of non-empty filters. `available.length <= 1` → early return. Active filter stays active when it empties; `]`/`[` moves to next non-empty filter on next press. If bench completely empty, `]`/`[` does nothing.
+
+**`src/utils/aria.ts`**
+- Extended `FilterDef` type — added `count: number` and `isActive: boolean`.
+- Added `filterAriaName(id)` helper — maps filter ID to display name ("Corners", "Zone 1", etc.).
+- Added `filterAriaLabel(f)` helper — derives accessible label: empty+active → "Corners filter, empty, currently selected"; empty+inactive → "Corners filter, empty"; non-empty → "Corners filter, 4 pieces".
+- Updated `initFilterButtons` — sets `radio.disabled = f.count === 0 && !f.isActive` and `aria-label` via `filterAriaLabel`. `aria-checked` uses `f.isActive` (not index-0 assumption).
+- Updated `updateFilterButtonLabels` — sets `disabled` and `aria-label` on every update call. Visual, pointer, and AT states agree: empty inactive = disabled + non-interactive; empty active = enabled + interactive.
+
+**`docs/decisions.md`** — added "Empty filter state (Story 40d)" section.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 40c — Deterministic bench order + piece rotation (2026-04-14)
 
 **`src/canvas/bench.ts`** — only file touched.

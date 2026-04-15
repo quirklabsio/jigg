@@ -158,5 +158,17 @@ One seed per session. One master order per session. Filters are views — they n
 
 Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:session:hardcoded` at Story 53 time to confirm sentinel removal.
 
+## Empty filter state (Story 40d)
+
+- **`getBenchFilterCounts` — single pass, never cached** — one loop over `_trayDisplayOrder`, increments 9 counters. Called fresh inside `renderFilterStrip` on every layout pass. Not a separate `filter().length` call per filter.
+- **All filters follow the same empty-state rules — no special cases** — "All" reflects total pieces in `STAGE_BENCH` and may reach zero when bench is empty. It follows the same empty-state rules as all other filters. No privileged filters.
+- **`getFilterDefs` always returns all 9 entries** — previously excluded palette zones with 0 count. Now all 5 zones always appear. ARIA radiogroup button count is fixed at 9; `updateFilterButtonLabels` always receives 9.
+- **Empty treatment: visual + pointer + AT must agree** — empty inactive: 35%/40% alpha, `eventMode: 'none'`, `disabled=true`. Empty active: 55% alpha, `eventMode: 'static'`, `disabled=false`, "currently selected" in label. Visual, pointer, and AT states are set in the same rendering pass.
+- **Active filter stays active when it empties — no auto-switch** — if the user is on Corners and extracts the last corner piece, the filter stays on Corners. User drives all transitions.
+- **`cycleFilter` skips empty filters** — builds `available` list of non-empty filters from `getBenchFilterCounts`. If `available.length <= 1`, returns immediately. If active filter is empty, `]`/`[` moves to the next non-empty filter.
+- **When bench is completely empty** — all filters show `(0)` or slash; `available.length === 0`; `]`/`[` does nothing; active filter stays active and remains interactive (no-op).
+- **Diagonal slash on empty swatches — softened contrast** — `0x777777` at `alpha: 0.6`, 1px width. Signals "temporarily empty", not "removed" or "invalid". No strikethrough on text filters — same reasoning.
+- **`FilterDef` extended** — added `count: number` and `isActive: boolean`. Both `initFilterButtons` and `updateFilterButtonLabels` in `aria.ts` derive `disabled` and `aria-label` from these fields directly.
+
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.

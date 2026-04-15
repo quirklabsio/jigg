@@ -8,7 +8,7 @@ export const LANDMARK_TABLE_ID = 'landmark-table';
 
 // ─── Filter def type ──────────────────────────────────────────────────────────
 
-export type FilterDef = { id: string; label: string };
+export type FilterDef = { id: string; label: string; count: number; isActive: boolean };
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -261,6 +261,35 @@ export function syncButtonDOMOrder(orderedIds: string[]): void {
 // ─── Filter radiogroup ────────────────────────────────────────────────────────
 
 /**
+ * Maps a filter ID to a human-readable name for ARIA labels.
+ */
+function filterAriaName(id: string): string {
+  if (id === 'all')      return 'All';
+  if (id === 'corner')   return 'Corners';
+  if (id === 'edge')     return 'Edges';
+  if (id === 'interior') return 'Interior';
+  if (id.startsWith('palette-')) return `Zone ${parseInt(id.slice(8), 10) + 1}`;
+  return id;
+}
+
+/**
+ * Compute the accessible label for a filter button.
+ * Empty inactive → "Corners filter, empty"
+ * Empty active   → "Corners filter, empty, currently selected"
+ * Non-empty      → "Corners filter, 4 pieces"
+ */
+function filterAriaLabel(f: FilterDef): string {
+  const name    = filterAriaName(f.id);
+  const isEmpty = f.count === 0;
+  if (isEmpty) {
+    return f.isActive
+      ? `${name} filter, empty, currently selected`
+      : `${name} filter, empty`;
+  }
+  return `${name} filter, ${f.count} pieces`;
+}
+
+/**
  * Create filter buttons inside #landmark-bench — mouse-only, all tabIndex=-1.
  * Idempotent — removes any pre-existing group first.
  * Keyboard users cycle filters via ] / [ on piece buttons.
@@ -276,15 +305,17 @@ export function initFilterButtons(filters: FilterDef[]): void {
   group.setAttribute('aria-label', 'Filter pieces');
   group.style.cssText = VISUALLY_HIDDEN_CSS;
 
-  filters.forEach((f, idx) => {
+  filters.forEach((f) => {
     const radio = document.createElement('button');
     radio.type = 'button';
     radio.setAttribute('role', 'radio');
-    radio.setAttribute('aria-checked', idx === 0 ? 'true' : 'false');
-    radio.setAttribute('aria-label', f.label);
+    radio.setAttribute('aria-checked', f.isActive ? 'true' : 'false');
+    radio.setAttribute('aria-label', filterAriaLabel(f));
     radio.dataset.filterId = f.id;
     radio.tabIndex = -1; // mouse-only — never reachable by Tab
     radio.textContent = f.label;
+    // Empty inactive = disabled for AT. Empty active = enabled (selection visible).
+    radio.disabled = f.count === 0 && !f.isActive;
 
     radio.addEventListener('click', () => _onFilterActivate(f.id));
 
@@ -296,7 +327,8 @@ export function initFilterButtons(filters: FilterDef[]): void {
 }
 
 /**
- * Update filter radio button labels (e.g. "Corners (3)") without recreating the group.
+ * Update filter radio button labels and ARIA state without recreating the group.
+ * Sets disabled + aria-label to match empty/active state exactly.
  * No-op if initFilterButtons has not been called.
  */
 export function updateFilterButtonLabels(filters: FilterDef[]): void {
@@ -308,8 +340,10 @@ export function updateFilterButtonLabels(filters: FilterDef[]): void {
     const radio = radios[i];
     if (radio) {
       radio.textContent = f.label;
-      radio.setAttribute('aria-label', f.label);
+      radio.setAttribute('aria-label', filterAriaLabel(f));
       radio.dataset.filterId = f.id;
+      // Empty inactive → disabled. Empty active → enabled (selection state visible).
+      radio.disabled = f.count === 0 && !f.isActive;
     }
   });
 }
