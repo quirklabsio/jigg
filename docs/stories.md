@@ -42,6 +42,30 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ## Session Notes
 
+### Story 43 — Accessibility audit + documentation cleanup (2026-04-16)
+
+Rewrote `docs/accessibility.md` to reflect actual codebase state after Stories 37a–42c.
+No source files modified. `npm run typecheck` passes clean.
+
+**Key corrections from the previous doc:**
+- Bench button label format updated: Story 42a changed labels to classification-only
+  ("Corner piece" / "Edge piece" / "Interior piece"), not "Piece N — Palette N, ..." format.
+- Table button label format updated: state-only labels only ("Piece", "Group of N", "Held", "Placed").
+- Table landmark label corrected: static "Puzzle table" (Story 42a removed reactive piece-count
+  label). "Puzzle complete" is announced via `announce()` live region, not landmark label.
+- `?` shortcuts panel: marked as deferred in old doc; it IS built (Story 42c, `src/canvas/shortcuts.ts`).
+- High contrast mechanism clarified: app-level toggle only; no CSS `forced-colors` support.
+- `colorBin` reference removed: field is `paletteIndex`; zone labels are P1–P5 on filter strip
+  swatches when greyscale active, not on piece ARIA buttons.
+- Roadmap discrepancy flagged: Stories 41a/41b show `[ ]` in roadmap but pick-up/put-down,
+  R rotate, cluster tab stops, and escape-drop are all implemented. Arrow-key movement is the
+  unshipped part.
+
+**New gap flagged:**
+- Arrow key movement not implemented (confirmed absent from all source files and session notes).
+
+---
+
 ### Story 42c — ? key: keyboard shortcuts panel (2026-04-16)
 
 **`src/canvas/shortcuts.ts`** (new file)
