@@ -79,6 +79,15 @@ interface TabStop {
 // Filter group DOM element — lives inside #landmark-bench, after all piece buttons
 let _filterGroup: HTMLDivElement | null = null;
 
+// Table landmark label dedup — last written value; prevents redundant DOM writes.
+// Story 42a: label is static "Puzzle table", so after first write this is always a no-op.
+let _lastTableLabel = '';
+
+// Live region for one-shot screen reader announcements (aria-live="polite").
+// Created once in initLandmarks; used via announce().
+let _liveRegion:     HTMLElement | null = null;
+let _announceTimer:  ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Register focus/blur/activate callbacks for bench buttons.
  * Call once from scene.ts after initFocusRing — before initBenchButtons.
@@ -197,10 +206,14 @@ export function initLandmarks(): void {
   document.getElementById(LANDMARK_TABLE_ID)?.remove();
   _buttonMap.clear();
   _trackedPieceId = null;
+  _lastTableLabel = ''; // reset dedup so initTableLandmarkLabel writes on next call
+
+  // Live region created once — persists across puzzle reloads (idempotent).
+  initLiveRegion();
 
   _landmarkBench = document.createElement('div');
   _landmarkBench.setAttribute('role', 'application');
-  _landmarkBench.setAttribute('aria-label', 'Piece bench — 5 Palette Groups');
+  _landmarkBench.setAttribute('aria-label', 'Piece tray');
   _landmarkBench.id       = LANDMARK_BENCH_ID;
   _landmarkBench.tabIndex = -1; // programmatically focusable, not in tab order
   _landmarkBench.style.cssText = VISUALLY_HIDDEN_CSS;
@@ -229,21 +242,81 @@ export function initLandmarks(): void {
   });
 }
 
+// ─── Reactive table landmark label ───────────────────────────────────────────
+
+/**
+ * Ensure #landmark-table has the static "Puzzle table" aria-label.
+ * Deduped — DOM write fires only once per puzzle load (label never changes after set).
+ * Story 42a: label is static. Puzzle-complete announcement goes via announce() in scene.ts.
+ */
+export function updateTableLandmarkLabel(): void {
+  if (!_landmarkTable) return;
+  if (_lastTableLabel !== 'Puzzle table') {
+    _landmarkTable.setAttribute('aria-label', 'Puzzle table');
+    _lastTableLabel = 'Puzzle table';
+  }
+}
+
+/**
+ * Set the static #landmark-table aria-label once at puzzle load.
+ * No store subscription needed — label is static in Story 42a.
+ * Call after initLandmarks().
+ */
+export function initTableLandmarkLabel(): void {
+  updateTableLandmarkLabel();
+}
+
+// ─── Focus safety utility ─────────────────────────────────────────────────────
+
+/**
+ * Redirect focus from `el` to `fallback` if `el` is the current active element.
+ * Call before removing or hiding any DOM node that might be focused.
+ * Prevents focus falling to <body> when a focused element is mutated out of view.
+ */
+export function redirectFocusIfActive(el: HTMLElement, fallback: HTMLElement): void {
+  if (document.activeElement === el) fallback.focus();
+}
+
+// ─── Live region announcements ────────────────────────────────────────────────
+
+/**
+ * Create the aria-live="polite" region and append it to <body>.
+ * Idempotent — no-op if already initialised.
+ * Called from initLandmarks() so the region is always available when landmarks exist.
+ */
+function initLiveRegion(): void {
+  if (_liveRegion) return;
+  _liveRegion = document.createElement('div');
+  _liveRegion.setAttribute('aria-live', 'polite');
+  _liveRegion.setAttribute('aria-atomic', 'true');
+  _liveRegion.style.cssText = VISUALLY_HIDDEN_CSS;
+  document.body.appendChild(_liveRegion);
+}
+
+/**
+ * Announce `text` to screen readers via the aria-live region.
+ * Clears the region first to guarantee re-announcement even when text repeats.
+ * Debounced — rapid successive calls keep only the latest text (prevents stacking).
+ */
+export function announce(text: string): void {
+  if (!_liveRegion) return;
+  _liveRegion.textContent = '';
+  if (_announceTimer !== null) clearTimeout(_announceTimer);
+  _announceTimer = setTimeout(() => {
+    if (_liveRegion) _liveRegion.textContent = text;
+    _announceTimer = null;
+  }, 0);
+}
+
 // ─── Button label ─────────────────────────────────────────────────────────────
 
 function _updateButtonLabel(btn: HTMLButtonElement, piece: Piece): void {
-  const stageLabel =
-    isPlaced(piece)  ? 'Placed'   :
-    isOnTable(piece) ? 'On table' :
-    isInBench(piece) ? 'In bench' :
-                       'Unknown';
-
-  btn.setAttribute(
-    'aria-label',
-    `Piece ${piece.index} — Palette ${piece.paletteIndex + 1}, ` +
-    `row ${piece.gridCoord.row + 1}, column ${piece.gridCoord.col + 1}, ` +
-    `${stageLabel}`,
-  );
+  // Classification-only label — concise, no IDs, no position metadata (Story 42a).
+  const label =
+    piece.edgeType === 'corner' ? 'Corner piece' :
+    piece.edgeType === 'edge'   ? 'Edge piece'   :
+                                  'Interior piece';
+  btn.setAttribute('aria-label', label);
 }
 
 // ─── Button lifecycle ─────────────────────────────────────────────────────────
@@ -273,7 +346,14 @@ export function createBenchButton(piece: Piece): HTMLButtonElement {
 
   // Enter / Space — spiral extraction. See docs/spike-keyboard-focus.md §9.9.
   // [/] filter cycling is global (scene.ts window handler) — not on individual buttons.
+  // Escape — deselect, return focus to bench landmark (stable recovery point).
+  //   Blur fires _onBenchBlur → setFocusedPiece(null) → clears focus ring.
   btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      document.getElementById(LANDMARK_BENCH_ID)?.focus();
+      return;
+    }
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
 
@@ -289,6 +369,7 @@ export function createBenchButton(piece: Piece): HTMLButtonElement {
 
     // Extract — reconcileBenchState fires inside extractPieceFromBench
     _onBenchActivate(piece.id);
+    announce('Activated');
 
     // Focus continuation — keyboard only, never fires for mouse or drag.
     requestAnimationFrame(() => {
@@ -483,24 +564,47 @@ export function setActiveFilterButton(filterId: string): void {
 // ─── Table buttons ────────────────────────────────────────────────────────────
 
 /**
- * Compute the aria-label for a table button in its default (not-held) state.
- * Row/col are 1-based for human-readable output.
+ * Set the default table button label — state-only, no position metadata (Story 42a).
  */
-function _updateTableButtonLabel(btn: HTMLButtonElement, piece: Piece): void {
-  btn.setAttribute(
-    'aria-label',
-    `Piece ${piece.index} — row ${piece.gridCoord.row + 1}, ` +
-    `column ${piece.gridCoord.col + 1}, On table`,
-  );
+function _updateTableButtonLabel(btn: HTMLButtonElement, _piece: Piece): void {
+  btn.setAttribute('aria-label', 'Piece');
 }
 
 /**
- * Update the aria-label of an existing table button to the default "On table" state.
- * Called after put-down to restore the label from "Held".
+ * Restore a table button label from "Held" (or any transient state).
+ * Cluster-aware and placed-aware — Story 42a state-only labels:
+ *   Placed         → "Placed"
+ *   Primary of N≥2 → "Group of N"
+ *   Solo / non-primary member → "Piece"
+ *
+ * Called from scene.ts after put-down and after board snap.
+ * Also called from syncClusterTabStops, which handles the primary-label case
+ * independently — both are idempotent so order doesn't matter.
  */
 export function updateTableButtonLabel(piece: Piece): void {
   const btn = _buttonMap.get(piece.id);
-  if (btn) _updateTableButtonLabel(btn, piece);
+  if (!btn) return;
+
+  if (isPlaced(piece)) {
+    btn.setAttribute('aria-label', 'Placed');
+    return;
+  }
+
+  const state = usePuzzleStore.getState();
+  const cluster = piece.clusterId ? state.groupsById[piece.clusterId] : null;
+  if (cluster && cluster.pieceIds.length > 1) {
+    // Identify primary = lowest piece.index in cluster
+    const members = cluster.pieceIds
+      .map((id) => state.piecesById[id])
+      .filter(Boolean) as Piece[];
+    const primary = [...members].sort((a, b) => a.index - b.index)[0];
+    if (primary?.id === piece.id) {
+      btn.setAttribute('aria-label', `Group of ${cluster.pieceIds.length}`);
+      return;
+    }
+  }
+
+  btn.setAttribute('aria-label', 'Piece');
 }
 
 /**
@@ -545,16 +649,19 @@ export function createTableButton(piece: Piece): HTMLButtonElement {
 // ─── Cluster tab stops ────────────────────────────────────────────────────────
 
 /**
- * Set tabIndex on all buttons for a cluster's members.
- * The lowest-index member gets tabIndex=0 (the single tab stop for the cluster).
- * All other members get tabIndex=-1 (reachable only via the primary button).
+ * Set tabIndex and aria-label on all buttons for a cluster's members.
+ * Primary (lowest index) gets tabIndex=0 and "Group of N".
+ * All other members get tabIndex=-1 and "Piece" (not reachable via Tab).
  *
  * Call from snap.ts whenever a cluster forms or gains a new member.
  */
 export function syncClusterTabStops(clusterPieces: Piece[]): void {
   const sorted = [...clusterPieces].sort((a, b) => a.index - b.index);
+  const n = sorted.length;
   sorted.forEach((piece, i) => {
     setButtonTabIndex(piece.id, i === 0 ? 0 : -1);
+    const btn = _buttonMap.get(piece.id);
+    if (btn) btn.setAttribute('aria-label', i === 0 ? `Group of ${n}` : 'Piece');
   });
 }
 

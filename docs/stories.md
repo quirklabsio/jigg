@@ -42,6 +42,32 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ## Session Notes
 
+### Story 42 — Focus coordination + screen reader QA (2026-04-15)
+
+**`src/utils/aria.ts`**
+- Added `_lastTableLabel: string` module var — dedup cache for reactive table landmark label.
+- Added `updateTableLandmarkLabel()` — reads `usePuzzleStore`, computes piece count or "puzzle complete", writes `aria-label` only when text changes. Dedup prevents redundant DOM writes and spurious screen reader re-announcements.
+- Added `initTableLandmarkLabel()` — calls `usePuzzleStore.subscribe(() => updateTableLandmarkLabel())` + immediate initial call. Single subscription replaces scattered imperative call sites.
+- Added `redirectFocusIfActive(el, fallback)` — checks `document.activeElement === el`; if true, calls `fallback.focus()`. Called before hiding the strip handle in bench collapse to prevent focus dropping to `<body>`.
+- Added Escape handler in `createBenchButton` keydown: `e.preventDefault(); document.getElementById(LANDMARK_BENCH_ID)?.focus()`. Blur fires `_onBenchBlur` → `setFocusedPiece(null)` → clears focus ring. Bench landmark is the stable recovery point.
+
+**`src/canvas/bench.ts`**
+- Added `LANDMARK_TABLE_ID` and `redirectFocusIfActive` to imports from `../utils/aria`.
+- `setTrayOpen`: added `if (open && _benchCollapsed) return` guard at top — permanently collapsed bench cannot be reopened by any code path (T key, strip handle click, programmatic call).
+- `applyBenchCollapseEffects`: three additions — (1) focus redirect: if `_benchStripHandle` is `document.activeElement`, redirect to `#landmark-table` before DOM mutations; (2) strip handle hide: `_benchStripHandle.style.display = 'none'`; (3) strip handle tab removal: `_benchStripHandle.tabIndex = -1`. All after `_benchCollapsed = true` guard and before `_onBenchCollapse()`.
+
+**`src/canvas/scene.ts`**
+- Added `initTableLandmarkLabel` to aria.ts import.
+- Called `initTableLandmarkLabel()` immediately after `initBenchButtons()` — wires the store subscription and sets initial label.
+- T key handler: added two early-return guards after the held-piece guard — `if (_benchCollapsed) return` and `if (!usePuzzleStore.getState().pieces.some(isInBench)) return`. Both are complete no-ops: no state change, no hint update, no sound.
+
+**`docs/accessibility.md`**
+- §9.4 Key Binding Map: updated column headers to match new two-column model (Bench mode / Table mode / Global). Updated T row to document all three no-op conditions. Updated ] / [ rows to say "non-empty filter". Updated Escape rows for both contexts. Added T guard notes below table.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 39 — Spec + prerequisites (2026-04-12)
 
 `jigg-spec/accessibility.md` created and pushed first (before any `src/` changes). Submodule pointer updated.
@@ -736,5 +762,39 @@ Rule: **never call drawCutSegments without first lineTo to pts[0]** — the curs
 **`docs/decisions.md`** — table reconciliation pattern + `_heldRef` rationale + `applyBoardSnap` extraction + spatial hash deferral documented.
 
 **`docs/gotchas.md`** — keyboard snap spatial hash gotcha added with workaround and deferral note.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
+### Story 42a — Screen reader enhancements (2026-04-15)
+
+Core principle: every announcement answers "what do I do next?" in ≤3 words.
+
+**`src/utils/aria.ts`**
+- Added `_liveRegion: HTMLElement | null` and `_announceTimer` module vars.
+- Added private `initLiveRegion()` — appended to `document.body`, `aria-live="polite"` + `aria-atomic="true"`, visually hidden. Called from `initLandmarks()`.
+- Added exported `announce(text)` — debounced: clears text, clearTimeout, setTimeout(0) sets text. Prevents stacking rapid announcements; latest wins.
+- `initLandmarks()`: bench landmark label → `"Piece tray"` (no instruction copy), calls `initLiveRegion()`, resets `_lastTableLabel = ''`.
+- `updateTableLandmarkLabel()` / `initTableLandmarkLabel()` simplified — static `"Puzzle table"` label, no store subscription (count no longer shown). Dedup via `_lastTableLabel` unchanged.
+- `_updateButtonLabel` (bench): edgeType-based — `"Corner piece"` / `"Edge piece"` / `"Interior piece"`.
+- `_updateTableButtonLabel` (table, private): always `"Piece"`.
+- `updateTableButtonLabel` (exported, cluster-aware): `"Placed"` for placed pieces; `"Group of N"` for cluster primary (lowest `piece.index`); `"Piece"` otherwise.
+- `syncClusterTabStops`: now also sets `aria-label` — primary gets `"Group of N"`, members get `"Piece"`.
+- `createBenchButton` keydown: `announce('Activated')` after `_onBenchActivate`.
+
+**`src/canvas/bench.ts`**
+- Added `announce` to imports from `aria.ts`.
+- Added `FILTER_ANNOUNCE` constant mapping filter keys → SR text (`'All pieces'`, `'Corners'`, `'Edges'`, `'Interior'`, `'Palette N'`).
+- `applyBenchFilter()`: announces filter name after applying. Palette zones use `'Palette N'` (1-based).
+- Strip handle `aria-label` changed from `'Open piece bench — or press T'` → `'Open piece tray'`.
+
+**`src/canvas/scene.ts`**
+- Added `announce` to aria.ts import.
+- `pickUp()`: simplified ARIA label to `"Held"`, added `announce('Picked up')`.
+- `putDown()`: removed `!piece.placed` guard — `updateTableButtonLabel` handles the placed case.
+- `dropPiece()`: added `announce('Dropped')`.
+- `applyBoardSnap()`: updates labels for all newly placed pieces via `updateTableButtonLabel`; announces `'Puzzle complete'` if `puzzleComplete`, else `'Placed'` (conditional prevents stacking).
+- T key handler: captures `trayOpen` before toggle; announces `'Puzzle table'` when closing tray (switching to table), `'Piece tray'` when opening tray (switching to bench).
 
 `npm run typecheck` passes clean. Zero suppressions.

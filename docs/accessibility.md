@@ -349,22 +349,26 @@ Cluster = single tab stop. Primary piece = lowest `PieceDefinition.index`. All o
 
 ### 9.4 Key Binding Map
 
-| Key | Bench context | Table context | Notes |
+| Key | Bench mode | Table mode | Global |
 |---|---|---|---|
-| `Tab` | Next bench piece | Next table piece/cluster | Browser native |
-| `Shift+Tab` | Previous bench piece | Previous table piece/cluster | Browser native |
-| `Enter` | Spiral extract | Pick up / put down | Never zoom-to-place |
-| `Space` | Spiral extract | Pick up / put down | `preventDefault()` required |
-| `]` | Next bench filter | — | Global when bench open; focuses first visible piece if bench not focused |
-| `[` | Previous bench filter | — | Global when bench open; focuses first visible piece if bench not focused |
-| `ArrowLeft/Right` | — | Move held piece | Table context only (Story 41b) |
-| `ArrowUp/Down` | — | Move held piece | Table context only (Story 41b) |
-| `Escape` | Deselect, return to landmark | Drop piece, return to table button | |
-| `T` | Toggle bench | Toggle bench | Safe in `role="application"` |
-| `R` | — | Rotate focused piece 90° CW | No bench action |
-| `Shift+B` | Background cycle | Background cycle | No AT conflict |
+| `Tab` | Next bench piece | Next table piece/cluster | — |
+| `Shift+Tab` | Previous bench piece | Previous table piece/cluster | — |
+| `Enter` / `Space` | Spiral extract | Pick up / put down | — |
+| `]` | Next non-empty filter | — | — |
+| `[` | Previous non-empty filter | — | — |
+| `Escape` | Deselect, return to bench landmark | Drop held piece, return to table button | — |
+| `R` | — | Rotate focused piece 90° CW | — |
+| `T` | Switch to table | Switch to bench (if has pieces) | No-op if collapsed, empty, or holding a piece |
+| `Shift+B` | Background cycle | Background cycle | Always |
 
-`[`/`]` cycle the bench filter strip globally whenever the bench is open (handled in `scene.ts` window keydown, not on individual buttons). First press when no bench piece is focused cycles the filter and jumps focus to the first visible piece. Subsequent presses cycle without losing bench focus. Arrow keys are reserved for piece movement on the table (Story 41b). Arrow key snap: no snap mid-movement. Snap evaluated on put-down (Enter/Space) only — matches pointer drag model.
+`[`/`]` cycle the bench filter strip globally whenever the bench is open (handled in `scene.ts` window keydown, not on individual buttons). Skips empty filters. First press when no bench piece is focused cycles the filter and jumps focus to the first visible piece. Arrow keys are reserved for piece movement on the table (post-launch). Arrow key snap: no snap mid-movement. Snap evaluated on put-down (Enter/Space) only — matches pointer drag model.
+
+`T` guards (all are no-ops, no state change, no sound):
+- While holding a piece (`_heldRef.value !== null`)
+- After permanent bench collapse (`_benchCollapsed === true`)
+- When bench has no pieces (all extracted but collapse callback not yet fired)
+
+`Enter` always triggers spiral extraction from bench. `zoomToPlacePiece()` is pointer-only. Dedicated zoom-preview key deferred post-launch.
 
 `Enter` always triggers spiral extraction. `zoomToPlacePiece()` is pointer-only. Dedicated zoom-preview key deferred post-Story 42.
 

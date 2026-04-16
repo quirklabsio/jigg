@@ -15,6 +15,7 @@ import { isInBench, isOnTable, type Piece } from '../puzzle/types';
 import { hexToRgb } from '../puzzle/cutter';
 import {
   LANDMARK_BENCH_ID,
+  LANDMARK_TABLE_ID,
   removeButton,
   focusButton,
   setButtonTabIndex,
@@ -27,8 +28,18 @@ import {
   createTableButton,
   applyBenchTabState,
   getAriaKeyboardMode,
+  redirectFocusIfActive,
+  announce,
   type FilterDef,
 } from '../utils/aria';
+
+// Filter ID → concise announcement text (Story 42a — filter name only, no sentence).
+const FILTER_ANNOUNCE: Record<string, string> = {
+  all:      'All pieces',
+  corner:   'Corners',
+  edge:     'Edges',
+  interior: 'Interior',
+};
 import {
   isDraggingCanvas,
   insertGroupAABB,
@@ -329,10 +340,27 @@ function isBenchEmpty(): boolean {
 function applyBenchCollapseEffects(): void {
   if (_benchCollapsed) return;
   _benchCollapsed = true;
+
+  // Guard focus BEFORE mutating DOM — prevents focus falling to <body> when the
+  // strip handle is hidden while it is the active element (e.g. last piece dragged
+  // out while strip handle held keyboard focus).
+  if (_benchStripHandle) {
+    const tableLandmark = document.getElementById(LANDMARK_TABLE_ID) as HTMLElement | null;
+    if (tableLandmark) redirectFocusIfActive(_benchStripHandle, tableLandmark);
+  }
+
   const benchLandmark = document.getElementById(LANDMARK_BENCH_ID) as HTMLElement | null;
   if (benchLandmark) benchLandmark.inert = true;
+
   _onBenchCollapse(); // fires setKeyboardMode('table') + setBenchCollapsed() in scene.ts
   setTrayOpen(false);
+
+  // Hide strip handle permanently — bench can never reopen after collapse.
+  // tabIndex=-1 removes it from tab order; display:none removes it visually and from AT.
+  if (_benchStripHandle) {
+    _benchStripHandle.style.display = 'none';
+    _benchStripHandle.tabIndex = -1;
+  }
 }
 
 function reconcileBenchState(): void {
@@ -400,6 +428,11 @@ export function applyBenchFilter(filter: TrayFilter): void {
 
   // Resolve focus after tabIndex values have settled
   handleFilterChangeFocus();
+
+  // Announce filter name to screen readers — filter name only, no sentence (Story 42a).
+  const name = FILTER_ANNOUNCE[filter as string]
+    ?? `Palette ${parseInt((filter as string).slice(8), 10) + 1}`;
+  announce(name);
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
@@ -861,6 +894,7 @@ function layoutTrayPieces(): void {
 // ─── Tray open / close ────────────────────────────────────────────────────────
 
 export function setTrayOpen(open: boolean): void {
+  if (open && _benchCollapsed) return; // permanently collapsed — ignore open requests
   if (!_app || !_viewport) return;
   usePuzzleStore.getState().setTrayOpen(open);
   targetTrayHeight = open ? TRAY_HEIGHT_OPEN : TRAY_HEIGHT_CLOSED;
@@ -1755,7 +1789,7 @@ export function initTray(
   if (_benchStripHandle) _benchStripHandle.remove();
   const stripHandle = document.createElement('button');
   stripHandle.id = 'bench-strip-handle';
-  stripHandle.setAttribute('aria-label', 'Open piece bench — or press T');
+  stripHandle.setAttribute('aria-label', 'Open piece tray');
   stripHandle.tabIndex = -1; // bench starts open — not reachable via Tab until closed
   stripHandle.style.cssText = [
     'position:fixed',

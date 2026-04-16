@@ -72,7 +72,8 @@ When a story closes: add session notes to `stories.md`, mark `[x]` here, remove 
 
 - [ ] **Story 41b** — Arrow-key movement; grid-aligned incremental movement in world space when piece is held. Step size = one grid cell width in world space. No snap or merge mid-movement — snap evaluated on put-down only. R key rotates 90° when piece/group is focused (canvas context only).
 
-- [ ] **Story 42** — Focus coordination; tray↔board direct tab-order transition (no intermediary button). Board landmark `aria-label` updates reactively with on-canvas piece count. Escape: tray = deselect + return to tray landmark; canvas = drop held piece + return to board button. Tray close moves focus to tray handle focusable element.
+- [x] **Story 42** — Focus coordination; tray↔board direct tab-order transition (no intermediary button). Board landmark `aria-label` updates reactively with on-canvas piece count. Escape: tray = deselect + return to tray landmark; canvas = drop held piece + return to board button. Tray close moves focus to tray handle focusable element.
+- [x] **Story 42a** — Screen reader enhancements; minimal, high-signal announcements. Bench labels → classification only (`Corner/Edge/Interior piece`). Table labels → state only (`Piece/Group of N/Held/Placed`). Landmark labels → `"Piece tray"` / `"Puzzle table"`. Live region `announce()` with debounce. Filter change, extraction, pick-up, drop, place, mode switch, and puzzle-complete announcements.
 
 ---
 
@@ -158,10 +159,9 @@ DONE     Story 29         (Cleanup)                                   ✓
          Stories 32–37e   (Tray epic)                                 ✓
 
          Story 40         (Bench keyboard nav)                         ✓
-NEXT     Story 41a        (Canvas pick-up/put-down model)
-         Stories 41a+41b  (Canvas keyboard — re-estimate after Story 39 closes)
-         Story 42         (Focus coordination)
-         Story 44         (File picker — unblocks real playtesting)
+         Stories 41a+41b  (Canvas keyboard — pick-up/put-down + R rotate) ✓
+         Story 42         (Focus coordination)                         ✓
+NEXT     Story 44         (File picker — unblocks real playtesting)
 
 THEN     Stories 31, 43   (Specs — tray + ingestion)
          Stories 45–52    (Ingestion + Shell — content + chrome)

@@ -21,7 +21,7 @@ import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
 import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getVisibleBenchOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter, registerBenchCollapseHandler } from './bench';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
-import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton, registerTableHandlers, updateTableButtonLabel, applyBenchTabState } from '../utils/aria';
+import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton, registerTableHandlers, updateTableButtonLabel, applyBenchTabState, initTableLandmarkLabel, announce } from '../utils/aria';
 import {
   loadPreferences,
   applyPreferences,
@@ -617,8 +617,18 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
         if (f) applyShadowPlaced(f);
       }
 
-      if (usePuzzleStore.getState().puzzleComplete) {
+      // Update ARIA labels for all placed pieces (Story 42a: placed → "Placed").
+      for (const pid of result.pieceIds) {
+        const p = usePuzzleStore.getState().piecesById[pid];
+        if (p) updateTableButtonLabel(p);
+      }
+
+      const puzzleComplete = usePuzzleStore.getState().puzzleComplete;
+      if (puzzleComplete) {
         onComplete(app, hitLayer, usePuzzleStore.getState().pieces.length);
+        announce('Puzzle complete');
+      } else {
+        announce('Placed');
       }
 
       reconcileTableState(heldRef);
@@ -690,6 +700,10 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
 
   initLandmarks();
   initBenchButtons(usePuzzleStore.getState().pieces);
+  // Reactive table landmark label — subscribes to store, updates on every piece
+  // state change. No manual call sites needed. Call after initLandmarks so
+  // _landmarkTable is populated before the first label write.
+  initTableLandmarkLabel();
   // Buttons were created in piece-index order (store order). Reorder DOM to match
   // _trayDisplayOrder (the shuffled visual layout order) so Tab follows the grid
   // left→right, top→bottom rather than creation order.
@@ -766,18 +780,12 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       tweenSpriteRotation(sprite, sprite.rotation, sprite.rotation + LIFT_ROTATION, 80);
     }
 
-    // Update ARIA label to signal held state
-    const piece = usePuzzleStore.getState().piecesById[pieceId];
+    // Update ARIA label to signal held state (Story 42a: state-only, no metadata)
     const btn = document.querySelector<HTMLButtonElement>(
       `#${LANDMARK_TABLE_ID} [data-piece-id="${pieceId}"]`,
     );
-    if (btn && piece) {
-      btn.setAttribute(
-        'aria-label',
-        `Piece ${piece.index} — row ${piece.gridCoord.row + 1}, ` +
-        `column ${piece.gridCoord.col + 1}, Held`,
-      );
-    }
+    if (btn) btn.setAttribute('aria-label', 'Held');
+    announce('Picked up');
   }
 
   function putDown(pieceId: string): void {
@@ -792,9 +800,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     // Run snap checks — may place piece or merge cluster
     checkSnapAtCurrentPosition(pieceId);
 
-    // Restore "On table" label (if piece wasn't just placed)
+    // Restore label from "Held". updateTableButtonLabel is placed-aware:
+    // placed → "Placed", cluster primary → "Group of N", else → "Piece".
+    // applyBoardSnap also calls updateTableButtonLabel for placed pieces — idempotent.
     const piece = usePuzzleStore.getState().piecesById[pieceId];
-    if (piece && !piece.placed) updateTableButtonLabel(piece);
+    if (piece) updateTableButtonLabel(piece);
   }
 
   function dropPiece(pieceId: string): void {
@@ -803,6 +813,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     const piece = usePuzzleStore.getState().piecesById[pieceId];
     if (piece) updateTableButtonLabel(piece);
     focusButton(pieceId);
+    announce('Dropped');
   }
 
   registerTableHandlers({
@@ -925,7 +936,14 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (e.key === 't' || e.key === 'T') {
       // No-op while holding a piece — no side effects, no sound, no state change.
       if (_heldRef.value) return;
-      setTrayOpen(!usePuzzleStore.getState().trayOpen);
+      // No-op after permanent bench collapse — bench cannot reopen.
+      if (_benchCollapsed) return;
+      // No-op when bench has no pieces — treat as collapsed (edge case: all pieces
+      // extracted via drag before the collapse callback fired).
+      if (!usePuzzleStore.getState().pieces.some(isInBench)) return;
+      const _trayCurrentlyOpen = usePuzzleStore.getState().trayOpen;
+      setTrayOpen(!_trayCurrentlyOpen);
+      announce(_trayCurrentlyOpen ? 'Puzzle table' : 'Piece tray');
       return;
     }
     // R — rotate focused table piece or cluster 90° CW.
