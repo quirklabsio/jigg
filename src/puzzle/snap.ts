@@ -1,10 +1,31 @@
 import type { Sprite } from 'pixi.js';
 import type { Piece } from './types';
+import { isOnTable } from './types';
 import { usePuzzleStore } from '../store/puzzleStore';
+import {
+  removeButton,
+  focusButton,
+  syncClusterTabStops,
+  syncTableButtonOrder,
+  LANDMARK_TABLE_ID,
+} from '../utils/aria';
 
 const SNAP_THRESHOLD_SQ = 40 * 40;
 const BOARD_SNAP_THRESHOLD_SQ = 60 * 60;
 const TWO_PI = 2 * Math.PI;
+
+/**
+ * Return the lowest-index on-table, unplaced piece ID.
+ * Used for focus handoff after a piece is placed on the board.
+ * Store-only — no DOM dependency.
+ */
+function getFirstTablePieceId(): string | null {
+  const pieces = usePuzzleStore.getState().pieces;
+  const onTable = pieces
+    .filter((p) => isOnTable(p) && !p.placed)
+    .sort((a, b) => a.index - b.index);
+  return onTable[0]?.id ?? null;
+}
 
 // [dCol, dRow, ldx, ldy]
 // ldx/ldy are unit scale factors — multiply by pieceW/pieceH to get local-space delta
@@ -131,6 +152,17 @@ export function checkAndApplySnap(
           }
         }
         console.log('MERGED:', absorbedId, '→', survivorId, 'new piece count:', survivor.pieceIds.length);
+
+        // Keyboard ARIA: sync cluster tab stops and table button order.
+        // Primary tab stop = lowest-index member; all others tabIndex=-1.
+        const survivorPieces = survivor.pieceIds
+          .map((id) => updState.piecesById[id])
+          .filter(Boolean) as Piece[];
+        const onTablePieces = survivorPieces.filter(isOnTable);
+        if (onTablePieces.length > 0) {
+          syncClusterTabStops(onTablePieces);
+          syncTableButtonOrder();
+        }
       }
 
       result = { survivorId, absorbedId };
@@ -201,6 +233,21 @@ export function checkAndApplyBoardSnap(
 
     const totalPlaced = usePuzzleStore.getState().pieces.filter((p) => p.placed).length;
     console.log('BOARD SNAP:', groupId, '| pieces placed:', group.pieceIds.length, '| total:', totalPlaced);
+
+    // Keyboard ARIA: remove buttons for all newly placed pieces, then hand focus
+    // off to the next table piece so the user can continue without re-orienting.
+    for (const pid of group.pieceIds) {
+      removeButton(pid);
+    }
+    syncTableButtonOrder();
+
+    const nextId = getFirstTablePieceId();
+    if (nextId) {
+      focusButton(nextId);
+    } else {
+      // Table is now empty — puzzle is complete or all remaining pieces placed.
+      document.getElementById(LANDMARK_TABLE_ID)?.focus();
+    }
   }
 
   return snapPiece ? { groupId, pieceIds: [...group.pieceIds] } : null;

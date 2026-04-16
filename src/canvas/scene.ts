@@ -18,10 +18,10 @@ import { onComplete } from '../puzzle/completion';
 import { rotateGroup } from '../puzzle/rotate';
 import { checkAndApplySnap, checkAndApplyBoardSnap } from '../puzzle/snap';
 import { usePuzzleStore, type TrayFilter } from '../store/puzzleStore';
-import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter, registerBenchCollapseHandler } from './bench';
+import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoading, scrollBenchToId, spiralExtractPiece, getTrayDisplayOrder, getVisibleBenchOrder, getFilterDefs, getFirstVisibleBenchPieceId, applyBenchFilter, cycleFilter, registerBenchCollapseHandler } from './bench';
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
-import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton } from '../utils/aria';
+import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton, registerTableHandlers, updateTableButtonLabel, applyBenchTabState } from '../utils/aria';
 import {
   loadPreferences,
   applyPreferences,
@@ -79,21 +79,56 @@ const FOCUS_RING_COLOR     = 0xff00ff; // neon magenta — matches SNAP_HIGHLIGH
 const FOCUS_RING_THICKNESS = 2;        // screen-space px, non-scaling
 const FOCUS_RING_PADDING   = 4;        // px outside piece bounding box
 
-let _focusRing: Graphics | null = null;
-let _focusedPieceId: string | null = null;
+// Discriminated union — ticker draws different bounds for each kind.
+// 'filter' is reserved for future filter-button focus (not yet wired).
+type FocusTarget =
+  | { kind: 'piece';   pieceId: string }
+  | { kind: 'cluster'; primaryPieceId: string; memberIds: string[] }
+  | { kind: 'filter';  filterId: string }
+  | null;
+
+let _focusRing:   Graphics    | null = null;
+let _focusTarget: FocusTarget        = null;
 
 // Track whether the most recent input was keyboard or pointer.
 // Focus ring and guardFocusWithinApp are suppressed after pointer events —
 // the ring should only appear from keyboard navigation (Tab / arrow keys).
 let _lastInputWasKeyboard = false;
 
+/**
+ * Set the focus target. Suppressed when last input was pointer (ring keyboard-only).
+ * Clearing (null) always allowed — used to dismiss the ring after blur/completion.
+ */
+function setFocusedTarget(target: FocusTarget): void {
+  if (target !== null && !_lastInputWasKeyboard) return;
+  _focusTarget = target;
+  if (!target) _focusRing?.clear();
+}
+
+/** Bench button focus — thin wrapper around setFocusedTarget for backward compat. */
 function setFocusedPiece(pieceId: string | null): void {
-  if (pieceId !== null && !_lastInputWasKeyboard) {
-    // Pointer-initiated focus — suppress ring entirely
-    return;
+  setFocusedTarget(pieceId ? { kind: 'piece', pieceId } : null);
+}
+
+/**
+ * Compute the screen-space AABB that wraps all member sprites.
+ * Returns null if no sprites found (e.g. cluster dissolved after board snap).
+ */
+function getClusterScreenAABB(
+  memberIds: string[],
+  spriteMap: Map<string, Sprite>,
+): { x: number; y: number; width: number; height: number } | null {
+  const sprites = memberIds.map((id) => spriteMap.get(id)).filter(Boolean) as Sprite[];
+  if (!sprites.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const sprite of sprites) {
+    const b = sprite.getBounds();
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
   }
-  _focusedPieceId = pieceId;
-  if (!pieceId) _focusRing?.clear();
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 /**
@@ -103,29 +138,72 @@ function setFocusedPiece(pieceId: string | null): void {
  * Also registers the per-frame redraw ticker.
  */
 function initFocusRing(app: Application, spriteMap: Map<string, Sprite>): void {
-  _focusRing         = new Graphics();
-  _focusRing.zIndex  = 1000; // above benchContainer (500) and viewport (0)
+  _focusRing        = new Graphics();
+  _focusRing.zIndex = 1000; // above benchContainer (500) and viewport (0)
   app.stage.addChild(_focusRing);
 
-  app.ticker.add(() => {
-    if (!_focusRing) return;
-    if (_focusedPieceId) {
-      const sprite = spriteMap.get(_focusedPieceId);
-      if (sprite) {
-        const bounds = sprite.getBounds(); // screen-space bounds
-        _focusRing.clear();
-        _focusRing
-          .rect(
-            bounds.x      - FOCUS_RING_PADDING,
-            bounds.y      - FOCUS_RING_PADDING,
-            bounds.width  + FOCUS_RING_PADDING * 2,
-            bounds.height + FOCUS_RING_PADDING * 2,
-          )
-          .stroke({ color: FOCUS_RING_COLOR, width: FOCUS_RING_THICKNESS });
-      }
-    } else {
-      _focusRing.clear();
+  // DRY helper — draws the ring rect from a {x,y,width,height} bounds object.
+  // setFocusedTarget owns all _focusRing.clear() calls — no clear() at call sites.
+  function drawRingFromBounds(b: { x: number; y: number; width: number; height: number }): void {
+    _focusRing!.clear()
+      .rect(
+        b.x      - FOCUS_RING_PADDING,
+        b.y      - FOCUS_RING_PADDING,
+        b.width  + FOCUS_RING_PADDING * 2,
+        b.height + FOCUS_RING_PADDING * 2,
+      )
+      .stroke({ color: FOCUS_RING_COLOR, width: FOCUS_RING_THICKNESS });
+  }
+
+  // PixiJS v8 removed worldVisible. Walk the parent chain to check global visibility.
+  // Used to suppress the ring on filtered-out bench pieces (container.visible=false)
+  // without clearing _focusTarget — so the ring returns if the filter is removed.
+  function isWorldVisible(sprite: Sprite): boolean {
+    let node: Sprite['parent'] = sprite;
+    while (node) {
+      if (!node.visible) return false;
+      node = node.parent;
     }
+    return true;
+  }
+
+  app.ticker.add(() => {
+    if (!_focusRing || !_focusTarget) return;
+
+    if (_focusTarget.kind === 'piece') {
+      const sprite = spriteMap.get(_focusTarget.pieceId);
+      // Detached guard — sprite removed from scene graph (e.g. mid-extraction).
+      // Clears focus target so stale ring doesn't persist.
+      if (!sprite || !sprite.parent) {
+        setFocusedTarget(null); // setFocusedTarget owns the ring clear
+        return;
+      }
+      // Visibility guard — sprite is in scene graph but hidden (e.g. filtered out in bench).
+      // Keep _focusTarget alive so ring returns when filter is cleared; just don't draw.
+      if (!isWorldVisible(sprite)) { _focusRing.clear(); return; }
+      drawRingFromBounds(sprite.getBounds());
+
+    } else if (_focusTarget.kind === 'cluster') {
+      // All members must be present and attached — stale clusters clear immediately
+      const allPresent = _focusTarget.memberIds.every((id) => {
+        const s = spriteMap.get(id);
+        return s && s.parent;
+      });
+      if (!allPresent) {
+        setFocusedTarget(null);
+        return;
+      }
+      // If any member is hidden (filtered out), suppress ring without clearing target
+      const allVisible = _focusTarget.memberIds.every((id) => {
+        const s = spriteMap.get(id);
+        return s && isWorldVisible(s);
+      });
+      if (!allVisible) { _focusRing.clear(); return; }
+      const bounds = getClusterScreenAABB(_focusTarget.memberIds, spriteMap);
+      if (bounds) drawRingFromBounds(bounds);
+      else        setFocusedTarget(null);
+    }
+    // kind === 'filter' — no ring for filter buttons
   });
 }
 
@@ -178,23 +256,39 @@ export function setKeyboardMode(mode: KeyboardMode): void {
   const tableLandmark = document.getElementById(LANDMARK_TABLE_ID) as HTMLElement | null;
   if (!benchLandmark || !tableLandmark) return;
 
+  // Semantic signal for AT
   benchLandmark.inert = mode !== 'bench';
   tableLandmark.inert = mode !== 'table';
 
-  if (mode === 'bench') {
-    const firstId = getFirstVisibleBenchPieceId();
-    if (firstId) {
-      requestAnimationFrame(() => focusButton(firstId));
-    }
-  } else {
-    const firstId = getFirstTablePiece();
-    if (firstId) {
-      requestAnimationFrame(() => focusButton(firstId));
-    }
-    // table is empty — intentionally let focus fall to browser chrome
-  }
+  // Belt-and-suspenders: inert alone is unreliable in some browser/extension
+  // environments. Explicitly sweep tabIndex on every mode switch so Tab order
+  // is correct regardless of environment.
+  applyBenchTabState(mode);
+  // Clear stale canvas focus before switching contexts.
+  // Must be before requestAnimationFrame — prevents one-frame ring flash.
+  setFocusedTarget(null);
 
-  updateTHint(mode, !_benchCollapsed);
+  // Focus jump — single rAF so DOM has settled after inert+tabIndex changes
+  requestAnimationFrame(() => {
+    if (mode === 'bench') {
+      const firstId = getFirstVisibleBenchPieceId();
+      if (firstId) focusButton(firstId);
+    } else {
+      const firstId = getFirstTablePiece();
+      if (firstId) {
+        focusButton(firstId);
+      } else {
+        // Table is empty — focus the landmark itself so the user has a recovery
+        // point. tabIndex=-1 ensures programmatic focus works even though the
+        // landmark is not natively focusable.
+        tableLandmark.tabIndex = -1;
+        tableLandmark.focus();
+      }
+    }
+  });
+
+  const benchExists = usePuzzleStore.getState().pieces.some(isInBench);
+  updateTHint(mode, benchExists);
 }
 
 export function getKeyboardMode(): KeyboardMode {
@@ -436,10 +530,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const shadowMap = new Map<string, DropShadowFilter>();
 
   setDragStartCallback((groupId) => {
-    // Clear bench focus ring immediately on drag start — don't leave a bench piece
-    // highlighted while the user is interacting with the table.
-    _focusedPieceId = null;
-    _focusRing?.clear();
+    // Clear focus ring immediately on drag start — pointer takes over.
+    setFocusedTarget(null); // setFocusedTarget owns the ring clear
 
     const group = usePuzzleStore.getState().groupsById[groupId];
     if (!group) return;
@@ -458,7 +550,23 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 
-  setBoardSnapCallback((groupId) => {
+  // ── Board snap — shared logic for both drag and keyboard put-down ─────────────
+  // Extracted into a named function so checkSnapAtCurrentPosition (keyboard path)
+  // reuses the same animation, shadow, completion, and reconciliation logic as drag.
+
+  /** Clear keyboard state when all pieces are placed — puzzle is complete. */
+  function reconcileTableState(_heldPieceIdRef: { value: string | null }): void {
+    const allPlaced = usePuzzleStore.getState().pieces.every((p) => p.placed);
+    if (!allPlaced) return;
+    // All pieces placed — puzzle complete. Keyboard cleanup.
+    setFocusedTarget(null);
+    _heldPieceIdRef.value = null;
+  }
+
+  function applyBoardSnap(
+    groupId: string,
+    heldRef: { value: string | null },
+  ): { groupId: string; pieceIds: string[] } | null {
     const result = checkAndApplyBoardSnap(groupId, spriteMap);
     if (result) {
       if (usePuzzleStore.getState().reducedMotion) {
@@ -512,9 +620,15 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
       if (usePuzzleStore.getState().puzzleComplete) {
         onComplete(app, hitLayer, usePuzzleStore.getState().pieces.length);
       }
+
+      reconcileTableState(heldRef);
     }
     return result;
-  });
+  }
+
+  // Dummy held ref for the drag path — drag doesn't manage _heldPieceId.
+  const _dragHeldRef = { value: null as string | null };
+  setBoardSnapCallback((groupId) => applyBoardSnap(groupId, _dragHeldRef));
 
   // ── Tray ───────────────────────────────────────────────────────────────────
   // initTray moves all in-tray containers into the tray container, applies
@@ -588,6 +702,141 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     (dir) => cycleFilter(dir as 1 | -1),
   );
   initFilterButtons(getFilterDefs());
+
+  // ── Table keyboard — pick-up / put-down model ─────────────────────────────
+  // Mirrors the bench handler registration pattern. Closures capture app, spriteMap,
+  // scale, and the heldRef so all keyboard paths share the same animation logic.
+
+  // Held piece state — local to loadScene closure, shared by all table keyboard fns.
+  const _heldRef = { value: null as string | null };
+
+  const LIFT_ROTATION = 0.0175; // 1° in radians — visual lift cue on pick-up
+
+  /** Simple single-sprite rotation tween for keyboard pick-up / put-down. */
+  function tweenSpriteRotation(sprite: Sprite, from: number, to: number, ms: number): void {
+    if (Math.abs(to - from) < 1e-6) return;
+    const start = performance.now();
+    const tickerFn = () => {
+      if (usePuzzleStore.getState().reducedMotion) {
+        sprite.rotation = to;
+        app.ticker.remove(tickerFn);
+        return;
+      }
+      const t = Math.min((performance.now() - start) / ms, 1);
+      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      sprite.rotation = from + (to - from) * ease;
+      if (t >= 1) app.ticker.remove(tickerFn);
+    };
+    app.ticker.add(tickerFn);
+  }
+
+  /** Snap a radian rotation to the nearest 90° increment. */
+  function snapToNearest90(r: number): number {
+    return Math.round(r / (Math.PI / 2)) * (Math.PI / 2);
+  }
+
+  /** Return all Piece objects currently in a cluster (by clusterId). */
+  function getClusterMembers(clusterId: string): ReturnType<typeof usePuzzleStore.getState>['pieces'] {
+    const state = usePuzzleStore.getState();
+    const group = state.groupsById[clusterId];
+    if (!group) return [];
+    return group.pieceIds.map((id) => state.piecesById[id]).filter(Boolean) as typeof state.pieces;
+  }
+
+  /** Run snap checks (piece-to-piece then board) at the piece's current position. */
+  function checkSnapAtCurrentPosition(pieceId: string): void {
+    const piece = usePuzzleStore.getState().piecesById[pieceId];
+    if (!piece?.clusterId) return;
+    let groupId = piece.clusterId;
+
+    // Piece-to-piece snap — may merge the piece into a neighbouring cluster
+    const snapResult = checkAndApplySnap(groupId, spriteMap);
+    if (snapResult) groupId = snapResult.survivorId;
+
+    // Board snap — may place the group; drives animation, completion, reconciliation
+    applyBoardSnap(groupId, _heldRef);
+  }
+
+  function pickUp(pieceId: string): void {
+    _heldRef.value = pieceId;
+    const sprite = spriteMap.get(pieceId);
+    if (!sprite) return;
+
+    if (!usePuzzleStore.getState().reducedMotion) {
+      tweenSpriteRotation(sprite, sprite.rotation, sprite.rotation + LIFT_ROTATION, 80);
+    }
+
+    // Update ARIA label to signal held state
+    const piece = usePuzzleStore.getState().piecesById[pieceId];
+    const btn = document.querySelector<HTMLButtonElement>(
+      `#${LANDMARK_TABLE_ID} [data-piece-id="${pieceId}"]`,
+    );
+    if (btn && piece) {
+      btn.setAttribute(
+        'aria-label',
+        `Piece ${piece.index} — row ${piece.gridCoord.row + 1}, ` +
+        `column ${piece.gridCoord.col + 1}, Held`,
+      );
+    }
+  }
+
+  function putDown(pieceId: string): void {
+    _heldRef.value = null;
+    const sprite = spriteMap.get(pieceId);
+    if (!sprite) return;
+
+    if (!usePuzzleStore.getState().reducedMotion) {
+      tweenSpriteRotation(sprite, sprite.rotation, snapToNearest90(sprite.rotation), 80);
+    }
+
+    // Run snap checks — may place piece or merge cluster
+    checkSnapAtCurrentPosition(pieceId);
+
+    // Restore "On table" label (if piece wasn't just placed)
+    const piece = usePuzzleStore.getState().piecesById[pieceId];
+    if (piece && !piece.placed) updateTableButtonLabel(piece);
+  }
+
+  function dropPiece(pieceId: string): void {
+    // Escape — drop without snap, return focus to button
+    _heldRef.value = null;
+    const piece = usePuzzleStore.getState().piecesById[pieceId];
+    if (piece) updateTableButtonLabel(piece);
+    focusButton(pieceId);
+  }
+
+  registerTableHandlers({
+    onFocus: (pieceId) => {
+      if (!_lastInputWasKeyboard) return;
+      const piece = usePuzzleStore.getState().piecesById[pieceId];
+      if (!piece) return;
+
+      if (piece.clusterId) {
+        const members = getClusterMembers(piece.clusterId);
+        setFocusedTarget({
+          kind:            'cluster',
+          primaryPieceId:  pieceId,
+          memberIds:       members.map((p) => p.id),
+        });
+      } else {
+        setFocusedTarget({ kind: 'piece', pieceId });
+      }
+    },
+
+    onBlur: () => setFocusedTarget(null),
+
+    onActivate: (pieceId) => {
+      if (_heldRef.value === pieceId) {
+        putDown(pieceId);
+      } else {
+        // Drop any other held piece first (safety guard — only one held at a time)
+        if (_heldRef.value) putDown(_heldRef.value);
+        pickUp(pieceId);
+      }
+    },
+
+    onEscape: (pieceId) => dropPiece(pieceId),
+  });
 
   // ── T-key hint ─────────────────────────────────────────────────────────────
   // Small fixed overlay hinting the T key mode switch. Hidden until first
@@ -674,12 +923,29 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     if (e.key === 't' || e.key === 'T') {
+      // No-op while holding a piece — no side effects, no sound, no state change.
+      if (_heldRef.value) return;
       setTrayOpen(!usePuzzleStore.getState().trayOpen);
+      return;
+    }
+    // R — rotate focused table piece or cluster 90° CW.
+    // Works whether piece is held or not. No-op in bench context (bench pieces are
+    // not isOnTable, so the isOnTable guard prevents accidental bench rotation).
+    if (e.key === 'r' || e.key === 'R') {
+      if (!_lastInputWasKeyboard) return;
+      if (!_focusTarget) return;
+      if (_focusTarget.kind === 'filter') return; // bench context — no rotation
+      const focusedPieceId = _focusTarget.kind === 'cluster'
+        ? _focusTarget.primaryPieceId
+        : _focusTarget.pieceId;
+      const focusedPiece = usePuzzleStore.getState().piecesById[focusedPieceId];
+      if (!focusedPiece || !isOnTable(focusedPiece) || !focusedPiece.clusterId) return;
+      rotateGroup(focusedPiece.clusterId, spriteMap);
       return;
     }
     // [/] — cycle bench filter strip. Works whenever bench is open, regardless of focus.
     // Focus handling (keep/move/jump-to-first) is owned by applyBenchFilter in bench.ts.
-    // Arrow keys are reserved for piece movement on the table (Story 41b).
+    // Arrow keys are reserved for piece movement on the table (future story).
     if (e.key === '[' || e.key === ']') {
       if (!usePuzzleStore.getState().trayOpen) return;
       e.preventDefault();
@@ -793,3 +1059,17 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     }
   });
 }
+
+// Temporary debug exposure — remove after audit
+;(window as any)._jiggDebug = {
+  store:        () => usePuzzleStore.getState(),
+  focusTarget:  () => _focusTarget,
+  keyboardMode: () => _keyboardMode,
+  // Bench DOM order diagnostics:
+  //   displayOrder — full shuffled master order (_trayDisplayOrder); what syncButtonDOMOrder
+  //                  uses on initial load. Compare against DOM button sequence.
+  //   visibleOrder — filtered subset currently shown in bench; what layoutTrayPieces
+  //                  passes to syncButtonDOMOrder on every layout.
+  displayOrder: () => getTrayDisplayOrder(),
+  visibleOrder: () => getVisibleBenchOrder(usePuzzleStore.getState().activeFilter),
+};

@@ -24,6 +24,9 @@ import {
   getFocusedPieceId,
   clearFocusedPieceId,
   registerBenchNavHelpers,
+  createTableButton,
+  applyBenchTabState,
+  getAriaKeyboardMode,
   type FilterDef,
 } from '../utils/aria';
 import {
@@ -349,7 +352,13 @@ function reconcileBenchState(): void {
  */
 function extractPieceFromBench(pieceId: string): void {
   clearFocusedPieceId(); // always clear — extracted piece is leaving the bench
-  removeButton(pieceId);
+  removeButton(pieceId); // remove bench button from DOM and _buttonMap
+
+  // Piece is already STAGE_TABLE (extractPieceToCanvas was called before this).
+  // Create table button immediately — _buttonMap now holds the table button.
+  const piece = usePuzzleStore.getState().piecesById[pieceId];
+  if (piece) createTableButton(piece);
+
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
   // Reconcile after mutation — unconditional. Idempotent if bench is still non-empty.
   reconcileBenchState();
@@ -811,11 +820,15 @@ function layoutTrayPieces(): void {
   // Clamp scroll and apply
   _scrollX = clampScroll(_scrollX);
 
-  // Sync bench button tabIndex: visible pieces get 0, filtered-out pieces get -1.
+  // Sync bench button tabIndex: mode + filter are both arbiters.
+  // bench mode + filtered-in → 0 (Tab stays within the visible set).
+  // bench mode + filtered-out → -1 (invisible pieces are not reachable via Tab).
+  // table mode → -1 for all bench pieces regardless of filter.
   // Runs on every layout (filter change, extraction, load).
-  const inTraySet = new Set(inTray);
+  const inBenchMode = getAriaKeyboardMode() === 'bench';
+  const inTraySet = new Set(inTray); // inTray is the filtered-in subset
   for (const id of allInTray) {
-    setButtonTabIndex(id, inTraySet.has(id) ? 0 : -1);
+    setButtonTabIndex(id, inBenchMode && inTraySet.has(id) ? 0 : -1);
   }
 
   // Sync DOM button order to match visual bench layout (left→right = _trayDisplayOrder order).
@@ -839,6 +852,10 @@ function layoutTrayPieces(): void {
   // Empty state — shown only when all pieces have left the tray
   updateEmptyState(allInTray.length === 0);
 
+  // Belt-and-suspenders: enforce mode-based tabIndex on all bench buttons.
+  // Guards against any code path that may have set an incorrect tabIndex
+  // between layout passes (e.g. a button created just before mode switched).
+  applyBenchTabState();
 }
 
 // ─── Tray open / close ────────────────────────────────────────────────────────
@@ -854,12 +871,11 @@ export function setTrayOpen(open: boolean): void {
     applyTrayLayout();
   }
 
-  // Sync strip handle pointer-events and tab reachability:
-  // - open: pointer-events none (PixiJS _stripHitArea handles close); tabIndex -1 (bench open, handle irrelevant)
-  // - closed: pointer-events auto (DOM button handles open); tabIndex 0 (reachable via Tab)
+  // Sync strip handle pointer-events only.
+  // tabIndex stays -1 unconditionally — T is the keyboard mechanism for opening the bench;
+  // the strip handle is mouse-only and never enters the tab order.
   if (_benchStripHandle) {
     _benchStripHandle.style.pointerEvents = open ? 'none' : 'auto';
-    _benchStripHandle.tabIndex = open ? -1 : 0;
   }
 
   // Focus handoff: if a bench button was focused when the bench closes,

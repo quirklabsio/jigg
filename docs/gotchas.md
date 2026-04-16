@@ -366,11 +366,47 @@
 
 Symptom: First Tab press lands on an invisible element, focus ring never appears, `document.activeElement.getAttribute('aria-label')` returns null.
 
-Cause: Browser extensions (password managers, ad blockers, dev tools) inject focusable `<div>` elements into the page before bench buttons in DOM order.
+Cause: Browser extensions (password managers, ad blockers, dev tools) inject focusable `<div>` elements into the page before bench buttons in DOM order, or override native focus behaviour in ways the app cannot control.
 
 Diagnosis: Check `document.activeElement.id` after Tab — if it's something like `jsExtensionMenuParent` it's an extension, not app code.
 
-Confirm: Test in incognito (extensions disabled). If keyboard nav works correctly there, the extension is the culprit.
+Confirm: Test in incognito (extensions disabled). If keyboard nav works correctly there, the extension is the culprit — the implementation is correct and cannot be fixed from application code.
 
-Fix: `guardFocusWithinApp()` in `scene.ts` listens for `focusin` and redirects to `#landmark-bench button[tabindex="0"]` whenever focus lands outside owned regions. Works against late-injected elements too (unlike a one-shot silencing pass). Add new legitimate focusable regions to the `isOurs` check as the app grows.
+Note: `inert` + `applyBenchTabState` together handle the common case. Extensions that fully override native focus behaviour are out of scope.
 
+
+## Keyboard snap leaves spatial hash stale (Story 41b)
+
+Pieces moved via keyboard (arrow keys — future story) and placed via
+keyboard put-down are not registered in the spatial hash. After a
+keyboard-triggered snap, the resulting cluster is not hit-testable
+by pointer drag until the page is refreshed or a drag interaction
+re-registers it.
+
+Workaround: after keyboard snap, call `insertGroupAABB` on the survivor
+group to register it in the spatial hash. Deferred — no arrow key
+movement in 41b so keyboard pieces stay at their extraction position.
+Revisit in Story 42 or when arrow key movement ships.
+
+## `inert` attribute unreliable for Tab order in some environments
+
+Symptom: bench buttons remain reachable by Tab even though
+`#landmark-bench.inert === true`. Verified: inert is set correctly
+but Tab still reaches bench buttons in some browser/extension configs.
+
+Cause: Browser extensions or specific browser builds don't fully
+honour dynamically set `inert` for Tab interception.
+
+Fix: Belt-and-suspenders via `applyBenchTabState()`:
+- `applyBenchTabState(mode)` called from `setKeyboardMode` on every mode switch
+- `applyBenchTabState()` called at end of `layoutTrayPieces` (safety net)
+- Mode is the sole arbiter of bench button tabIndex — filter no longer affects it
+- Scoped to `button[data-piece-id]` — never hits filter radios or unrelated controls
+- `_ariaKeyboardMode` mirrored in aria.ts so bench.ts can read it without importing scene.ts
+
+`tableLandmark.tabIndex = -1` set before `.focus()` on empty table — ensures
+programmatic focus works in browsers where non-natively-focusable elements
+silently ignore `.focus()` calls without an explicit tabIndex.
+
+`inert` is kept as the semantic signal for AT.
+Explicit tabIndex sweep guarantees Tab order regardless of environment.

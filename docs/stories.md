@@ -687,3 +687,54 @@ Rule: **never call drawCutSegments without first lineTo to pts[0]** — the curs
 **`docs/decisions.md`** — extraction reconciliation pattern appended.
 
 `npm run typecheck` passes clean. Zero suppressions.
+
+---
+
+### Story 41b — Table keyboard navigation (2026-04-15)
+
+**`src/utils/aria.ts`**
+- `TableHandlers` interface + `_tableHandlers` module var added. `registerTableHandlers(handlers)` exported.
+- `TabStop` interface added (internal to aria.ts).
+- `_updateTableButtonLabel(btn, piece)` — sets `"Piece N — row R, column C, On table"`.
+- `createTableButton(piece)` — appends button to `#landmark-table`, wires focus/blur/keydown/escape via `_tableHandlers`. Re-uses `_buttonMap` (bench button already removed before call).
+- `updateTableButtonLabel(piece)` — restores "On table" label after put-down.
+- `syncClusterTabStops(clusterPieces)` — sorts by `piece.index`, sets tabIndex=0 on primary, -1 on all others.
+- `getTableTabStops(pieces)` (private) — one stop per cluster (lowest index = primary) + one per lone piece.
+- `syncTableButtonOrder()` — reorders DOM buttons in `#landmark-table` by ascending lowestIndex; derived from current store state, never persisted.
+
+**`src/canvas/bench.ts`**
+- `createTableButton` added to import from `aria.ts`.
+- `extractPieceFromBench`: after `removeButton(pieceId)` (removes bench button), reads piece from store and calls `createTableButton(piece)`. Piece is already `STAGE_TABLE` at this point (`extractPieceToCanvas` runs before `extractPieceFromBench` in all three extraction paths).
+
+**`src/puzzle/snap.ts`**
+- New imports from `aria.ts`: `removeButton`, `focusButton`, `syncClusterTabStops`, `syncTableButtonOrder`, `LANDMARK_TABLE_ID`. New import `isOnTable` from `./types`.
+- `getFirstTablePieceId()` (private) — store-only derivation: `.filter(isOnTable && !placed).sort(index)[0]?.id`. No DOM query.
+- `checkAndApplySnap`: after `mergeGroups`, reads survivor group pieces, calls `syncClusterTabStops(onTablePieces)` + `syncTableButtonOrder()`.
+- `checkAndApplyBoardSnap`: after `markGroupPlaced`, calls `removeButton(pid)` for each placed piece, `syncTableButtonOrder()`, then focus handoff via `focusButton(nextId)` or `#landmark-table.focus()`.
+
+**`src/canvas/scene.ts`**
+- `FocusTarget` discriminated union type added (kind: `'piece'` | `'cluster'` | `'filter'`). `_focusedPieceId` replaced by `_focusTarget: FocusTarget`.
+- `setFocusedTarget(target)` — replaces `setFocusedPiece` as the primary setter; has `_lastInputWasKeyboard` guard. `setFocusedPiece(pieceId)` kept as a thin wrapper for bench handler backward compat.
+- `getClusterScreenAABB(memberIds, spriteMap)` — computes screen-space AABB from `sprite.getBounds()` across all member sprites.
+- `initFocusRing` ticker extended: `kind === 'piece'` → single sprite bounds (existing); `kind === 'cluster'` → `getClusterScreenAABB`; else → clear.
+- `setDragStartCallback`: `_focusedPieceId = null` → `_focusTarget = null`.
+- Board snap logic extracted into `applyBoardSnap(groupId, heldRef)` named function — drag callback calls it via `_dragHeldRef` dummy; keyboard put-down calls it with `_heldRef`.
+- `reconcileTableState(_heldRef)` — checks `allPlaced`; if true, calls `setFocusedTarget(null)` and `_heldRef.value = null`.
+- `_heldRef = { value: null }` ref object — shared by all keyboard closures inside `loadScene`.
+- `tweenSpriteRotation(sprite, from, to, ms)` — single-sprite rotation tween with reducedMotion guard.
+- `snapToNearest90(r)` — rounds radian rotation to nearest 90°.
+- `getClusterMembers(clusterId)` — reads group from store, returns piece array.
+- `checkSnapAtCurrentPosition(pieceId)` — calls `checkAndApplySnap` then `applyBoardSnap`; survivor group ID used for board snap.
+- `pickUp(pieceId)` — sets `_heldRef.value`, tweens rotation +1°, updates ARIA label to "Held".
+- `putDown(pieceId)` — clears `_heldRef.value`, tweens rotation to nearest 90°, calls `checkSnapAtCurrentPosition`, restores "On table" label if not placed.
+- `dropPiece(pieceId)` — escape path: clears held, restores label, returns focus to button (no snap).
+- `registerTableHandlers` wired after `initFilterButtons`.
+- `R`/`r` key handler added: rotates focused piece/cluster via `rotateGroup(clusterId, spriteMap)`; guards `isOnTable`; no-op for bench pieces (`kind === 'filter'` or piece not on table).
+- `T`/`t` key: `if (_heldRef.value) return` guard added — pure no-op while holding.
+- `import` updated: `registerTableHandlers`, `updateTableButtonLabel` added from `aria.ts`.
+
+**`docs/decisions.md`** — table reconciliation pattern + `_heldRef` rationale + `applyBoardSnap` extraction + spatial hash deferral documented.
+
+**`docs/gotchas.md`** — keyboard snap spatial hash gotcha added with workaround and deferral note.
+
+`npm run typecheck` passes clean. Zero suppressions.

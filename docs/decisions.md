@@ -202,3 +202,24 @@ This pattern repeats in Story 41b for table interactions.
 `applyBenchCollapseEffects()` is a terminal transition — not a general utility.
 `setKeyboardMode` inside collapse is intentional but scoped — 41b must not create
 circular transitions by calling `setKeyboardMode` from table collapse into bench.
+
+## Table keyboard navigation (Story 41b)
+
+**Table reconciliation mirrors bench reconciliation:**
+- `reconcileTableState()` lives inside the `loadScene` closure (needs `_heldRef` and `setFocusedTarget`).
+- Called from inside `applyBoardSnap` — the shared board snap function, analogous to `reconcileBenchState` inside `extractPieceFromBench`.
+- Only clears keyboard state (`_heldRef.value = null`, `setFocusedTarget(null)`) — completion detection is already handled by existing `puzzleComplete` check immediately before it.
+
+**`_heldRef` as a ref object, not a plain variable:**
+- `reconcileTableState` and `applyBoardSnap` are nested functions inside `loadScene` that need to read and mutate the same `_heldPieceId` value. A plain `let` variable can't be closed over mutably across sibling functions defined in the same scope when passed as an argument.
+- `const _heldRef = { value: null as string | null }` is a ref object that all closures share. Mutation via `_heldRef.value = ...` is visible to all readers.
+
+**`applyBoardSnap` extracted from `setBoardSnapCallback`:**
+- Board snap logic (pulse animation, shadows, completion, reconciliation) was previously inlined inside the drag callback. Extracting into a named `applyBoardSnap(groupId, heldRef)` function allows the keyboard put-down path (`checkSnapAtCurrentPosition`) to call the same logic without duplication.
+- `setBoardSnapCallback` now calls `applyBoardSnap(groupId, _dragHeldRef)` where `_dragHeldRef` is a dummy ref (drag never holds a keyboard piece).
+
+**`getFirstTablePieceId` in snap.ts — store only, no DOM query:**
+- Focus handoff after board snap uses the store directly: `.filter(isOnTable && !placed).sort(index)[0]`. DOM queries are fragile (depend on button existence and tab order already being synced). Store is always authoritative.
+
+**Spatial hash not updated after keyboard snap:**
+- See gotchas.md — deferred until arrow key movement ships.
