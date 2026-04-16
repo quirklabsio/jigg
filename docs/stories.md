@@ -42,6 +42,32 @@ Append-only. When a story closes, session notes are added here and the story is 
 
 ## Session Notes
 
+### Story 42c — ? key: keyboard shortcuts panel (2026-04-16)
+
+**`src/canvas/shortcuts.ts`** (new file)
+- DOM modal overlay: backdrop `div#shortcuts-panel` (z-index 2000) wrapping an inner `role="dialog"` container.
+- `role="dialog"`, `aria-modal="true"`, `aria-label="Keyboard shortcuts"` on inner container.
+- Single close button (`×`) for pointer/mouse users. Focus moves to close button on open.
+- Focus trap: `Tab` in overlay keydown intercepted → `closeBtn.focus()` (only one tabbable element).
+- `Escape` and `?` within overlay both call `closeShortcutsPanel()` with `stopPropagation()` — prevents propagation to window handler.
+- Backdrop click closes panel.
+- `openShortcutsPanel()`: saves `document.activeElement` → `_previousFocus`; sets `display:flex`; focuses close button via rAF.
+- `closeShortcutsPanel()`: sets `display:none`; restores `_previousFocus.focus()`.
+- `toggleShortcutsPanel()`: open↔close toggle.
+- `SHORTCUTS_PANEL_ID` exported for `guardFocusWithinApp` inclusion.
+- Content mirrors `docs/accessibility.md §9.4` key binding map (Bench / Table / Global sections).
+
+**`src/canvas/scene.ts`**
+- Added import of `SHORTCUTS_PANEL_ID`, `initShortcutsPanel`, `toggleShortcutsPanel`, `closeShortcutsPanel`, `isShortcutsPanelOpen` from `./shortcuts`.
+- `guardFocusWithinApp`: added `target.closest(\`#${SHORTCUTS_PANEL_ID}\`)` to `isOurs` — focus inside modal is not redirected to bench.
+- Called `initShortcutsPanel()` immediately after `guardFocusWithinApp()`.
+- Keydown handler: added `?` case (`e.preventDefault(); toggleShortcutsPanel(); return`) — no `_lastInputWasKeyboard` guard per spec.
+- Keydown handler: added `Escape` priority check (`if (isShortcutsPanelOpen()) { closeShortcutsPanel(); return }`) before all other key handling.
+
+`npm run typecheck` passes clean. Zero suppressions.
+
+---
+
 ### Story 42 — Focus coordination + screen reader QA (2026-04-15)
 
 **`src/utils/aria.ts`**

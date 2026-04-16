@@ -22,6 +22,7 @@ import { initTray, onTrayResize, setTrayOpen, applyTrayPreferences, setTrayLoadi
 import AnalysisWorker from '../workers/analysis.worker.ts?worker';
 import { sampleImageLuminance } from '../utils/luminance';
 import { LANDMARK_BENCH_ID, LANDMARK_TABLE_ID, initLandmarks, initBenchButtons, registerBenchHandlers, syncButtonDOMOrder, registerFilterHandlers, initFilterButtons, focusButton, registerTableHandlers, updateTableButtonLabel, applyBenchTabState, initTableLandmarkLabel, announce } from '../utils/aria';
+import { SHORTCUTS_PANEL_ID, initShortcutsPanel, toggleShortcutsPanel, closeShortcutsPanel, isShortcutsPanelOpen } from './shortcuts';
 import {
   loadPreferences,
   applyPreferences,
@@ -416,6 +417,7 @@ function guardFocusWithinApp(): void {
     const isOurs =
       target.closest('#landmark-bench') ||
       target.closest('#landmark-table') ||
+      target.closest(`#${SHORTCUTS_PANEL_ID}`) ||
       target.id === 'bench-strip-handle' ||
       target === document.body;
     if (!isOurs) {
@@ -697,6 +699,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // Guard against browser extension elements stealing focus.
   // Intercepts at focus time — works against late-injected elements too.
   guardFocusWithinApp();
+  initShortcutsPanel();
 
   initLandmarks();
   initBenchButtons(usePuzzleStore.getState().pieces);
@@ -933,6 +936,18 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+    // Escape — close shortcuts panel if open (before any other Escape handling)
+    if (e.key === 'Escape' && isShortcutsPanelOpen()) {
+      e.preventDefault();
+      closeShortcutsPanel();
+      return;
+    }
+    // ? — toggle keyboard shortcuts reference panel. No _lastInputWasKeyboard guard.
+    if (e.key === '?') {
+      e.preventDefault();
+      toggleShortcutsPanel();
+      return;
+    }
     if (e.key === 't' || e.key === 'T') {
       // No-op while holding a piece — no side effects, no sound, no state change.
       if (_heldRef.value) return;
