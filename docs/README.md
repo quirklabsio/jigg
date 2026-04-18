@@ -21,6 +21,7 @@ Three questions, three categories.
 ## Planning (BA)
 - [`roadmap.md`](roadmap.md) — story board: shipped, next, deferred
 - [`BA.md`](BA.md) — story writing guide and handoff workflow
+- [`next-story.md`](next-story.md) — the story prompt for the next dev session (BA writes, dev reads)
 
 ## Development log
 - [`stories.md`](stories.md) — implementation log, one entry per shipped story

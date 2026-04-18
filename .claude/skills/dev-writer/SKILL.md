@@ -19,10 +19,11 @@ Use this skill for:
 When triggered, automatically read these files in order:
 
 ### Required Reading (Always)
-1. **`docs/CLAUDE.md`** — Agent workflow and development patterns
-2. **`docs/roadmap.md`** — Current story status and planning
-3. **`docs/stories.md`** — Implementation history and shipped features  
-4. **`docs/decisions.md`** — Technical decisions and architectural rationale
+1. **`docs/next-story.md`** — The story prompt the BA prepared for this session. Read first.
+2. **`CLAUDE.md`** — Agent workflow and development patterns
+3. **`docs/roadmap.md`** — Current story status and planning
+4. **`docs/stories.md`** — Implementation history and shipped features
+5. **`docs/decisions.md`** — Technical decisions and architectural rationale
 
 ### Conditional Reading (When Relevant)
 - **Spec work:** Also read `docs/spec-integration.md` + `docs/engine-conventions.md`
@@ -98,8 +99,10 @@ When triggered, automatically read these files in order:
 ## Integration with BA Workflow
 
 When a story comes from BA planning:
+- The prompt arrives in `docs/next-story.md` — that file IS the handoff
 - The story prompt should follow `docs/BA.md` format
 - Confirm implementation preserves existing user experience
+- After shipping, clear `docs/next-story.md` so the next session doesn't re-read a stale prompt
 
 ## Session Handoff
 

@@ -11,3 +11,7 @@ For any new knowledge gained, route it to the right layer:
 - A new **anti-pattern or failure mode** → `docs/gotchas.md`
 
 Create a new implementation doc in `docs/` only if no existing file fits. Do not create new docs for the other two layers — there is exactly one architecture doc and one decisions doc.
+
+Finally, close the handoff loop:
+- If `docs/next-story.md` still holds the prompt that was just shipped, overwrite it with `# No story queued` so the next dev session doesn't re-read a stale prompt
+- If the prompt in `docs/next-story.md` does NOT match what was just shipped, stop and flag it — do not overwrite; the BA may have queued the next story already, or something is out of sync

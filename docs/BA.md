@@ -67,18 +67,21 @@ Acceptance:
 
 ## Handoff to Development
 
+The handoff contract is `docs/next-story.md`. The BA writes the full story prompt to that file; the dev session reads it as part of boot (see `CLAUDE.md` and the dev-writer skill). No copy/paste, single source of truth.
+
 ### Before writing a story:
 1. Check `roadmap.md` — understand what's shipped and what's planned
 2. Review `decisions.md` — understand existing constraints
 
 ### When handing off:
-1. Story prompt follows format above
-2. Move story from **Next** to **In Progress**
-3. Tag Claude Code session with story number
+1. Write the story prompt to `docs/next-story.md` (overwrite any previous prompt)
+2. Story prompt follows the format above
+3. Move story from **Next** to **In Progress** in `roadmap.md`
 
 ### After implementation:
 1. Review what dev added to `stories.md`
-2. Move story to **Shipped**
+2. Move story to **Shipped** in `roadmap.md`
+3. The dev session clears `docs/next-story.md` as part of shipping; if it's still populated, confirm it's stale before overwriting with the next story
 
 ## Common Patterns
 
