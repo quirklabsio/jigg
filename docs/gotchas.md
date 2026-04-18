@@ -277,6 +277,37 @@ const mockSpatialHash = {
 }
 ```
 
+## Blob URLs Don't Survive Page Reloads
+
+`URL.createObjectURL(file)` produces a blob URL (`blob:http://...`) that is only valid for the lifetime of the document that created it. Storing a blob URL in `sessionStorage` and reading it back after `window.location.reload()` gives you a dead reference — the new document's `Assets.load` receives the string but the resource is gone.
+
+**Symptom:** `Assets.load` resolves to `null` (no throw, no 404 in the network panel), causing a null-destructure crash at the first line that reads `texture.width`.
+
+**Fix:** Use `FileReader.readAsDataURL` to convert the file to a base64 data URL before storing. Data URLs are self-contained strings — no browser resource to expire.
+
+```typescript
+// WRONG: blob URL dies on reload
+sessionStorage.setItem(KEY, URL.createObjectURL(file));
+window.location.reload();
+
+// RIGHT: data URL survives reload
+const reader = new FileReader();
+reader.onload = () => {
+  sessionStorage.setItem(KEY, reader.result as string);
+  window.location.reload();
+};
+reader.readAsDataURL(file);
+```
+
+**Secondary defence:** On boot, discard any stored value starting with `'blob:'` — a guard against stale entries written by an older code version:
+
+```typescript
+const stored = sessionStorage.getItem(KEY);
+const imageUrl = stored && !stored.startsWith('blob:') ? stored : FALLBACK_URL;
+```
+
+**Size limit:** `sessionStorage` is capped at ~5 MB per origin. Wrap `sessionStorage.setItem` in a `try/catch` (`QuotaExceededError`) and remove the key on failure so the next boot falls back cleanly instead of looping.
+
 ---
 
 *Report new gotchas to maintain this list.*

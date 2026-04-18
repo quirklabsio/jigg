@@ -188,6 +188,12 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 - **Diagonal slash on empty swatches — softened contrast** — `0x777777` at `alpha: 0.6`, 1px width. Signals "temporarily empty", not "removed" or "invalid". No strikethrough on text filters — same reasoning.
 - **`FilterDef` extended** — added `count: number` and `isActive: boolean`. Both `initFilterButtons` and `updateFilterButtonLabels` in `aria.ts` derive `disabled` and `aria-label` from these fields directly.
 
+## Drag-and-drop image load (Story 44)
+
+- **`FileReader.readAsDataURL` over `URL.createObjectURL`** — the story prompt suggested blob URLs. Blob URLs are bound to the originating document; after `window.location.reload()` the resource is gone and `Assets.load` returns null. Data URLs are self-contained strings — they cost more memory (base64 overhead) and hit the 5 MB `sessionStorage` quota for large images, but they survive the reload without any lifecycle management. The quota risk is acceptable for a dev-tool story; Story 45 will normalise image dimensions before this matters in production.
+- **`sessionStorage` over `IndexedDB` for the pending URL** — sessionStorage is synchronous, requires no schema, and scopes naturally to the tab. The image URL survives a reload within the tab, which is exactly the lifetime we need. Cross-tab or cross-session persistence is not required (and would be wrong — this is per-session state).
+- **Page reload over in-place teardown** — there is no scene teardown path. Reloading avoids writing one prematurely; Story 46 will introduce clean rebuild. The reload is intentionally temporary; see `next-story.md` / roadmap for the planned teardown path.
+
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.
 
