@@ -2,6 +2,7 @@
 import { initApp } from './canvas/app';
 import { loadScene } from './canvas/scene';
 import { activateDrag } from './puzzle/drag';
+import { normalizeImage } from './imageNormalize';
 
 const SESSION_KEY = 'jigg:pendingImageUrl';
 const TEST_IMAGE_URL = '/test-image.jpg';
@@ -28,9 +29,7 @@ container.addEventListener('drop', (e) => {
   const file = e.dataTransfer?.files[0];
   if (!file || !file.type.startsWith('image/')) return;
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    const dataUrl = reader.result as string;
+  normalizeImage(file).then((dataUrl) => {
     try {
       sessionStorage.setItem(SESSION_KEY, dataUrl);
     } catch {
@@ -38,6 +37,7 @@ container.addEventListener('drop', (e) => {
       sessionStorage.removeItem(SESSION_KEY);
     }
     window.location.reload();
-  };
-  reader.readAsDataURL(file);
+  }).catch((err) => {
+    console.warn('normalizeImage failed:', err);
+  });
 });

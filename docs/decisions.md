@@ -194,6 +194,14 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 - **`sessionStorage` over `IndexedDB` for the pending URL** — sessionStorage is synchronous, requires no schema, and scopes naturally to the tab. The image URL survives a reload within the tab, which is exactly the lifetime we need. Cross-tab or cross-session persistence is not required (and would be wrong — this is per-session state).
 - **Page reload over in-place teardown** — there is no scene teardown path. Reloading avoids writing one prematurely; Story 46 will introduce clean rebuild. The reload is intentionally temporary; see `next-story.md` / roadmap for the planned teardown path.
 
+## Image Normalization (Story 45)
+
+- **`createImageBitmap(file, { imageOrientation: 'from-image' })` for EXIF correction** — the `imageOrientation` option is the only browser-native way to apply EXIF orientation before drawing to canvas. Without it, iPhone portrait photos decode sideways (raw sensor pixels are landscape; EXIF says rotate). The option is supported in all modern browsers and requires no third-party EXIF library. Passing the raw `File` directly (not a data URL or blob URL) means the browser handles HEIC/HEIF decode on platforms that support it for free.
+- **`OffscreenCanvas.convertToBlob` over `canvas.toDataURL`** — `convertToBlob` is async and returns a `Blob`, which can then be read as a data URL via `FileReader`. `toDataURL` is synchronous and blocks the main thread for large images; `convertToBlob` does not. Also normalizes PNG input to JPEG, giving predictable output size regardless of input format.
+- **`normalizeImage` as a pure function — no side effects, no DOM access** — the caller (`main.ts`) owns storage and reload. Keeping the function pure means it is trivially testable in isolation and makes the boundary between "image processing" and "app lifecycle" explicit. The story constraint was explicit on this; we followed it.
+- **`bitmap.close()` after drawing** — `ImageBitmap` holds a GPU-side resource that is not released by GC. Calling `.close()` after `ctx.drawImage` frees it immediately. Omitting this leaks GPU memory for the lifetime of the tab, which is especially bad for large phone photos.
+- **Extreme aspect ratios warned, not rejected** — the story explicitly defers the policy decision to Story 46. Logging and proceeding surfaces real failure modes (warped pieces, layout breakage) that inform what Story 46 needs to fix. A silent rejection would hide them.
+
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.
 

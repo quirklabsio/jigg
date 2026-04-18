@@ -308,6 +308,27 @@ const imageUrl = stored && !stored.startsWith('blob:') ? stored : FALLBACK_URL;
 
 **Size limit:** `sessionStorage` is capped at ~5 MB per origin. Wrap `sessionStorage.setItem` in a `try/catch` (`QuotaExceededError`) and remove the key on failure so the next boot falls back cleanly instead of looping.
 
+## EXIF Orientation Test Images — Raw Pixel Orientation Must Match Real Device
+
+When constructing a test image for EXIF Orientation=6 (the common iPhone portrait case), the **raw pixel dimensions must be landscape** (wider than tall), not portrait.
+
+A real iPhone captures in landscape sensor orientation and sets EXIF Orientation=6 to say "rotate 90° CW to display correctly." The raw bytes are therefore wider than tall (e.g. 4032×3024). After applying Orientation=6, the displayed image becomes portrait (3024×4032).
+
+If you create the test image with portrait raw pixels (3024×4032) and set Orientation=6, the rotation produces landscape — the opposite of what you're testing.
+
+```python
+# WRONG: portrait raw pixels with Orientation=6 → rotates to landscape
+img = Image.new('RGB', (3024, 4032), ...)  # tall
+exif = piexif.dump({'0th': {piexif.ImageIFD.Orientation: 6}})
+
+# RIGHT: landscape raw pixels with Orientation=6 → rotates to portrait
+img = Image.new('RGB', (4032, 3024), ...)  # wide, like iPhone sensor
+exif = piexif.dump({'0th': {piexif.ImageIFD.Orientation: 6}})
+```
+
+**Expected result after `normalizeImage`:** width: 1536, height: 2048 (portrait)
+**Bug result (EXIF ignored):** width: 2048, height: 1536 (landscape)
+
 ---
 
 *Report new gotchas to maintain this list.*
