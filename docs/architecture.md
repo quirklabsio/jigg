@@ -1,97 +1,89 @@
-# Architecture
+<!-- audience: Dev, Agent, BA -->
 
-## Principles
+# Architecture — What Exists and How It Fits Together
 
-### Implemented
-- PixiJS owns the canvas — never use DOM elements for puzzle pieces or in-puzzle UI
-- State lives in Zustand, PixiJS reads it imperatively via `getState()`
-- All CPU-heavy work runs in Web Workers; WASM communicates via `postMessage` only — no shared state
-- All piece positions are stored in world space, never screen space
-- Correct positions are set once on puzzle creation and never mutate
-- Drag moves the group, not the individual piece — a single piece is a group of one
-- Sprites are permanently `eventMode='none'`; a single transparent hit layer (`Graphics`) over the stage handles all pointer events — no per-sprite toggling
-- Spatial hash maps screen cells to group IDs for O(1) pointer-to-group lookup on pointerdown
-- Z-index uses a monotonic `settleCounter` — each drop gets a unique value so most-recently-placed group always renders on top
-- `activePointerId` pointer lock prevents two groups from being dragged simultaneously
-- `store/` files must not import from `puzzle/` or `canvas/` files that themselves import from `store/` — prevents circular deps
-
-### Planned (not yet implemented)
-- Dexie writes debounced 500ms via persistence bridge that subscribes to Zustand — nothing else writes to Dexie directly (Stories 27–29)
-- Snap detection compares world space positions only (Story 9)
-- Piece-to-piece snapping merges groups anywhere in world space, not just on the board (Story 9)
+*Conceptual overview of the Jigg application. For implementation details see the relevant how-it's-built docs. For why things are this way see `decisions.md`.*
 
 ---
 
-## Folder Structure
+## The Puzzle Model
 
-### Exists now
-```
-src/
-  canvas/        # PixiJS setup, scene management, render loop, UI overlays
-  puzzle/        # piece logic, cutting, drag, scatter, snap, completion
-  workers/       # Web Worker entry points
-  store/         # Zustand stores
-  wasm-pkg/      # generated WASM bindings (do not edit — output of wasm:build)
-crates/
-  jigg-analysis/ # Rust WASM crate (edge detection, Bezier cut generation)
-public/
-  wasm/          # static WASM assets served directly (not bundled by Vite)
-docs/            # this directory
-```
+A puzzle is a flat collection of **pieces**. Each piece carries two categories of data: its immutable definition (shape, correct position, index) sourced from the `jigg-spec` submodule, and its mutable runtime state (where it is, whether it's been placed, which group it belongs to).
 
-### Planned (not yet created)
-```
-src/
-  db/            # Dexie schema and queries (Stories 27–29)
-  shaders/       # GLSL .frag/.vert files (Stories 16–19)
-```
+Pieces live in one of two **stages**: the bench (the unsolved tray) or the table (the assembly area). Movement is one-way — a piece that reaches the table never returns to the bench.
+
+**Groups (clusters)** form when pieces snap together. A group is not a stored object; it is derived at runtime by collecting pieces that share a `clusterId`. A lone piece is implicitly a group of one. When a group reaches its correct position, all its pieces are marked `placed` and the group dissolves — placed pieces have no cluster.
+
+`placed: boolean` is the sole authority on correctness. Stage identity is not a proxy for correctness.
 
 ---
 
-## Core Types
+## Rendering
 
-`src/puzzle/types.ts` is the source of truth for all shared types. Do not redefine these elsewhere.
+PixiJS owns the canvas. All puzzle pieces, visual feedback, snap highlights, and background rendering happen inside the PixiJS scene graph. The DOM is not used for anything a user can see in the puzzle itself.
 
-```typescript
-interface Piece {
-  id: string;
-  groupId: string;                                       // always belongs to a group
-  localPosition: { x: number; y: number };              // offset from group origin
-  correctPosition: { x: number; y: number };            // fixed world space, set once on puzzle creation
-  gridCoord: { col: number; row: number };              // used for neighbour lookup
-  rotation: number;
-  placed: boolean;
-  touched: boolean;
-  stackIndex: number;
-  textureRegion: { x: number; y: number; w: number; h: number };
-}
+The exception is **accessibility**: a parallel DOM layer sits alongside the PixiJS canvas. This layer holds ARIA landmarks, a hidden button tree that screen readers navigate, and a live announcement region. It is visually hidden but structurally present and fully wired to puzzle state.
 
-interface PieceGroup {
-  id: string;
-  pieceIds: string[];                                   // single unconnected piece = group of one
-  position: { x: number; y: number };                  // group origin in world space
-}
+These two layers — PixiJS canvas and DOM accessibility tree — are kept in sync as piece state changes.
 
-interface PuzzleConfig {
-  imageUrl: string;
-  pieceCount: number;          // 12–200 (cap at 50 on mobile)
-  surface: 'matte' | 'glossy' | 'canvas' | 'wood';
-  lightAngle: number;          // degrees
-}
+---
 
-interface EdgeMap {
-  data: Float32Array;
-  width: number;
-  height: number;
-}
+## Interaction
 
-type WorkerMessageType =
-  | 'ANALYZE_IMAGE'
-  | 'ANALYSIS_COMPLETE'
-  | 'ERROR';
+**Pointer input** uses a single transparent hit layer rather than per-piece event listeners. A spatial hash indexes pieces by grid cell, so hit testing is O(1) regardless of piece count.
 
-interface WorkerMessage<T = unknown> {
-  type: WorkerMessageType;
-  payload: T;
-}
+**Snap detection** runs on drag end. The pipeline queries nearby pieces, tests edge alignment and rotation compatibility, selects the best candidate by confidence, and executes a position correction. Groups snap as units.
+
+**Keyboard input** runs in parallel to pointer input, not as a fallback. The app maintains a keyboard mode (bench or table) and uses the `inert` attribute to restrict tab focus to the active region. Keyboard piece movement, rotation, and placement are first-class interactions.
+
+---
+
+## Accessibility
+
+Two `role="application"` landmarks bracket the experience — bench first, table second in DOM order. `role="application"` suppresses assistive technology shortcut keys so the app owns all key events.
+
+A live region announces state changes: filter switches, piece pickup, snap, placement, completion. Piece buttons carry labels derived from piece type and current state, updated as state changes.
+
+Visual accessibility (high contrast, greyscale, reduced motion) is managed through PixiJS filters and Zustand preferences, with in-app toggles independent of OS-level settings.
+
+See `accessibility.md` for the full keyboard map, ARIA label formats, and known gaps.
+
+---
+
+## State
+
+Game state lives in a **Zustand store** outside React, making it accessible to the PixiJS scene, workers, and DOM accessibility layer without prop threading. The store holds pieces, puzzle metadata, user settings, and UI state.
+
+Piece state is the ground truth. The PixiJS scene and DOM layers read from it and write back to it on user interaction.
+
+---
+
+## WASM Integration
+
+Image analysis and cut generation run in a **Web Worker** backed by a Rust/WASM module. The worker receives raw pixel data from the main thread, runs Canny edge detection and cut routing in WASM, and returns results via structured message protocol. The main thread remains unblocked during processing.
+
+The WASM module is imported directly into the worker as an ES module (not served from `public/`). See `wasm-pipeline.md` for build steps and the message protocol.
+
+---
+
+## Module Map
+
 ```
+src/
+├── puzzle/           # Game logic — piece state, types, snap detection
+├── canvas/           # PixiJS rendering — scene, sprites, spatial index
+├── interaction/      # Input handling — pointer, keyboard, ARIA integration
+├── workers/          # Web Worker + WASM bridge
+└── wasm-pkg/         # Generated Rust/WASM bindings (do not edit)
+
+jigg-spec/            # Git submodule — canonical .jigg format types
+docs/                 # Documentation
+```
+
+The spec submodule (`jigg-spec/`) defines the serialisable types that cross the persistence boundary. Runtime extensions to those types live in `src/puzzle/types.ts`. See `spec-integration.md` for the import alias and the boundary rules.
+
+---
+
+*For runtime invariants and contracts: `engine-conventions.md`*  
+*For implementation mechanics: `drag-and-drop.md`, `snap-detection.md`, `wasm-pipeline.md`*  
+*For architectural trade-offs: `decisions.md`*

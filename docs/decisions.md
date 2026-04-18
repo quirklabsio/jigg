@@ -1,6 +1,14 @@
-# Decisions
+<!-- audience: Dev, Agent -->
 
-Do not revisit without asking.
+# Technical Decisions — Project Choice History
+
+*Product, process, and architectural choices made during Jigg development with rationale and context.*
+
+## V1 / V2 Split
+
+V1 is the free tier MVP — strictly frontend, no auth, no backend. Persistence is browser storage (IndexedDB) or portable via `.jigg` export. This makes the app frictionless to start: no account, no signup, works immediately. The architectural constraints below (no accounts, no backend) are deliberate V1 decisions, not omissions.
+
+V2 introduces a paid subscription tier: user auth, backend, cross-device sync, and anything that requires server state. Nothing in V1 should take on backend dependencies that block this transition.
 
 ## Stack
 - **PixiJS over Canvas 2D** — performance ceiling with 200 pieces, shadows, and shaders

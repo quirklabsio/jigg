@@ -1,36 +1,24 @@
-# ROLE
-Be direct. Flag bad ideas immediately. Prefer concise over complete.
+# CLAUDE.md — Agent Development Workflow
 
-# WORKFLOW
-On every task, follow this sequence:
+**DEFAULT: Development Mode**
+Unless explicitly told otherwise, this is a technical implementation session.
 
-1. Analyse the request
-2. Run `find docs/ -name "*.md" | sort` — see available docs
-3. Read `docs/roadmap.md` — current story context
-4. Read `docs/stories.md` — shipped history and session notes
-5. Read other docs relevant to the task
-6. Read `tsconfig.json` — path config
-7. Read `package.json` — available commands
-8. Present a revised execution plan with explicit todo items
-9. Wait for user confirmation before starting work
-10. Do the work
-11. Append session notes to `docs/stories.md`
-12. If new gotchas found: update `docs/gotchas.md`
+## Required Reading
+Always read these files before responding:
+1. `docs/roadmap.md` — Current status
+2. `docs/stories.md` — Implementation history  
+3. `docs/decisions.md` — Technical constraints
 
-# END OF SESSION
-When the task is complete or context is growing large, run `/refine` to 
-summarise decisions and compress context.
+For spec work, also read:
+- `docs/spec-integration.md` — Type imports and git workflow
+- `docs/engine-conventions.md` — Runtime invariants
 
-# JIGG-SPEC
-Spec submodule lives at `/jigg-spec` (public repo).
-Files: `types.ts` (source of truth), `spec.md` (rationale + structure).
+## Story Implementation
+- Follow story prompt format (title, requirements, files, acceptance)
+- Always update `stories.md` with what shipped
+- Ask technical questions when unclear
 
-When touching anything related to save, load, or export:
-- Read `jigg-spec/spec.md` first
-- If implementation requires a spec change: update jigg-spec first,
-  commit and push there, then update the implementation
-
-# RULES
-- Never create memory files. Use `docs/` only.
-- No `project_*.md`, `MEMORY.md`, or ad-hoc note files.
-- Never edit `CLAUDE.md`.
+## Key References
+- Patterns: `docs/gotchas.md`
+- Architecture: `docs/architecture.md`  
+- Accessibility: `docs/accessibility.md`

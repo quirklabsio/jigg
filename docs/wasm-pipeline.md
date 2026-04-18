@@ -1,4 +1,8 @@
-# WASM Pipeline
+<!-- audience: Dev, Agent -->
+
+# WASM Pipeline — Rust Integration & Build Process
+
+*Build workflow and integration patterns for Rust/WASM image processing components.*
 
 ## Build
 ```bash
@@ -120,7 +124,7 @@ const overlay = new Sprite(texture);
 overlay.scale.set(scale);
 overlay.position.set(boardLeft, boardTop);
 overlay.alpha = 0.6;
-overlay.visible = false; // toggled with E key
+overlay.visible = false; // E key toggle removed in Story 29; overlay kept but never shown
 app.stage.addChild(overlay);
 ```
 

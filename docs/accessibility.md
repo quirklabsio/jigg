@@ -1,9 +1,8 @@
-# Accessibility
+<!-- audience: Dev, Agent -->
 
-Last audited: 2026-04-16 (Stories 37a–42c complete)
+# Accessibility Architecture — Keyboard Navigation & Screen Readers
 
----
-
+*Implementation guide for accessible puzzle interaction and assistive technology support.*
 ## Screen reader support
 
 ### Landmarks
@@ -170,9 +169,7 @@ App-level toggle (`greyscale: boolean` in Zustand store).
   illegible. `clampZoom` allows down to 0.05×.
 - **Arrow key movement not implemented.** Keyboard piece movement (incremental grid-aligned
   steps while held) was not shipped. Enter picks up and puts down; no mid-hold movement.
-- **Roadmap discrepancy on Stories 41a/41b.** Roadmap shows both `[ ]` (unchecked) but
-  session notes and source confirm pick-up/put-down, cluster tab stops, R rotate, and
-  escape-drop are all implemented. Arrow-key movement (the unbuilt part) is what remains.
+- **Arrow key movement deferred.** Story 50 moved to Deferred. Roadmap reflects this correctly.
 
 ---
 
