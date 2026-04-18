@@ -15,6 +15,7 @@
 | Stories 1–38 | Core puzzle solving |
 | Stories 40–42c | Keyboard navigation + screen reader support |
 | Story 43 | Accessibility audit + docs rewrite |
+| Story 44 | Drag-and-drop image load (2026-04-18) |
 
 ---
 
@@ -22,11 +23,7 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-**Story 44 — Drag & Drop Image (zero UI)**
-Drop image anywhere on canvas → loads immediately. Replaces current puzzle image. No validation beyond basic file type.
-*Outcome: Test with real images in seconds.*
-
-**Story 45 — Image Normalization**
+**Story 45 — Image Normalization** *(in progress — see `docs/next-story.md`)*
 Downscale oversized images (define max dimension). Preserve aspect ratio. Handle extreme aspect ratios gracefully.
 *Outcome: Discover performance ceilings early.*
 

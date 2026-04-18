@@ -2,7 +2,8 @@ Think about what we learned during this session. Analyse errors that occurred an
 
 - Read `docs/README.md` to orient on the current doc structure
 - Read `docs/gotchas.md` and `docs/decisions.md`
-- Update `docs/stories.md` with a new entry for this session
+- Read `docs/stories.md` to match the format and voice of recent entries before adding a new one
+- Update `docs/stories.md` with a new entry for this session. If the shipped work deviated from the prompt in `docs/next-story.md` (scope crept, sub-task deferred, different files touched than the touch list specified, etc.), explicitly note the delta — the BA needs this before queueing the next story.
 
 For any new knowledge gained, route it to the right layer:
 - Something changed about **what exists or how it fits together** → `docs/architecture.md`
@@ -12,6 +13,4 @@ For any new knowledge gained, route it to the right layer:
 
 Create a new implementation doc in `docs/` only if no existing file fits. Do not create new docs for the other two layers — there is exactly one architecture doc and one decisions doc.
 
-Finally, close the handoff loop:
-- If `docs/next-story.md` still holds the prompt that was just shipped, overwrite it with `# No story queued` so the next dev session doesn't re-read a stale prompt
-- If the prompt in `docs/next-story.md` does NOT match what was just shipped, stop and flag it — do not overwrite; the BA may have queued the next story already, or something is out of sync
+Do **not** touch `docs/next-story.md`. That file is BA-owned; dev never writes or clears it. The next dev session will notice a stale prompt via the staleness guardrail (see `CLAUDE.md`) and ask the user before proceeding.

@@ -67,11 +67,12 @@ Acceptance:
 
 ## Handoff to Development
 
-The handoff contract is `docs/next-story.md`. The BA writes the full story prompt to that file; the dev session reads it as part of boot (see `CLAUDE.md` and the dev-writer skill). No copy/paste, single source of truth.
+The handoff contract is `docs/next-story.md`. **The BA owns this file exclusively** — BA writes, BA clears, BA overwrites. The dev session reads it as part of boot (see `CLAUDE.md` and the dev-writer skill) but never writes to it. No copy/paste, single source of truth.
 
 ### Before writing a story:
 1. Check `roadmap.md` — understand what's shipped and what's planned
 2. Review `decisions.md` — understand existing constraints
+3. Check `docs/next-story.md` — if it still holds a shipped story, overwrite it (see below). Dev leaves stale prompts in place by design; reconciling is the BA's job.
 
 ### When handing off:
 1. Write the story prompt to `docs/next-story.md` (overwrite any previous prompt)
@@ -81,7 +82,10 @@ The handoff contract is `docs/next-story.md`. The BA writes the full story promp
 ### After implementation:
 1. Review what dev added to `stories.md`
 2. Move story to **Shipped** in `roadmap.md`
-3. The dev session clears `docs/next-story.md` as part of shipping; if it's still populated, confirm it's stale before overwriting with the next story
+3. `docs/next-story.md` still holds the shipped prompt — dev does not clear it. Clear it yourself by either overwriting with the next story, or setting it to `# No story queued` if nothing is ready.
+
+### Staleness guardrail (dev-side)
+If a dev session starts and the prompt in `next-story.md` matches a story already logged in `stories.md`, dev is instructed to stop and ask rather than re-implement. This protects against a BA forgetting to queue the next story — the worst case is a "is this stale?" question at session start, not a re-implementation.
 
 ## Common Patterns
 

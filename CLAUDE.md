@@ -15,11 +15,11 @@ For spec work, also read:
 - `docs/engine-conventions.md` — Runtime invariants
 
 ## Story Implementation
-- `docs/next-story.md` is the handoff contract — BA writes, dev reads
+- `docs/next-story.md` is the handoff contract — **BA owns this file exclusively. Dev reads only, never writes, never clears, never overwrites.**
+- **Staleness guardrail:** before implementing, cross-check the prompt against `docs/stories.md`. If the story number or described work already appears as shipped, stop and ask the user — do not re-implement. The BA may not have queued the next story yet.
 - Follow story prompt format (title, requirements, files, acceptance)
 - Push back in-session if the prompt is unclear or wrong
 - Always update `stories.md` with what shipped
-- After shipping, clear `docs/next-story.md` (leave it empty or with a `# No story queued` placeholder) so the next session doesn't re-read a stale prompt
 
 ## Key References
 - Patterns: `docs/gotchas.md`
