@@ -16,6 +16,7 @@
 | Stories 40–42c | Keyboard navigation + screen reader support |
 | Story 43 | Accessibility audit + docs rewrite |
 | Story 44 | Drag-and-drop image load (2026-04-18) |
+| Story 45 | Image normalization — EXIF orientation, max 2048, JPEG re-encode (2026-04-18) |
 
 ---
 
@@ -23,13 +24,15 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-**Story 45 — Image Normalization** *(in progress — see `docs/next-story.md`)*
-Downscale oversized images (define max dimension). Preserve aspect ratio. Handle extreme aspect ratios gracefully.
-*Outcome: Discover performance ceilings early.*
-
-**Story 46 — Rebuild Puzzle on Image Load**
-Regenerate pieces after image load. Enforce 200-piece cap. Reset puzzle state cleanly.
+**Story 46 — Dynamic piece grid from image aspect ratio** *(in progress — see `docs/next-story.md`)*
+Compute rows/cols from image dimensions. Enforce 200-piece cap. Keep reload-based rebuild; defer in-place teardown.
 *Outcome: Core loop works with arbitrary input.*
+
+**Story 46b (candidate) — Bench piece clipping**
+Pieces with downward knobs and the magenta active ring cut off at bench button bottom. Mask padding / button bounds fix.
+
+**Story 46c (candidate) — Scatter spread investigation**
+Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure then fix if real.
 
 ---
 
