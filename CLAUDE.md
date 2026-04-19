@@ -20,6 +20,7 @@ For spec work, also read:
 - Follow story prompt format (title, requirements, files, acceptance)
 - Push back in-session if the prompt is unclear or wrong
 - Always update `stories.md` with what shipped
+- **QA handoff at end of work.** Before declaring done, run `/qa` (or produce the equivalent inline): a chat-only summary the user can test from cold — refreshed acceptance criteria, concrete test steps, any test images dropped into `/qa-scratch/`, and what's deliberately out of scope. See `.claude/commands/qa.md` for the format and `test/fixtures/README.md` for the fixture system.
 
 ## Key References
 - Patterns: `docs/gotchas.md`

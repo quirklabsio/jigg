@@ -104,6 +104,7 @@ When a story comes from BA planning:
 - Confirm implementation preserves existing user experience
 - **Never write to or clear `docs/next-story.md`.** It is BA-owned. Read only.
 - **Check for staleness before implementing.** Cross-reference the prompt against `docs/stories.md`. If the story has already shipped (number or described work matches a logged entry), stop and ask the user rather than re-implementing — the BA may not have queued the next story yet.
+- **End-of-work QA handoff via `/qa`.** When you believe the work is done, run `/qa` to produce the chat-only handoff (refreshed acceptance criteria, test steps, test images in `/qa-scratch/`, out of scope, roadmap preview). Do NOT run `/refine` at this point — refine is the final step after the user has manually tested and confirmed pass. Sequence: code → `/qa` → user tests → (bugfix loop if needed) → `/refine`. Promotion of fixtures from `/qa-scratch/` into `/test/fixtures/` is a human decision made after testing — see `test/fixtures/README.md`.
 
 ## Session Handoff
 

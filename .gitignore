@@ -5,3 +5,4 @@ crates/jigg-analysis/target/
 .DS_Store
 *.env
 .env.local
+qa-scratch/
