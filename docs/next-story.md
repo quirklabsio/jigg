@@ -1,78 +1,118 @@
-# Story 47: Choose-image file picker (minimal UI)
+# Story 48: Curated image set + dev regression fixture
 
 ## Context
 
-Story 44 introduced drag-and-drop as a dev-tool entry for arbitrary images; Story 45 normalized them; Story 46 made the puzzle rebuild around any grid. End users don't drag files onto web apps as a first instinct though — they click buttons. Story 47 is the first of the Controlled Inputs epic ("make it a product, not a dev tool"): add a minimal DOM button that triggers the native file picker, routing the chosen file through the same pipeline drag-and-drop already uses.
+Story 47 shipped a "Choose Image" button that goes straight to a native file picker. That's fine for power users but gives a first-time user nothing to click through to. Story 48 adds a small baked-in set of public-domain images users can pick from, surfaced via the same button. One of those entries is a **designated dev regression fixture** — a small-grid image with documented manual-test steps (this absorbs the parked Story 47b into 48 per the fold-in decision).
 
-No design flourish. One button, one click, reuse the existing path.
+Metadata stays lightweight per the roadmap — no JSON file (that's Story 49), no landing screen (Story 52), no settings panel (Story 70). Just a typed array and a minimal picker panel.
 
 ## Requirements
 
-Add a persistent DOM `<button>` element to `index.html` (a sibling of `#app`, not inside the pixi-managed region). Label it clearly — "Choose Image" is the roadmap's suggested text; you can pick any equivalent imperative label but avoid verbose copy.
+### The curated set
 
-On click:
-1. Programmatically create a hidden `<input type="file" accept="image/*">` and trigger `.click()` on it (the standard pattern for styled upload triggers — a real `<input>` is clunky to style, a hidden one driven by a button is accessible and clean).
-2. On `change`, read `files[0]`. Apply the existing gate `file.type.startsWith('image/')`.
-3. Call `normalizeImage(file)` — the exact same function Story 45 added.
-4. Store to `sessionStorage` under the existing `SESSION_KEY` (`'jigg:pendingImageUrl'`).
-5. `window.location.reload()`.
+Create a new module at `src/curated/images.ts` exporting a typed array. Each entry:
 
-This is the drag-and-drop pipeline, reused. **Do not duplicate the logic.** Extract the shared "process-and-load-image" path from `main.ts`'s drop handler into a single helper (e.g. `loadImageFile(file)`) and call it from both the drop handler and the new click handler. The drop handler must continue to work identically after the refactor.
+```ts
+{
+  src: string;                     // path under public/curated/, e.g. '/curated/landscape-01.jpg'
+  label: string;                   // short display name, e.g. "Mountain lake"
+  forceGrid?: { cols: number; rows: number };  // optional grid override (used by the regression fixture)
+}
+```
 
-### Styling
+Target set: **5–10 images** chosen for variety across the dimensions that matter: aspect ratio (at least one portrait, one landscape, one roughly square), palette complexity (at least one simple/graphic, one busy/photographic), and dominant-color spread (not all cool tones, not all warm). Dev picks the specific images.
 
-Inline styles in `index.html`'s existing `<style>` block. No separate stylesheet. Keep it visually small and unobtrusive:
+**Public-domain only.** No personal photos. Good sources: Wikimedia Commons, Unsplash (public-domain license only), NASA, Met Open Access. Each image pre-normalized to ≤ 2048 px longest edge (to avoid Story 45's runtime normalization on every load) and ≤ 300 KB per file. Drop them in `public/curated/`.
 
-- Fixed position, one corner of the viewport (top-right is the default recommendation — top-left may conflict with future settings or landmark focus)
-- ~8–12 px padding, system font, neutral background (off-white or pale gray) matching the existing `#f5f5f3` body background so it doesn't shout
-- Subtle hover state
-- Clear focus ring (honor the default browser outline or provide an equivalent; accessibility is non-negotiable)
+### The regression fixture (the 47b fold-in)
 
-### Accessibility
+Exactly one entry in the curated set is the dev regression image:
+- **Grid: 3×3 = 9 pieces** via `forceGrid`. Chosen over 2×4=8 because 3×3 includes all three piece-classification types (4 corners, 4 edges, 1 interior) — that's the minimum grid that exercises the full bench filter strip.
+- **Content**: clearly distinct regions per piece — a simple geometric or high-contrast image where correct placement is obvious at a glance. An abstract color-block composition beats a photograph here. Dev picks.
+- **Label**: something like `"Regression test (3×3)"` — communicate the dev-tool nature in the label itself.
+- **Always present in the set.** It's not hidden behind a debug flag. If a user loads it they get a small puzzle. No harm.
 
-- It's a real `<button>`, not a styled `<div>`. Tab lands on it. Enter/Space activates. Screen readers announce "button, Choose Image".
-- The button must remain reachable regardless of the bench/table keyboard mode (see `decisions.md` §"Keyboard Mode Switching — `inert` model"). It is NOT inside the bench or table landmark — it's a top-level document control, so the `inert` management on `benchLandmark` / `table` does not touch it.
-- Do not interfere with existing keyboard shortcuts (T, Tab, Enter, etc.). The button responding to its own click/keydown is fine; global keydown handlers in `scene.ts` still fire.
-- Confirm the button tabs into a sensible order — probably first (before the puzzle landmark) or last, whichever fits naturally. Don't force a specific tabindex unless necessary.
+### The forceGrid plumbing
+
+`computeGrid` currently derives `cols`/`rows` from image dimensions (Story 46). When a curated image with `forceGrid` is loaded, the override wins:
+
+- Pass the optional forced grid through the image-load path (same path Story 47 refactored into `loadImageFile(file)` — this needs a sibling or parameter for "load by URL + optional forced grid").
+- In `scene.ts`' `loadScene` (or wherever `computeGrid` is called), if a forced grid is provided, skip `computeGrid` and use the override. Otherwise behave as today.
+- The grid override must respect the existing constraints: `rows >= 2`, `cols >= 2`, `rows * cols <= 200`. Throw or console.warn and ignore if the override violates. 3×3 satisfies all constraints.
+
+### The picker panel
+
+Repurpose the "Choose Image" button from Story 47. On click, it now opens a small panel (previously: triggered picker directly). The panel contains:
+
+- A grid of thumbnails, one per curated entry (label below or overlay)
+- An "Upload your own…" affordance at the bottom of the panel that triggers the hidden `<input type="file">` — the pre-48 flow
+- Close affordances: Escape key, click outside the panel, or a small × in the panel corner
+
+Click on a curated thumbnail → `loadImageFile(url, { forceGrid })` (the URL equivalent of the existing file-object path) → same `sessionStorage + reload` pipeline Story 45/47 established.
+
+### Panel accessibility
+
+Non-negotiable, consistent with the accessibility bar:
+- Panel is a `<dialog>` (preferred) or a landmark region with `role="dialog"` + `aria-label="Choose an image"`
+- Focus moves into the panel on open; trap focus inside while open (arrow keys navigate thumbnails, Tab cycles within)
+- Enter activates the focused thumbnail
+- Escape closes and returns focus to the "Choose Image" button
+- Thumbnails are real `<button>` elements with `aria-label` including the image label (e.g. `aria-label="Mountain lake"`); a screen reader announces them
+
+### The regression script document
+
+Create `docs/regression-script.md` — a short, durable manual-test doc. Seed it with the end-to-end steps for the regression fixture: load regression image → open bench → extract one piece via click → extract one via keyboard → rotate a piece → snap to board → merge two pieces into a cluster → solve to completion. Each step should call out what it verifies. ~2 minutes of clicks, covers the core loop.
+
+The doc is living — future stories add steps as they ship features. This first version just seeds it.
 
 ## Constraints
 
-- **Do not change the image pipeline.** `normalizeImage`, `sessionStorage`, reload-based rebuild — all stays. This story is a new entry point, not a rewrite.
-- **Do not remove or weaken drag-and-drop.** Both entry points coexist. Drop still works exactly as before.
-- **Do not introduce a loading spinner or progress UI.** Normalization is fast at 2048 max; a spinner adds ceremony for a non-problem. If perf is ever a real issue, that's a future story.
-- **Do not add a custom file-type error dialog.** Non-image selection is silently ignored, matching Story 44's behavior. User picks the file; we trust the `accept` attribute to guide them.
-- **Do not style the button into something clever.** "Minimal UI" means it looks like a button, not like a brand.
-- **Do not touch pixi UI layers** (`scene.ts` tray, filter strip, etc.). This is a DOM button outside the canvas.
-- **Do not pre-empt the Settings panel (Story 70).** If you find yourself thinking about a panel, a dropdown, or a menu, step back — a single button is the entire surface.
+- **Do not introduce a metadata JSON file.** That's Story 49. The typed array in `src/curated/images.ts` is the entire metadata surface right now.
+- **Do not build a landing screen.** Story 52 owns the "Play Today / Choose Image" fork.
+- **Do not pre-empt Story 70's settings panel.** The picker panel is for image selection only — no rotation toggle, no snap sensitivity, no background controls.
+- **Do not change drag-and-drop.** Drop still works onto the canvas, same as today.
+- **Do not break 47's upload flow.** The "Upload your own…" option inside the panel must go through the exact same `loadImageFile(file)` helper. No duplication.
+- **Do not commit images that can't pass a public-domain check.** If unsure about a specific image's license, skip it. Seven good images beats ten with a lawyer-attracting eighth.
+- **Do not add image-level description text, credits, or license URLs to the array.** Those are Story 49's concern. Just `src`, `label`, optional `forceGrid`.
+- **Do not remove the existing `public/test-image.jpg` or `public/test-face.png`.** They're referenced by QA fixtures; this story is additive.
 
 ## Files likely to touch
 
-- `index.html` — add the `<button>`, add inline styles for it
-- `src/main.ts` — extract `loadImageFile(file)` helper, wire it to both the drop handler (refactor) and the new click handler
+- `src/curated/images.ts` — new; the typed array
+- `public/curated/*.jpg` — new image assets (5–10 files, each ≤ 300 KB)
+- `index.html` — panel markup and inline styles (keep consistent with the existing `<style>` block)
+- `src/main.ts` — extend `loadImageFile` (or add a sibling) to accept a URL + optional `forceGrid`; repurpose the Choose Image button to open the panel; wire thumbnail clicks and the upload fallback
+- `src/canvas/scene.ts` (or wherever `computeGrid` is called) — honor the forced grid when present; fall through to `computeGrid` otherwise
+- `docs/regression-script.md` — new
+- `docs/decisions.md` — short note on the `forceGrid` override path and why the panel reused the 47 button rather than adding a second
 
 ## Acceptance
 
 User tests via QA page. Write ACs into `public/qa.html` per the `/qa` command format.
 
-- **AC-1: Button visible on load.** The "Choose Image" button is visible in the corner of the viewport on initial load. Doesn't overlap the tray, filter strip, or other existing UI.
-- **AC-2: Click opens native picker.** Clicking the button opens the OS file picker. The picker filter shows image types only (`accept="image/*"`).
-- **AC-3: Picked image loads.** Pick any JPEG or PNG from the QA page's fixture list (or any image on disk). The page reloads and the puzzle regenerates around the chosen image. Behavior is identical to drag-and-drop of the same file.
-- **AC-4: Non-image silently ignored.** If the user picks a non-image file via a file picker that allowed it (rare given `accept`, but possible), nothing happens — no error, no reload. Matches Story 44 drop behavior.
-- **AC-5: Drag-and-drop still works.** Drop an image onto the canvas. Loads identically. Both entry points functional.
-- **AC-6: Keyboard accessible.** Tab to the button. It receives a visible focus ring. Press Enter — picker opens. Press Space — picker opens. Screen readers announce it as a button with the correct label.
-- **AC-7: Tabs through without breaking keyboard modes.** Open the tray with `T`. Tab. Focus lands sensibly (button reachable; bench landmark still navigable; no accidental inert violations). Close the tray with `T`. Tab still works correctly on the table side.
-- **AC-8: No regression in puzzle solving.** Load an image via the button, solve a few pieces, extract via keyboard, snap to the board. All Story 40–46e behaviors still work.
+- **AC-1: Panel opens from the existing button.** Click "Choose Image". A small panel appears near the button showing 5–10 thumbnails and an "Upload your own…" affordance. No duplicate or secondary button was added.
+- **AC-2: Curated selection loads.** Click any curated thumbnail. The page reloads and the puzzle rebuilds around that image. Behavior matches drag-and-drop for the same image.
+- **AC-3: Regression fixture produces exactly 9 pieces.** Click the regression entry. Bench shows exactly 9 pieces in a 3×3 grid. Filter strip shows 4 corners, 4 edges, 1 interior.
+- **AC-4: Regression script is executable.** Follow `docs/regression-script.md` end-to-end on the regression image. Every step is clear; full script finishes in under ~3 minutes; all steps pass.
+- **AC-5: Upload fallback unchanged.** Click "Upload your own…" inside the panel. Native file picker opens. Selecting an image loads it — identical to Story 47's flow.
+- **AC-6: Drag-and-drop unchanged.** Drop an image onto the canvas (panel closed). Loads normally.
+- **AC-7: Keyboard access.** Tab reaches the button. Enter/Space opens the panel. Focus moves into the panel. Arrow keys navigate thumbnails; Enter activates a selection. Escape closes the panel and returns focus to the button.
+- **AC-8: Panel closes on outside click.** With panel open, click anywhere outside the panel. Panel closes.
+- **AC-9: Screen reader announces.** Panel announces as a dialog with its `aria-label`. Each thumbnail announces its image label.
+- **AC-10: No regression in Story 40–47 behaviors.** Tray open/close, bench filters, keyboard nav within bench/table, snap, rotation, completion detection all unchanged.
 
 ## Out of scope
 
-- Curated image set (Story 48)
-- Metadata shape (Story 49)
-- Landing screen with "Play Today" / "Choose Image" fork (Story 52 — that's further out and includes a second button)
-- Settings panel (Story 70)
-- Any progress UI, error dialog, or file-type feedback
-- Visual design beyond "minimal system button"
-- Story 46f (label clipping Approach B) — still queued separately; not a blocker
+- Metadata file (`docs/curated.json` or similar) — Story 49
+- Landing screen / first-load fork — Story 52
+- Settings panel — Story 70
+- Dynamic image sources (MET API) — Stories 65–67
+- Story 47a (piece visibility on board) — still a candidate
+- Story 47c (palette tuning + swap UI) — still a candidate
+- Story 46f (label clipping Approach B) — still a candidate
+- Image attribution / credits text — Story 49
+- A "scroll through all 10" panel layout if the set stays under ~10; a grid that fits in-panel is sufficient
 
 ## Known next
 
-After 47: Story 48 (Curated Image Set — hardcoded) kicks off the "baked-in images" work, still inside Controlled Inputs. 46f queued independently.
+After 48: the remaining 47-series candidates (47a piece visibility, 47c palette), and Story 49 (metadata file). The roadmap has no committed order beyond "47a is probably the most pressing UX fix" — re-queue at BA-session time once 48 ships.

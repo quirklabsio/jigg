@@ -40,8 +40,14 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 48 — Curated Image Set (hardcoded)**
-5–10 baked-in images. Simple selection UI (no metadata file yet).
+**Story 47a (candidate) — Piece visibility on board**
+White / near-white pieces blend into the off-white board — real UX bug with arbitrary images. Options: darker board tint, piece edge stroke, subtle placed-piece shadow, or accessibility-preference-aware board color. User-surfaced after 47 shipped with real-world images.
+
+**Story 47c (candidate) — Palette tuning + swap UI**
+Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
+
+**Story 48 — Curated Image Set + dev regression fixture** *(in progress — see `docs/next-story.md`)*
+5–10 public-domain baked-in images with a minimal picker panel triggered by the existing "Choose Image" button. One entry is a `forceGrid: {cols:3, rows:3}` regression fixture with a seeded `docs/regression-script.md`. 47b absorbed into this story.
 
 **Story 49 — Minimal Metadata Shape**
 Introduce lightweight structure: `id`, `title`, `source` (string only). Stored inline with curated set.
