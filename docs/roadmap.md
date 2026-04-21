@@ -17,16 +17,13 @@
 | Story 43 | Accessibility audit + docs rewrite |
 | Story 44 | Drag-and-drop image load (2026-04-18) |
 | Story 45 | Image normalization — EXIF orientation, max 2048, JPEG re-encode (2026-04-18) |
+| Story 46 | Dynamic piece grid from image aspect ratio — `computeGrid`, 200-piece cap, removed hardcoded COLS/ROWS (2026-04-20) |
 
 ---
 
 ## 📋 Next
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
-
-**Story 46 — Dynamic piece grid from image aspect ratio** *(in progress — see `docs/next-story.md`)*
-Compute rows/cols from image dimensions. Enforce 200-piece cap. Keep reload-based rebuild; defer in-place teardown.
-*Outcome: Core loop works with arbitrary input.*
 
 **Story 46b (candidate) — Bench piece clipping**
 Pieces with downward knobs and the magenta active ring cut off at bench button bottom. Mask padding / button bounds fix.

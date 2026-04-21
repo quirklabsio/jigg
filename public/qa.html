@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jigg — QA</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      padding: 24px 20px 48px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    .header { margin-bottom: 28px; }
+    .header-story { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+    .header-title { font-size: 18px; font-weight: 700; color: #eee; }
+
+    /* ── Section labels ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    /* ── AC checklist ── */
+    .ac-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px; }
+
+    .ac-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: #222;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .ac-row:hover { border-color: #444; }
+    .ac-row.passed { border-color: #2a5c3a; background: #1c2e22; }
+    .ac-row.failed { border-color: #5c2a2a; background: #2e1c1c; }
+
+    .ac-checkbox {
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      border: 2px solid #444;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+      transition: background 0.1s, border-color 0.1s;
+      font-size: 11px;
+    }
+    .ac-row.passed .ac-checkbox { background: #2d7a47; border-color: #2d7a47; }
+    .ac-row.failed .ac-checkbox { background: #7a2d2d; border-color: #7a2d2d; }
+
+    .ac-body { flex: 1; }
+    .ac-id { font-size: 11px; font-weight: 700; color: #5a9fd4; margin-bottom: 3px; }
+    .ac-text { font-size: 13px; color: #bbb; line-height: 1.5; }
+    .ac-row.passed .ac-text { color: #888; }
+
+    .ac-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .ac-btn {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #2a2a2a;
+      color: #888;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+    }
+    .ac-btn:hover { background: #353535; color: #ccc; }
+    .ac-btn.pass { border-color: #2d5c3a; color: #4caf76; }
+    .ac-btn.pass:hover { background: #1c3028; }
+    .ac-btn.fail { border-color: #5c2d2d; color: #cf6679; }
+    .ac-btn.fail:hover { background: #301c1c; }
+
+    /* ── Fixtures grid ── */
+    .fixtures { margin-bottom: 32px; }
+    .fixture-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      background: #222;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: grab;
+      transition: border-color 0.15s, transform 0.1s;
+      user-select: none;
+    }
+    .card:active { cursor: grabbing; transform: scale(0.97); }
+    .card:hover { border-color: #444; }
+
+    .card img {
+      width: 100%;
+      height: 100px;
+      object-fit: cover;
+      display: block;
+      pointer-events: none;
+    }
+
+    .card-meta { padding: 9px 11px 4px; }
+    .card-name { font-size: 11px; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-dims { font-size: 11px; color: #555; margin-top: 2px; }
+
+    .card-ac-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 11px 4px; }
+    .ac-tag {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: #1e3248;
+      color: #5a9fd4;
+      border: 1px solid #243d5c;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 11px 10px;
+    }
+
+    .load-btn {
+      flex: 1;
+      padding: 5px 0;
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 5px;
+      color: #888;
+      font-size: 11px;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.1s, color 0.1s;
+    }
+    .load-btn:hover { background: #353535; color: #eee; }
+
+    .nominate-btn {
+      padding: 5px 8px;
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 5px;
+      color: #666;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .nominate-btn:hover { background: #2a3828; border-color: #3a5c3a; color: #4caf76; }
+    .nominate-btn.nominated { background: #1c3028; border-color: #2d5c3a; color: #4caf76; }
+    .nominate-btn.recommended { border-color: #3a5c3a; }
+
+    .rec-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: #1a2e1a;
+      color: #4a8a5a;
+      border: 1px solid #2a4a2a;
+      margin-left: 6px;
+      vertical-align: middle;
+      cursor: help;
+    }
+
+    /* ── Observations ── */
+    .observations { margin-bottom: 24px; }
+    .obs-textarea {
+      width: 100%;
+      min-height: 100px;
+      background: #222;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      color: #ddd;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 12px 14px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .obs-textarea:focus { border-color: #444; }
+    .obs-textarea::placeholder { color: #444; }
+
+    /* ── Copy report ── */
+    .copy-row { display: flex; gap: 10px; align-items: center; }
+    .copy-btn {
+      padding: 9px 18px;
+      background: #1e3248;
+      border: 1px solid #243d5c;
+      border-radius: 6px;
+      color: #5a9fd4;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #243d5c; }
+    .copy-hint { font-size: 12px; color: #444; }
+
+    /* ── Progress bar ── */
+    .progress-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .progress-bar { flex: 1; height: 4px; background: #2a2a2a; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #2d7a47; border-radius: 2px; transition: width 0.3s; }
+    .progress-label { font-size: 12px; color: #555; white-space: nowrap; min-width: 60px; text-align: right; }
+
+    /* ── Status toast ── */
+    .status {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #ddd;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .status.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-story">Story 46 · QA Checklist</div>
+    <div class="header-title">Dynamic piece grid from image aspect ratio</div>
+  </div>
+
+  <!-- ── Acceptance Criteria ─────────────────────────────────── -->
+  <div class="section-label">Acceptance Criteria</div>
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-label" id="progressLabel">0 / 7</div>
+  </div>
+  <div class="ac-list" id="acList"></div>
+
+  <!-- ── Test Fixtures ──────────────────────────────────────── -->
+  <div class="fixtures">
+    <div class="section-label">Test Fixtures</div>
+    <div class="fixture-grid" id="fixtureGrid"></div>
+  </div>
+
+  <!-- ── Observations ──────────────────────────────────────── -->
+  <div class="observations">
+    <div class="section-label" style="margin-bottom:10px">Observations for BA</div>
+    <textarea class="obs-textarea" id="observations"
+      placeholder="Note anything unexpected — wrong piece counts, visual glitches, broken interactions, regressions. The BA reads this before writing the next story."></textarea>
+  </div>
+
+  <!-- ── Copy Report ──────────────────────────────────────── -->
+  <div class="copy-row">
+    <button class="copy-btn" id="copyBtn">Copy QA Report</button>
+    <span class="copy-hint">Paste into Slack, Notion, or a story comment.</span>
+  </div>
+
+  <!-- ── Fallback modal (shown when clipboard API is blocked) ── -->
+  <div id="reportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:100;padding:24px;align-items:center;justify-content:center;">
+    <div style="background:#222;border:1px solid #444;border-radius:10px;width:100%;max-width:600px;max-height:80vh;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #333;">
+        <span style="font-size:13px;font-weight:600;color:#ccc;">Select all and copy</span>
+        <button id="modalClose" style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;line-height:1;padding:0 4px;">×</button>
+      </div>
+      <textarea id="reportText" readonly style="flex:1;min-height:300px;background:#1a1a1a;border:none;color:#bbb;font-family:monospace;font-size:12px;line-height:1.6;padding:14px 16px;resize:none;outline:none;"></textarea>
+      <div style="padding:10px 16px;border-top:1px solid #333;">
+        <button id="modalCopy" style="padding:7px 16px;background:#1e3248;border:1px solid #243d5c;border-radius:5px;color:#5a9fd4;font-size:13px;font-weight:600;cursor:pointer;">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <script>
+    // ── Story data — update this block each session ──────────────────────────
+    const STORY = {
+      number: 46,
+      title: 'Dynamic piece grid from image aspect ratio',
+      criteria: [
+        {
+          id: 'AC-1',
+          text: '2048×1536 (phone JPEG, post-normalisation) → bench shows All (165 ± 10). Pieces look square-ish.',
+        },
+        {
+          id: 'AC-2',
+          text: '512×512 → bench shows All (81). 500×500 → All (64 ± 4). Piece side visibly above ~57 px.',
+        },
+        {
+          id: 'AC-3',
+          text: '2048×102 panorama → rows ≥ 2 (MIN_GRID enforced). Bench loads, no crash. Pieces are narrow but functional.',
+        },
+        {
+          id: 'AC-4',
+          text: '2048×2048 square → bench shows All (169 ± 4).',
+        },
+        {
+          id: 'AC-5',
+          text: 'No image produces more than 200 pieces. All tested images confirm count ≤ 200.',
+        },
+        {
+          id: 'AC-6',
+          text: 'Puzzle solvable on a large grid (≥ 130 pieces): drag, snap, bench filters, keyboard nav, rotation all work.',
+        },
+        {
+          id: 'AC-7',
+          text: 'Corner (4), Edge, and Interior counts in the filter strip are sensible for every tested grid.',
+        },
+      ],
+    };
+
+    const FIXTURES = [
+      {
+        src: '/test-image.jpg',
+        name: 'test-image.jpg',
+        dims: '800 × 600',
+        acs: ['AC-5', 'AC-6', 'AC-7'],
+        expect: 'All (130) — 13×10',
+      },
+      {
+        src: '/test-face.png',
+        name: 'test-face.png',
+        dims: '512 × 512',
+        acs: ['AC-2', 'AC-5'],
+        expect: 'All (81) — 9×9',
+      },
+      {
+        src: '/qa-scratch/synthetic-2048x1536.jpg',
+        name: 'synthetic-2048×1536',
+        dims: '2048 × 1536',
+        acs: ['AC-1', 'AC-5', 'AC-6', 'AC-7'],
+        expect: 'All (165) — 15×11',
+        qaFile: 'qa-scratch/synthetic-2048x1536.jpg',
+        recommended: true,
+        recommendReason: 'Covers the phone-JPEG aspect ratio — exercises more ACs than any other single fixture.',
+      },
+      {
+        src: '/qa-scratch/synthetic-2048x2048.jpg',
+        name: 'synthetic-2048×2048',
+        dims: '2048 × 2048',
+        acs: ['AC-4', 'AC-5'],
+        expect: 'All (169) — 13×13',
+        qaFile: 'qa-scratch/synthetic-2048x2048.jpg',
+        recommended: false,
+      },
+      {
+        src: '/qa-scratch/synthetic-2048x102.jpg',
+        name: 'synthetic-2048×102',
+        dims: '2048 × 102',
+        acs: ['AC-3', 'AC-5'],
+        expect: 'All (68) — 34×2',
+        qaFile: 'qa-scratch/synthetic-2048x102.jpg',
+        recommended: true,
+        recommendReason: 'Only fixture that proves MIN_GRID enforcement on extreme panoramas — not reproducible from a typical user photo.',
+      },
+    ];
+    // ── End story data ────────────────────────────────────────────────────────
+
+    // State: null = untested, true = pass, false = fail
+    const acState = Object.fromEntries(STORY.criteria.map(ac => [ac.id, null]));
+
+    // ── Render AC list ────────────────────────────────────────────────────────
+    const acList = document.getElementById('acList');
+
+    function renderAcList() {
+      acList.innerHTML = '';
+      STORY.criteria.forEach(ac => {
+        const state = acState[ac.id];
+        const row = document.createElement('div');
+        row.className = 'ac-row' + (state === true ? ' passed' : state === false ? ' failed' : '');
+
+        const checkMark = state === true ? '✓' : state === false ? '✗' : '';
+
+        row.innerHTML = `
+          <div class="ac-checkbox">${checkMark}</div>
+          <div class="ac-body">
+            <div class="ac-id">${ac.id}</div>
+            <div class="ac-text">${ac.text}</div>
+            <div class="ac-actions">
+              <button class="ac-btn pass" data-id="${ac.id}" data-result="pass">Pass ✓</button>
+              <button class="ac-btn fail" data-id="${ac.id}" data-result="fail">Fail ✗</button>
+              ${state !== null ? `<button class="ac-btn" data-id="${ac.id}" data-result="clear">Clear</button>` : ''}
+            </div>
+          </div>
+        `;
+        acList.appendChild(row);
+      });
+      updateProgress();
+    }
+
+    acList.addEventListener('click', e => {
+      const btn = e.target.closest('[data-result]');
+      if (!btn) return;
+      const { id, result } = btn.dataset;
+      acState[id] = result === 'pass' ? true : result === 'fail' ? false : null;
+      renderAcList();
+    });
+
+    // ── Progress bar ──────────────────────────────────────────────────────────
+    function updateProgress() {
+      const total = STORY.criteria.length;
+      const passed = Object.values(acState).filter(v => v === true).length;
+      const tested = Object.values(acState).filter(v => v !== null).length;
+      document.getElementById('progressFill').style.width = `${(passed / total) * 100}%`;
+      document.getElementById('progressLabel').textContent = `${passed} / ${total} passed`;
+    }
+
+    // ── Nominations (fixtures the user wants to promote) ─────────────────────
+    // Pre-seeded with dev recommendations — user can remove any they disagree with.
+    const nominated = new Set(FIXTURES.filter(f => f.recommended).map(f => f.src));
+
+    // ── Render fixture cards ──────────────────────────────────────────────────
+    const fixtureGrid = document.getElementById('fixtureGrid');
+
+    function renderFixtures() {
+      fixtureGrid.innerHTML = '';
+      FIXTURES.forEach(fixture => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.draggable = true;
+
+        const tags = fixture.acs.map(id => `<span class="ac-tag">${id}</span>`).join('');
+        const isNominated = nominated.has(fixture.src);
+        const canNominate = !!fixture.qaFile;
+        const isRec = !!fixture.recommended;
+        const recTitle = fixture.recommendReason ?? 'Dev recommends promoting this fixture.';
+        const recBadge = isRec ? `<span class="rec-badge" title="${recTitle}">Dev rec.</span>` : '';
+
+        card.innerHTML = `
+          <img src="${fixture.src}" alt="${fixture.name}" loading="lazy">
+          <div class="card-meta">
+            <div class="card-name">${fixture.name}${recBadge}</div>
+            <div class="card-dims">${fixture.dims} · <span style="color:#4a7a5a">${fixture.expect}</span></div>
+          </div>
+          <div class="card-ac-tags">${tags}</div>
+          <div class="card-footer">
+            <button class="load-btn">Load in App</button>
+            ${canNominate ? `<button class="nominate-btn ${isNominated ? 'nominated' : ''} ${isRec ? 'recommended' : ''}" title="${isRec ? recTitle : 'Nominate for promotion to test/fixtures/'}">${isNominated ? '★ Nominated' : '☆ Nominate'}</button>` : ''}
+          </div>
+        `;
+
+        card.addEventListener('dragstart', e => {
+          const absUrl = new URL(fixture.src, window.location.origin).href;
+          e.dataTransfer.setData('text/uri-list', absUrl);
+          e.dataTransfer.setData('text/plain', absUrl);
+          e.dataTransfer.effectAllowed = 'copy';
+        });
+
+        card.querySelector('.load-btn').addEventListener('click', () => loadInApp(fixture.src));
+
+        if (canNominate) {
+          card.querySelector('.nominate-btn').addEventListener('click', () => {
+            if (nominated.has(fixture.src)) nominated.delete(fixture.src);
+            else nominated.add(fixture.src);
+            renderFixtures();
+          });
+        }
+
+        fixtureGrid.appendChild(card);
+      });
+    }
+
+    renderFixtures();
+
+    // ── Load in App ───────────────────────────────────────────────────────────
+    function loadInApp(src) {
+      flash('Fetching…');
+      fetch(src)
+        .then(r => r.blob())
+        .then(blob => new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        }))
+        .then(dataUrl => {
+          try { sessionStorage.setItem('jigg:pendingImageUrl', dataUrl); }
+          catch { sessionStorage.removeItem('jigg:pendingImageUrl'); }
+          window.location.href = '/';
+        })
+        .catch(err => flash('Error: ' + err.message));
+    }
+
+    // ── Copy QA report ────────────────────────────────────────────────────────
+    document.getElementById('copyBtn').addEventListener('click', () => {
+      const date = new Date().toISOString().slice(0, 10);
+      const lines = [
+        `QA Report — Story ${STORY.number}: ${STORY.title}`,
+        `Date: ${date}`,
+        '',
+        'Acceptance Criteria:',
+      ];
+
+      STORY.criteria.forEach(ac => {
+        const state = acState[ac.id];
+        const icon = state === true ? '✓ PASS' : state === false ? '✗ FAIL' : '○ NOT TESTED';
+        lines.push(`  ${icon}  ${ac.id}: ${ac.text}`);
+      });
+
+      const obs = document.getElementById('observations').value.trim();
+      if (obs) {
+        lines.push('');
+        lines.push('Observations:');
+        obs.split('\n').forEach(l => lines.push('  ' + l));
+      }
+
+      // Fixture nominations
+      const nominatedFixtures = FIXTURES.filter(f => nominated.has(f.src));
+      if (nominatedFixtures.length > 0) {
+        lines.push('');
+        lines.push('Fixtures nominated for promotion to test/fixtures/:');
+        nominatedFixtures.forEach(f => {
+          const tag = f.recommended ? '[Dev rec.] ' : '[User added] ';
+          const reason = f.recommended && f.recommendReason ? `  — ${f.recommendReason}` : '';
+          lines.push(`  ${tag}${f.qaFile}  →  test/fixtures/images/slice/  (${f.acs.join(', ')})${reason}`);
+        });
+        lines.push('  (Dev: rename to convention, add fixtures.json entry, confirm automated: true/false)');
+      }
+
+      const passed = Object.values(acState).filter(v => v === true).length;
+      const failed = Object.values(acState).filter(v => v === false).length;
+      const untested = Object.values(acState).filter(v => v === null).length;
+      lines.push('');
+      lines.push(`Summary: ${passed} passed · ${failed} failed · ${untested} not tested`);
+
+      const text = lines.join('\n');
+
+      // Try modern clipboard API first; fall back to execCommand; finally show modal.
+      function showModal() {
+        const modal = document.getElementById('reportModal');
+        const ta = document.getElementById('reportText');
+        ta.value = text;
+        modal.style.display = 'flex';
+        ta.focus();
+        ta.select();
+      }
+
+      function execCommandCopy() {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      }
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+          .then(() => flash('Copied to clipboard ✓'))
+          .catch(() => {
+            if (execCommandCopy()) flash('Copied to clipboard ✓');
+            else showModal();
+          });
+      } else if (execCommandCopy()) {
+        flash('Copied to clipboard ✓');
+      } else {
+        showModal();
+      }
+    });
+
+    // ── Fallback modal controls ───────────────────────────────────────────────
+    document.getElementById('modalClose').addEventListener('click', () => {
+      document.getElementById('reportModal').style.display = 'none';
+    });
+    document.getElementById('modalCopy').addEventListener('click', () => {
+      const ta = document.getElementById('reportText');
+      ta.select();
+      if (document.execCommand('copy')) {
+        flash('Copied ✓');
+        setTimeout(() => { document.getElementById('reportModal').style.display = 'none'; }, 800);
+      }
+    });
+    document.getElementById('reportModal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+    });
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    let _toastTimer;
+    function flash(msg) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    renderAcList();
+  </script>
+</body>
+</html>

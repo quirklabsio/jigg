@@ -12,6 +12,33 @@ import type { CutPath, EdgeType, Piece } from './types';
  */
 export const EDGE_INFLUENCE = 0.5;
 
+// ─── Grid sizing ──────────────────────────────────────────────────────────────
+
+const TARGET_PIECES  = 160; // aim for this piece count (not the ceiling)
+const MAX_PIECES     = 200; // hard cap — never exceed
+const MIN_PIECE_SIDE = 60;  // soft floor in px; panoramas may go below (MIN_GRID wins)
+const MIN_GRID       = 2;   // absolute floor on rows and cols
+
+/**
+ * Compute rows and cols from image dimensions so pieces are close to square,
+ * never below MIN_GRID × MIN_GRID, and the total never exceeds MAX_PIECES.
+ */
+export function computeGrid(imageWidth: number, imageHeight: number): { rows: number; cols: number } {
+  const side = Math.max(Math.sqrt((imageWidth * imageHeight) / TARGET_PIECES), MIN_PIECE_SIDE);
+
+  let cols = Math.max(Math.round(imageWidth  / side), MIN_GRID);
+  let rows = Math.max(Math.round(imageHeight / side), MIN_GRID);
+
+  // Reduce the larger dimension first until within the hard cap.
+  // MIN_GRID is already enforced above; 2×2=4 ≤ 200 so this always terminates.
+  while (rows * cols > MAX_PIECES) {
+    if (cols > rows) cols--;
+    else rows--;
+  }
+
+  return { rows, cols };
+}
+
 // ─── Color helpers ────────────────────────────────────────────────────────────
 
 /** Arithmetic mean of sampled pixels in a rectangular region (every 4th pixel). */

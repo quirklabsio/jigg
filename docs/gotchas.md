@@ -277,6 +277,45 @@ const mockSpatialHash = {
 }
 ```
 
+## Small images produce *fewer* pieces than large images (MIN_PIECE_SIDE effect)
+
+`computeGrid` aims for `TARGET_PIECES=160`, but for small images the `MIN_PIECE_SIDE=60` floor overrides the target — raising the piece size forces fewer, larger pieces.
+
+**Example:** 512×512 image
+- Natural piece side: `√(512² / 160)` ≈ 40 px — below MIN_PIECE_SIDE
+- Floor clamps to 60 px → `round(512/60)` = 9 → **9×9 = 81 pieces**
+- Without the floor: 13×13 = 169 pieces
+
+A 2048×2048 image produces more pieces (169) than a 512×512 image (81). This is correct — tiny pieces on a small canvas are unplayable. Don't write QA expectations for small images by plugging the dimensions into the TARGET_PIECES formula alone; check whether MIN_PIECE_SIDE will engage.
+
+**Rule of thumb:** MIN_PIECE_SIDE engages when `√(w × h / 160) < 60`, i.e. when the image area is less than `160 × 60² = 576 000 px²` (roughly anything smaller than ~760×760).
+
+## `navigator.clipboard.writeText` fails silently when document is not focused
+
+`navigator.clipboard` requires the document to be focused. In a split-window QA setup — picker open in one tab, app in another — the document loses focus when the user switches tabs, causing `writeText` to reject with `NotAllowedError: Document is not focused`. The `.catch` fires but is easy to miss if the toast disappears quickly.
+
+**Fix:** always provide a fallback chain:
+1. `navigator.clipboard.writeText(text)` — works in normal focused-tab use
+2. `document.execCommand('copy')` via a temporary off-screen `<textarea>` — works without focus in most desktop browsers
+3. Modal with pre-selected text — last resort for sandboxed iframes and mobile
+
+```typescript
+navigator.clipboard.writeText(text)
+  .catch(() => {
+    // execCommand fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (!ok) showModal(text); // final fallback
+  });
+```
+
+`window.isSecureContext` guards `navigator.clipboard` access — localhost qualifies, so this isn't the failure mode in dev. The failure is always focus, not security context.
+
 ## Blob URLs Don't Survive Page Reloads
 
 `URL.createObjectURL(file)` produces a blob URL (`blob:http://...`) that is only valid for the lifetime of the document that created it. Storing a blob URL in `sessionStorage` and reading it back after `window.location.reload()` gives you a dead reference — the new document's `Assets.load` receives the string but the resource is gone.

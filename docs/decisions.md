@@ -192,7 +192,7 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 
 - **`FileReader.readAsDataURL` over `URL.createObjectURL`** — the story prompt suggested blob URLs. Blob URLs are bound to the originating document; after `window.location.reload()` the resource is gone and `Assets.load` returns null. Data URLs are self-contained strings — they cost more memory (base64 overhead) and hit the 5 MB `sessionStorage` quota for large images, but they survive the reload without any lifecycle management. The quota risk is acceptable for a dev-tool story; Story 45 will normalise image dimensions before this matters in production.
 - **`sessionStorage` over `IndexedDB` for the pending URL** — sessionStorage is synchronous, requires no schema, and scopes naturally to the tab. The image URL survives a reload within the tab, which is exactly the lifetime we need. Cross-tab or cross-session persistence is not required (and would be wrong — this is per-session state).
-- **Page reload over in-place teardown** — there is no scene teardown path. Reloading avoids writing one prematurely; Story 46 will introduce clean rebuild. The reload is intentionally temporary; see `next-story.md` / roadmap for the planned teardown path.
+- **Page reload over in-place teardown** — there is no scene teardown path. Reloading avoids writing one prematurely. Story 46 shipped without adding a teardown path — this is an explicit deferral, not an oversight. The reload-based rebuild is the permanent approach until a dedicated "clean rebuild" story is queued.
 
 ## Image Normalization (Story 45)
 
@@ -201,6 +201,27 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 - **`normalizeImage` as a pure function — no side effects, no DOM access** — the caller (`main.ts`) owns storage and reload. Keeping the function pure means it is trivially testable in isolation and makes the boundary between "image processing" and "app lifecycle" explicit. The story constraint was explicit on this; we followed it.
 - **`bitmap.close()` after drawing** — `ImageBitmap` holds a GPU-side resource that is not released by GC. Calling `.close()` after `ctx.drawImage` frees it immediately. Omitting this leaks GPU memory for the lifetime of the tab, which is especially bad for large phone photos.
 - **Extreme aspect ratios warned, not rejected** — the story explicitly defers the policy decision to Story 46. Logging and proceeding surfaces real failure modes (warped pieces, layout breakage) that inform what Story 46 needs to fix. A silent rejection would hide them.
+
+## Grid sizing algorithm (Story 46)
+
+- **`computeGrid` co-located with `gridCut` in `cutter.ts`** — both functions operate on image dimensions and feed the same pipeline. Keeping them in the same file avoids a module that exists only to export one function and a handful of constants.
+- **TARGET_PIECES=160, not MAX_PIECES=200, as the aiming point** — targeting the cap means any rounding pushes the product over it. The 40-piece gap (160→200) absorbs rounding noise from `Math.round` and still produces a full-feeling puzzle. Using 200 as both cap and target would require clamping after every round.
+- **MIN_PIECE_SIDE=60 is a soft floor, not a guarantee** — it raises the piece side when the natural size would be below 60px (small images). For extreme panoramas where MIN_GRID forces more rows than the natural side allows, MIN_GRID wins and pieces go below the floor. This is intentional: MIN_GRID enforces puzzle variety (corner/edge classification needs ≥2 on both axes); MIN_PIECE_SIDE is a comfort heuristic.
+- **MIN_GRID=2 enforced before the cap loop** — the cap loop (`while rows * cols > MAX_PIECES`) must never decrement below MIN_GRID. Because 2×2=4 ≤ 200, the loop is guaranteed to terminate regardless of input.
+- **"Reduce the larger dimension first" for cap enforcement** — when `rows * cols > 200`, shrinking the larger dimension keeps the grid closer to square. Any systematic preference (e.g. always reduce cols) would produce unexpectedly tall or wide grids for square inputs.
+
+## URL-based drop path (Story 46 session — dev tool)
+
+- **`handleImageFile` extracted from the drop handler** — the previous drop handler inlined normalizeImage + sessionStorage + reload. Adding a second entry point (URL drag from `test-picker.html`) would have duplicated that logic. Extraction keeps both paths (OS file drop and browser-to-browser drag) feeding the same function, with no duplication.
+- **URL drop fetches → Blob → File, then enters the existing normalizeImage path** — the normalizeImage pipeline accepts a `File`. Wrapping the fetched Blob in a `File` keeps the boundary clean: all normalisation, EXIF correction, and storage logic is unchanged. The MIME type comes from `Response.blob().type`; falls back to `'image/jpeg'` if empty (e.g. when the response lacks a Content-Type header).
+- **`qa.html` served as a static file from `public/`** (at `/qa`) — no build step, no framework, no HMR dependency. Works any time the dev server is running. Drag support uses `dragstart` + `text/uri-list` so the app receives the image URL rather than an opaque drag object.
+- **`qa-scratch/` served via Vite middleware, not committed to `public/`** — scratch images are gitignored by definition; putting them in `public/` would commit them. A small `configureServer` plugin in `vite.config.ts` serves `qa-scratch/` at `/qa-scratch/` during development only. Nothing in the plugin runs at build time or ships to production.
+- **Three-tier clipboard fallback: `navigator.clipboard` → `execCommand` → modal** — `navigator.clipboard.writeText` requires document focus; it fails silently in split-window QA setups (picker in one tab, app in another). `execCommand('copy')` works without focus. If both fail (sandboxed iframe, some mobile browsers), a modal shows the report text pre-selected so the user can `⌘C` manually. Each tier is tried in order; the modal is the last resort, never the default.
+
+## fixtures.json format (test/fixtures)
+
+- **`notes` at top level, not inside `expected`** — notes describe what the fixture tests; `expected` describes the system output. Mixing them makes `expected` harder to use as an assertion shape. `notes` is prose for humans; `expected` is data for test runners.
+- **No story or AC references in `notes`** — fixtures outlive the stories that created them. A note like "exercises AC-3, AC-5" is stale the moment the story closes. Notes describe the behavior under test: the image property that's interesting, the code path it exercises, why a user-supplied image wouldn't reproduce it as reliably.
 
 ## Process
 - **Never commit without explicit user instruction** — present completed work, wait for the user to explicitly say "commit" or similar. No exceptions. Do not infer commit approval from task completion or "LGTM" style feedback. No auto-commit at end of session, no commit as part of /refine.

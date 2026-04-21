@@ -4,7 +4,7 @@ import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { isInBench, isOnTable } from '../puzzle/types';
 import { createBoard } from './board';
-import { buildPieceMask, gridCut, EDGE_INFLUENCE } from '../puzzle/cutter';
+import { buildPieceMask, gridCut, computeGrid, EDGE_INFLUENCE } from '../puzzle/cutter';
 import {
   createHitLayer,
   initDragListeners,
@@ -33,8 +33,6 @@ import {
   BG_PRESETS_ORDER,
 } from '../utils/preferences';
 
-const COLS = 4;
-const ROWS = 4;
 const WORLD_SIZE = 4000;
 
 // ─── Snap highlight state (AC-4) ─────────────────────────────────────────────
@@ -345,14 +343,16 @@ function applyShadowPlaced(f: DropShadowFilter): void {
 function buildGridSprites(
   trayParent: Container,
   texture: Texture,
+  cols: number,
+  rows: number,
   scale: number,
   pixelData?: Uint8ClampedArray,
 ): { sprites: Sprite[]; containers: Container[] } {
   const tabPad = Math.ceil(Math.max(
-    Math.floor(texture.width  / COLS),
-    Math.floor(texture.height / ROWS),
+    Math.floor(texture.width  / cols),
+    Math.floor(texture.height / rows),
   ) * 0.4);
-  const { pieces } = gridCut(texture.width, texture.height, COLS, ROWS, pixelData);
+  const { pieces } = gridCut(texture.width, texture.height, cols, rows, pixelData);
 
   const gridIndex = new Map<string, string>();
   pieces.forEach((p) => gridIndex.set(`${p.gridCoord.col},${p.gridCoord.row}`, p.id));
@@ -370,8 +370,8 @@ function buildGridSprites(
     const ph = piece.textureRegion.h;
     const leftPad   = Math.min(tabPad, col * pw);
     const topPad    = Math.min(tabPad, row * ph);
-    const rightPad  = Math.min(tabPad, (COLS - col - 1) * pw);
-    const bottomPad = Math.min(tabPad, (ROWS - row - 1) * ph);
+    const rightPad  = Math.min(tabPad, (cols - col - 1) * pw);
+    const bottomPad = Math.min(tabPad, (rows - row - 1) * ph);
     const expandedW = pw + leftPad + rightPad;
     const expandedH = ph + topPad + bottomPad;
     const frame = new Rectangle(
@@ -444,9 +444,11 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = new Uint8Array(imageData.data.buffer);
 
+  const { cols, rows } = computeGrid(texture.width, texture.height);
+
   const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
-  const piecePixelW = Math.floor(texture.width  / COLS);
-  const piecePixelH = Math.floor(texture.height / ROWS);
+  const piecePixelW = Math.floor(texture.width  / cols);
+  const piecePixelH = Math.floor(texture.height / rows);
 
   app.stage.sortableChildren = true;
   app.stage.eventMode = 'static';
@@ -491,7 +493,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // buildGridSprites needs a parent — we use a temporary throw-away container.
   // initTray will move the containers into the real tray container.
   const tempParent = new Container();
-  const { sprites, containers } = buildGridSprites(tempParent, texture, scale, imageData.data);
+  const { sprites, containers } = buildGridSprites(tempParent, texture, cols, rows, scale, imageData.data);
 
   // Convert canonical positions from image-pixel space → world-screen space.
   // Pieces start in tray, but canonical positions are always world-space
@@ -911,8 +913,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const board = createBoard(
     texture.width,
     texture.height,
-    COLS,
-    ROWS,
+    cols,
+    rows,
     scale,
     app.screen.width,
     app.screen.height,
@@ -1027,8 +1029,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   worker.postMessage({
     type: 'GENERATE_CUTS',
     payload: {
-      cols: COLS,
-      rows: ROWS,
+      cols,
+      rows,
       pieceWidth:   piecePixelW,
       pieceHeight:  piecePixelH,
       seed:         0x4a_49_47_47,
@@ -1059,7 +1061,7 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
           sprite.mask = null;
         }
 
-        const mask = buildPieceMask(piece, cuts, COLS, ROWS, piecePixelW, piecePixelH);
+        const mask = buildPieceMask(piece, cuts, cols, rows, piecePixelW, piecePixelH);
         mask.roundPixels = true;
         sprite.addChild(mask);
         sprite.mask = mask;

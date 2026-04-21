@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "file": "grid_phone-aspect_2048x1536_165pieces.jpg",
+    "case": "phone-aspect-ratio",
+    "automated": false,
+    "notes": "4:3 landscape aspect ratio — most common phone JPEG after normalisation. MIN_PIECE_SIDE does not engage (natural side ~139px is well above the 60px floor).",
+    "input": { "dimensions": [2048, 1536] },
+    "expected": {
+      "grid": { "cols": 15, "rows": 11 },
+      "pieceCount": 165
+    }
+  },
+  {
+    "file": "grid_panorama-extreme_2048x102_mingrid.jpg",
+    "case": "panorama-extreme-mingrid",
+    "automated": false,
+    "notes": "Extreme 20:1 aspect ratio. MIN_GRID forces rows=2; piece side falls below MIN_PIECE_SIDE (60px) because the grid floor wins over the size floor.",
+    "input": { "dimensions": [2048, 102] },
+    "expected": {
+      "grid": { "cols": 34, "rows": 2 },
+      "pieceCount": 68
+    }
+  }
+]

@@ -26,18 +26,35 @@ container.addEventListener('dragover', (e) => {
 
 container.addEventListener('drop', (e) => {
   e.preventDefault();
-  const file = e.dataTransfer?.files[0];
-  if (!file || !file.type.startsWith('image/')) return;
 
+  const file = e.dataTransfer?.files[0];
+  if (file && file.type.startsWith('image/')) {
+    // File dropped from OS file manager
+    handleImageFile(file);
+    return;
+  }
+
+  // Image dragged from another browser tab (e.g. test-picker.html) — arrives as a URL.
+  const uriList = e.dataTransfer?.getData('text/uri-list') ?? '';
+  const url = uriList.split('\n').map(u => u.trim()).find(u => u && !u.startsWith('#'));
+  if (url) {
+    fetch(url)
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.blob(); })
+      .then(blob => new File([blob], url.split('/').pop() ?? 'image', { type: blob.type || 'image/jpeg' }))
+      .then(f => handleImageFile(f))
+      .catch(err => console.warn('URL drop failed:', err));
+  }
+});
+
+function handleImageFile(file: File): void {
   normalizeImage(file).then((dataUrl) => {
     try {
       sessionStorage.setItem(SESSION_KEY, dataUrl);
     } catch {
-      // sessionStorage quota exceeded — fall back to test image on reload
       sessionStorage.removeItem(SESSION_KEY);
     }
     window.location.reload();
   }).catch((err) => {
     console.warn('normalizeImage failed:', err);
   });
-});
+}
