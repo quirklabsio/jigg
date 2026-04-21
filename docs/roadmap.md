@@ -19,6 +19,7 @@
 | Story 45 | Image normalization — EXIF orientation, max 2048, JPEG re-encode (2026-04-18) |
 | Story 46 | Dynamic piece grid from image aspect ratio — `computeGrid`, 200-piece cap, removed hardcoded COLS/ROWS (2026-04-20) |
 | Story 46b | Fix bench piece clipping — tabs and focus ring (2026-04-21) |
+| Story 46c | Scatter spread fix — stepSize × _canvasScale in `bench.ts` (2026-04-21) |
 
 ---
 
@@ -30,11 +31,8 @@
 
 **Story 46d — CLOSED without fix.** Label clipping requires Approach B (overlay layer above mask). See `docs/decisions.md`. Queued below as Story 46f.
 
-**Story 46c — Scatter spread investigation** *(shipped 2026-04-21)*
-Outcome B: `stepSize` formula was missing `_canvasScale` factor. Fixed in `bench.ts:976`. Spread is now consistent across image sizes (~2.2× piece width at N=5 for all images).
-
-**Story 46e — Corner piece alignment** *(after 46c)*
-3/4 corner pieces sit with a small gap between the piece edge and the board edge. Investigate static offset vs new logic. From 46b QA.
+**Story 46e — Corner piece alignment** *(in progress — see `docs/next-story.md`)*
+Board drawn at `imageWidth × imageHeight` but piece coverage is `cols * floor(imageWidth/cols) × rows * floor(imageHeight/rows)` — remainder pixels create corner-gap on 3/4 corners. Shrink board to match piece coverage. Story-46-introduced.
 
 **Story 46f — Fix piece label clipping (Approach B)**
 Move labels from sprite children to a sibling overlay container above the sprite layer. Sync position + rotation per-frame via ticker. No mask clipping ever; labels render at full size on any piece size including 1000+ piece puzzles. Counter-rotation invariant (Story 37b) moves to the sync path but remains equivalent. See `docs/decisions.md` for the full analysis.
