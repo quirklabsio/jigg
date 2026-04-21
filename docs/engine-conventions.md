@@ -155,6 +155,17 @@ Snap distances, focus ring thickness, and other screen-space constants must acco
 | Group-local | `piece.pos` offset | Piece positions within a group | `+ group.position` |
 | Screen pixels | Visible px on display | Focus ring, snap highlight, DOM overlays | `÷ viewport.scale` |
 
+### Board dimensions
+
+The board rectangle matches the piece coverage area, **not** the full image dimensions:
+
+```
+boardW = Math.floor(imageWidth  / cols) * cols   // = cols  × pieceW
+boardH = Math.floor(imageHeight / rows) * rows   // = rows  × pieceH
+```
+
+`imageWidth × imageHeight` is almost always larger (remainder pixels from the floor division). The board must be sized to the piece coverage so corner pieces align flush with the board edges.
+
 ## Rotation Handling
 
 ### Storage Formats

@@ -338,3 +338,15 @@ circular transitions by calling `setKeyboardMode` from table collapse into bench
 
 **Spatial hash not updated after keyboard snap:**
 - See gotchas.md — deferred until arrow key movement ships.
+
+## Board size matches piece coverage, not image dimensions (Story 46e)
+
+The board was drawn at `imageWidth × imageHeight`. Piece dimensions are `Math.floor(imageWidth / cols) × Math.floor(imageHeight / rows)`, so total piece coverage is `cols × pieceW × rows × pieceH` — always ≤ the image dimensions by up to `cols-1` px on the right and `rows-1` px on the bottom. The remainder pixels are not part of any piece texture. Corner pieces at their canonical positions therefore had visible gaps against the board edges on 3 of 4 corners (top-left happened to align because its origin is (0,0)).
+
+**Fix chosen: Option A — shrink board to piece coverage.** Two locations required changes:
+1. `createBoard` in `board.ts` — `bw = Math.floor(imageWidth / cols) * cols * scale` and `bh` equivalent.
+2. `boardLeft`/`boardTop` in `scene.ts` — the canonical-position origin also used `texture.width * scale`; changed to `piecePixelW * cols * scale`. Both must stay in sync: the board rect and the canonical-position origin must use identical coverage dimensions or corners will be offset even with the correct board size.
+
+`cols`/`rows` were already in the `createBoard` signature (previously `void`-ed). No change to the centering math, shadow, or call-site signature.
+
+Options B (extend last-row/col pieces by remainder) and C (pad image at ingest to even dimensions) were ruled out per the story prompt. B requires invasive changes to cutter, snap, and render; C modifies the ingest pipeline and loses image content. A is the correct layer: the board must adapt to the pieces, not the other way around.

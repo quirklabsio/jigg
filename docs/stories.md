@@ -19,6 +19,25 @@ Files changed:
 
 -->
 
+## Story 46e: Fix corner piece alignment — board size mismatch
+
+**Shipped:** 2026-04-21
+
+Root cause: `createBoard` in `board.ts` computed `bw = imageWidth * scale` and `bh = imageHeight * scale`, but piece coverage is `cols * Math.floor(imageWidth / cols) × rows * Math.floor(imageHeight / rows)`. For non-evenly-divisible images (e.g. 2048×1536 on a 15×11 grid), the board extended past the piece grid by up to `cols-1` px right and `rows-1` px bottom, creating visible corner gaps. Story-46-introduced — pre-dynamic grids (4×4 on 800×600 or 2048×2048) happened to divide evenly.
+
+Fix (Option A): `createBoard` now computes `bw = Math.floor(imageWidth / cols) * cols * scale` and `bh = Math.floor(imageHeight / rows) * rows * scale`. The `cols`/`rows` params were already in the signature (previously `void`-ed). No change to centering math, shadow, or `scene.ts` call site. Options B (extend last-row/col pieces) and C (pad image at ingest) ruled out per story prompt.
+
+The first fix (board.ts only) still left corners misaligned — `boardLeft`/`boardTop` in scene.ts was computing the canonical-position origin using `texture.width * scale`, not `piecePixelW * cols * scale`. The board rect and the canonical origin were now computing different widths/heights, shifting the board relative to the piece grid. Second fix: scene.ts line 503–504 changed to `(app.screen.width - piecePixelW * cols * scale) / 2` and `(app.screen.height - piecePixelH * rows * scale) / 2`.
+
+Files changed:
+- `src/canvas/board.ts` — `bw`/`bh` now computed from piece coverage, not raw image dimensions
+- `src/canvas/scene.ts` — `boardLeft`/`boardTop` now use `piecePixelW * cols * scale` (consistent with board.ts)
+- `docs/decisions.md` — new "Board size matches piece coverage" section
+- `docs/engine-conventions.md` — new "Board dimensions" subsection in Coordinate Systems
+- `public/qa.html` — STORY and FIXTURES updated to Story 46e ACs
+
+---
+
 ## Story 46c: Bench→table scatter spread investigation
 
 **Shipped:** 2026-04-21

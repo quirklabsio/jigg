@@ -256,6 +256,22 @@ const mockSpatialHash = {
 }
 ```
 
+## Board size and canonical-position origin are two separate computations — fix one without the other and corners stay misaligned
+
+`createBoard` in `board.ts` and `boardLeft`/`boardTop` in `scene.ts` both independently compute the size of the playable area. If they use different widths, the board rect and the piece canonical positions become offset — corner pieces appear close but not flush regardless of which one you fix.
+
+Both must use `Math.floor(imageWidth / cols) * cols * scale`, not `imageWidth * scale`:
+
+```ts
+// board.ts — board rect size
+const bw = Math.floor(imageWidth / cols) * cols * scale;
+
+// scene.ts — canonical position origin
+const boardLeft = (app.screen.width - Math.floor(texture.width / cols) * cols * scale) / 2;
+```
+
+If you change one, always change the other in the same commit. The engine-conventions.md §"Board dimensions" has the canonical formula.
+
 ## Bench `THUMBNAIL_SIZE` depends on `FILTER_STRIP_HEIGHT` — they must move together
 
 `THUMBNAIL_SIZE` in `bench.ts` is derived from the available piece area inside `_piecesContainer`:

@@ -500,8 +500,8 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   // so that spiral placement and snap logic resolve correctly.
   const pieceScreenW = piecePixelW * scale;
   const pieceScreenH = piecePixelH * scale;
-  const boardLeft = (app.screen.width  - texture.width  * scale) / 2;
-  const boardTop  = (app.screen.height - texture.height * scale) / 2;
+  const boardLeft = (app.screen.width  - piecePixelW * cols * scale) / 2;
+  const boardTop  = (app.screen.height - piecePixelH * rows * scale) / 2;
   {
     const { pieces: currentPieces } = usePuzzleStore.getState();
     const worldPieces = currentPieces.map((p) => ({

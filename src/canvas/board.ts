@@ -19,10 +19,10 @@ export function createBoard(
   screenWidth:  number,
   screenHeight: number,
 ): Container {
-  void cols; void rows; // reserved for future slot rendering
-
-  const bw   = imageWidth  * scale;
-  const bh   = imageHeight * scale;
+  const pieceW = Math.floor(imageWidth  / cols);
+  const pieceH = Math.floor(imageHeight / rows);
+  const bw     = pieceW * cols * scale;
+  const bh     = pieceH * rows * scale;
   const left = (screenWidth  - bw) / 2;
   const top  = (screenHeight - bh) / 2;
 
