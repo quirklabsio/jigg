@@ -249,8 +249,8 @@
 <body>
 
   <div class="header">
-    <div class="header-story">Story 46 · QA Checklist</div>
-    <div class="header-title">Dynamic piece grid from image aspect ratio</div>
+    <div class="header-story">Story 46b · QA Checklist</div>
+    <div class="header-title">Fix bench piece clipping — tabs and focus ring</div>
   </div>
 
   <!-- ── Acceptance Criteria ─────────────────────────────────── -->
@@ -299,36 +299,28 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: 46,
-      title: 'Dynamic piece grid from image aspect ratio',
+      number: '46b',
+      title: 'Fix bench piece clipping — tabs and focus ring',
       criteria: [
         {
           id: 'AC-1',
-          text: '2048×1536 (phone JPEG, post-normalisation) → bench shows All (165 ± 10). Pieces look square-ish.',
+          text: 'Tabs fully visible, all rotations. Load any fixture. Scroll the bench; every tab tip is visible — none sliced off at any tray edge.',
         },
         {
           id: 'AC-2',
-          text: '512×512 → bench shows All (81). 500×500 → All (64 ± 4). Piece side visibly above ~57 px.',
+          text: 'Focus ring fully visible. Press T to open bench, Tab to reach it, arrow-right through pieces. The magenta active/focus ring is fully rendered — not clipped at top, bottom, or sides.',
         },
         {
           id: 'AC-3',
-          text: '2048×102 panorama → rows ≥ 2 (MIN_GRID enforced). Bench loads, no crash. Pieces are narrow but functional.',
+          text: 'Horizontal overflow still prevented. Rapidly flick between filters and scroll the bench; no piece bleeds past the left or right end of the tray strip.',
         },
         {
           id: 'AC-4',
-          text: '2048×2048 square → bench shows All (169 ± 4).',
+          text: 'Resize and tray open/close still correct. Trigger a window resize and toggle the tray with T; mask geometry refreshes, pieces stay inside the bench body.',
         },
         {
           id: 'AC-5',
-          text: 'No image produces more than 200 pieces. All tested images confirm count ≤ 200.',
-        },
-        {
-          id: 'AC-6',
-          text: 'Puzzle solvable on a large grid (≥ 130 pieces): drag, snap, bench filters, keyboard nav, rotation all work.',
-        },
-        {
-          id: 'AC-7',
-          text: 'Corner (4), Edge, and Interior counts in the filter strip are sensible for every tested grid.',
+          text: 'No regression in other bench features. Filter strip renders correctly; swatch active states show correctly; keyboard navigation moves focus as before; piece extraction works.',
         },
       ],
     };
@@ -338,44 +330,23 @@
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-5', 'AC-6', 'AC-7'],
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-5'],
         expect: 'All (130) — 13×10',
       },
       {
         src: '/test-face.png',
         name: 'test-face.png',
         dims: '512 × 512',
-        acs: ['AC-2', 'AC-5'],
+        acs: ['AC-1', 'AC-2', 'AC-5'],
         expect: 'All (81) — 9×9',
       },
       {
         src: '/qa-scratch/synthetic-2048x1536.jpg',
         name: 'synthetic-2048×1536',
         dims: '2048 × 1536',
-        acs: ['AC-1', 'AC-5', 'AC-6', 'AC-7'],
+        acs: ['AC-1', 'AC-3', 'AC-5'],
         expect: 'All (165) — 15×11',
         qaFile: 'qa-scratch/synthetic-2048x1536.jpg',
-        recommended: true,
-        recommendReason: 'Covers the phone-JPEG aspect ratio — exercises more ACs than any other single fixture.',
-      },
-      {
-        src: '/qa-scratch/synthetic-2048x2048.jpg',
-        name: 'synthetic-2048×2048',
-        dims: '2048 × 2048',
-        acs: ['AC-4', 'AC-5'],
-        expect: 'All (169) — 13×13',
-        qaFile: 'qa-scratch/synthetic-2048x2048.jpg',
-        recommended: false,
-      },
-      {
-        src: '/qa-scratch/synthetic-2048x102.jpg',
-        name: 'synthetic-2048×102',
-        dims: '2048 × 102',
-        acs: ['AC-3', 'AC-5'],
-        expect: 'All (68) — 34×2',
-        qaFile: 'qa-scratch/synthetic-2048x102.jpg',
-        recommended: true,
-        recommendReason: 'Only fixture that proves MIN_GRID enforcement on extreme panoramas — not reproducible from a typical user photo.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────

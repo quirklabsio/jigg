@@ -60,12 +60,18 @@ const TRAY_BG_HC_COLOR      = 0x000000;
 const TRAY_BG_HC_ALPHA      = 1.0;
 const TRAY_HANDLE_COLOR     = 0x888899;
 
-// Grid layout constants — Story 33
-const THUMBNAIL_SIZE      = TRAY_HEIGHT_OPEN * 0.7; // ~154px — tunable
-const PADDING             = 8;                       // px between thumbnails
-
+// Grid layout constants — Story 33 / Story 46b
+const PADDING             = 8;  // px between thumbnails
 // Filter strip — Story 34
 const FILTER_STRIP_HEIGHT = 36; // px — above the piece grid
+
+// THUMBNAIL_SIZE is the piece cell size (px). Must fit within the mask area with room
+// for the stage-level focus ring (FOCUS_RING_PADDING=4 + FOCUS_RING_THICKNESS=2 in scene.ts).
+// Available height = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING
+//   = 220 - 40 - 36 - 8 = 136. Subtract BENCH_RING_CLEARANCE → 128.
+// If scene.ts ring constants change, update BENCH_RING_CLEARANCE here too.
+const BENCH_RING_CLEARANCE = 8; // ≥ FOCUS_RING_PADDING + FOCUS_RING_THICKNESS in scene.ts
+const THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING - BENCH_RING_CLEARANCE; // 128
 
 const FILTER_OPTIONS: { key: TrayFilter; label: string }[] = [
   { key: 'all',      label: 'All' },

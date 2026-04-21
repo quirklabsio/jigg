@@ -19,6 +19,21 @@ Files changed:
 
 -->
 
+## Story 46b: Fix bench piece clipping — tabs and focus ring
+
+**Shipped:** 2026-04-21
+
+Root cause: `THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN * 0.7 = 154px` was set before Story 34 added the 36px filter strip. With the strip, available piece height dropped to 136px — 18px less than `THUMBNAIL_SIZE`. Piece cells overflowed the `_piecesContainer` mask AND extended off-screen, clipping both downward tab knobs and the stage-level focus ring.
+
+Fix (Option B): changed `THUMBNAIL_SIZE` from the fixed formula to `TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING - BENCH_RING_CLEARANCE = 128`. Added `BENCH_RING_CLEARANCE = 8` constant (≥ `FOCUS_RING_PADDING + FOCUS_RING_THICKNESS` from `scene.ts`). Option A (pad mask) was rejected because the piece cell bottom was already off-canvas — mask expansion can't make off-screen content visible. `decisions.md` records the full option analysis.
+
+Files changed:
+- `src/canvas/bench.ts` — `THUMBNAIL_SIZE` redefined from `TRAY_HEIGHT_OPEN * 0.7` to geometry-derived constant; `BENCH_RING_CLEARANCE` added; `PADDING` and `FILTER_STRIP_HEIGHT` reordered before `THUMBNAIL_SIZE`
+- `docs/decisions.md` — new "Bench piece clipping fix (Story 46b)" section
+- `public/qa.html` — STORY and FIXTURES updated to Story 46b ACs
+
+---
+
 ## Story 46: Dynamic piece grid from image aspect ratio
 
 **Shipped:** 2026-04-20

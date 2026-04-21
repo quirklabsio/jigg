@@ -277,6 +277,19 @@ const mockSpatialHash = {
 }
 ```
 
+## Bench `THUMBNAIL_SIZE` depends on `FILTER_STRIP_HEIGHT` — they must move together
+
+`THUMBNAIL_SIZE` in `bench.ts` is derived from the available piece area inside `_piecesContainer`:
+
+```
+THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING - BENCH_RING_CLEARANCE
+              = 220 - 40 - 36 - 8 - 8 = 128
+```
+
+If you add a new permanent element inside `_piecesContainer` above (or below) the piece grid — e.g. a second toolbar row, a notification bar — the available height shrinks and `THUMBNAIL_SIZE` must be recalculated. Failing to do so causes piece cells to overflow the mask (tab knobs sliced) and the focus ring to go off-screen (clipped at the canvas boundary).
+
+The `_focusRing` Graphics lives on `app.stage`, not inside `_piecesContainer`. **The container mask does not clip the ring.** The ring is clipped only by the canvas (WebGL viewport) boundary. If the sprite's bottom in screen space exceeds `screenH`, the ring drawn `FOCUS_RING_PADDING` pixels outside will be partially off-canvas and invisible. Reducing `THUMBNAIL_SIZE` is the correct fix — expanding the mask alone cannot recover off-screen content.
+
 ## Small images produce *fewer* pieces than large images (MIN_PIECE_SIDE effect)
 
 `computeGrid` aims for `TARGET_PIECES=160`, but for small images the `MIN_PIECE_SIDE=60` floor overrides the target — raising the piece size forces fewer, larger pieces.
