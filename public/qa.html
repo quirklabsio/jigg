@@ -299,28 +299,32 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '46b',
-      title: 'Fix bench piece clipping — tabs and focus ring',
+      number: '46d',
+      title: 'Fix piece label clipping on narrow pieces',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Tabs fully visible, all rotations. Load any fixture. Scroll the bench; every tab tip is visible — none sliced off at any tray edge.',
+          text: 'Normal (square-ish) pieces unchanged. Load test-image.jpg. Enable labels (Preferences → Piece numbers). Every label on bench and table is fully visible — no digit clipped. Visual size matches pre-fix appearance (or acceptably close).',
         },
         {
           id: 'AC-2',
-          text: 'Focus ring fully visible. Press T to open bench, Tab to reach it, arrow-right through pieces. The magenta active/focus ring is fully rendered — not clipped at top, bottom, or sides.',
+          text: 'Narrow pieces (panorama). Drop the panorama fixture (2048×102). Enable labels. Every label on narrow bench pieces is fully visible — may be visibly smaller than AC-1 labels, but legible and not clipped.',
         },
         {
           id: 'AC-3',
-          text: 'Horizontal overflow still prevented. Rapidly flick between filters and scroll the bench; no piece bleeds past the left or right end of the tray strip.',
+          text: 'Rotated pieces. Rotate a bench piece (double-tap or keyboard R). Label stays upright and fully visible. Extract the piece to the canvas; label remains upright and unclipped.',
         },
         {
           id: 'AC-4',
-          text: 'Resize and tray open/close still correct. Trigger a window resize and toggle the tray with T; mask geometry refreshes, pieces stay inside the bench body.',
+          text: 'Bench counter-scaling preserved. Labels in the bench do not visually swell or shrink as the window is resized (i.e. bench thumbnail slots reflow).',
         },
         {
           id: 'AC-5',
-          text: 'No regression in other bench features. Filter strip renders correctly; swatch active states show correctly; keyboard navigation moves focus as before; piece extraction works.',
+          text: 'Toggle works. Disable labels via Preferences; labels disappear from all pieces. Re-enable; labels reappear correctly on bench and table pieces.',
+        },
+        {
+          id: 'AC-6',
+          text: 'No regression in snap highlight or focus ring. Drag a piece near its correct board position — snap highlight renders above the label. Keyboard-navigate in bench — 46b focus ring is still visible.',
         },
       ],
     };
@@ -330,23 +334,24 @@
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-5'],
+        acs: ['AC-1', 'AC-3', 'AC-4', 'AC-5', 'AC-6'],
         expect: 'All (130) — 13×10',
       },
       {
         src: '/test-face.png',
         name: 'test-face.png',
         dims: '512 × 512',
-        acs: ['AC-1', 'AC-2', 'AC-5'],
+        acs: ['AC-1', 'AC-5'],
         expect: 'All (81) — 9×9',
       },
       {
-        src: '/qa-scratch/synthetic-2048x1536.jpg',
-        name: 'synthetic-2048×1536',
-        dims: '2048 × 1536',
-        acs: ['AC-1', 'AC-3', 'AC-5'],
-        expect: 'All (165) — 15×11',
-        qaFile: 'qa-scratch/synthetic-2048x1536.jpg',
+        src: '/qa-scratch/synthetic-2048x102.jpg',
+        name: 'synthetic-2048×102 (panorama)',
+        dims: '2048 × 102',
+        acs: ['AC-2', 'AC-3', 'AC-4', 'AC-5'],
+        expect: 'All — 2 rows, narrow pieces',
+        qaFile: 'qa-scratch/synthetic-2048x102.jpg',
+        nominate: true,
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────

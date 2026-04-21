@@ -210,6 +210,13 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 - **MIN_GRID=2 enforced before the cap loop** — the cap loop (`while rows * cols > MAX_PIECES`) must never decrement below MIN_GRID. Because 2×2=4 ≤ 200, the loop is guaranteed to terminate regardless of input.
 - **"Reduce the larger dimension first" for cap enforcement** — when `rows * cols > 200`, shrinking the larger dimension keeps the grid closer to square. Any systematic preference (e.g. always reduce cols) would produce unexpectedly tall or wide grids for square inputs.
 
+## Piece label clipping (Story 46d — deferred)
+
+Story 46d investigated label clipping caused by the piece-shape mask. The root cause: labels are sprite children clipped by the mask; tab blanks intrude `raw_h ≈ 0.25 × dimension` (worst case 0.2875×) from each edge, leaving a safe interior of only `≈ 0.43 × minDimension`. At fontSize=14 a 3-digit label bg is ~30px wide; on a 61px piece the safe half-width is ~13px, so the label clips the right-edge blank with only sub-pixel clearance.
+
+- **Approach A (dynamic container scale) attempted and abandoned** — scaling the container down to fit keeps the label inside the safe zone on average pieces but requires K so small that labels on small pieces become visually poor. On 60–80px pieces with 3-digit indices the fitScale drops to ~0.7 and the label looks "shrunken". Worse, this architecture does not scale to 1000+ piece puzzles where pieces may be 30px — no readable label fits inside the safe zone at any scale.
+- **Approach B chosen for the real fix (future story)** — move labels to a sibling overlay container above the sprite layer, synced per-frame via ticker (position + rotation). No mask clipping possible. Labels always render at full size regardless of piece dimensions. Cost: per-frame sync and a new overlay container in scene.ts. Queued for BA.
+
 ## Bench piece clipping fix (Story 46b)
 
 - **Option B (shrink THUMBNAIL_SIZE) over Option A (pad mask)** — Option A (expand `_piecesMask` rect) fails for the bottom row: with the tray positioned flush at the screen bottom, the bottom of the piece cell is already off-canvas (`tray.y + piecesContainer.y + cell_bottom = screenH + 18`). Expanding the mask only allows PixiJS to render content that is already beyond the canvas boundary — the WebGL viewport still clips it. Option C (per-button scissor) would have been major rework. Option B (reduce `THUMBNAIL_SIZE`) brings the entire cell within the visible canvas and within the existing mask, fixing both the tab clip and the off-screen focus ring simultaneously.

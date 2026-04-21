@@ -19,6 +19,16 @@ Files changed:
 
 -->
 
+## Story 46d: Fix piece label clipping on narrow pieces
+
+**Closed without code fix:** 2026-04-21
+
+Approach A (dynamic container scale) was attempted but abandoned. The piece-shape mask safe zone is only `≈ 0.43 × minDimension` wide; at 60–80px piece sizes with 3-digit labels, any K small enough to prevent clipping makes labels visually poor. The architecture (label as sprite child clipped by mask) does not scale to 1000+ piece puzzles. Approach B (overlay layer above mask, ticker-synced) is the correct fix; queued as Story 46f. See `docs/decisions.md` for full analysis.
+
+No production code changed. `public/qa.html` updated to Story 46d ACs (usable when Story 46f ships).
+
+---
+
 ## Story 46b: Fix bench piece clipping — tabs and focus ring
 
 **Shipped:** 2026-04-21

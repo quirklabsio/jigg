@@ -26,16 +26,18 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-*Committed sequence: 46d → 46c → 46e → Story 47. No new bugs sneak ahead of this order; the 46-series closes out before Controlled Inputs begins.*
+*Committed sequence: 46c → 46e → Story 47. No new bugs sneak ahead of this order; the 46-series closes out before Controlled Inputs begins.*
 
-**Story 46d — Fix piece label clipping on narrow pieces** *(in progress — see `docs/next-story.md`)*
-Piece number labels clip on narrow pieces (panorama-sized). Label sizing is fixed; mask clip is load-bearing. Resize labels to fit piece geometry.
+**Story 46d — CLOSED without fix.** Label clipping requires Approach B (overlay layer above mask). See `docs/decisions.md`. Queued below as Story 46f.
 
-**Story 46c — Scatter spread investigation** *(up next after 46d)*
+**Story 46c — Scatter spread investigation** *(up next)*
 Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure first — may resolve as "no real bug". If real, fix the spiral step.
 
 **Story 46e — Corner piece alignment** *(after 46c)*
 3/4 corner pieces sit with a small gap between the piece edge and the board edge. Investigate static offset vs new logic. From 46b QA.
+
+**Story 46f — Fix piece label clipping (Approach B)**
+Move labels from sprite children to a sibling overlay container above the sprite layer. Sync position + rotation per-frame via ticker. No mask clipping ever; labels render at full size on any piece size including 1000+ piece puzzles. Counter-rotation invariant (Story 37b) moves to the sync path but remains equivalent. See `docs/decisions.md` for the full analysis.
 
 ---
 
