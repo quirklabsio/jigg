@@ -30,7 +30,7 @@
 
 **Story 46d — CLOSED without fix.** Label clipping requires Approach B (overlay layer above mask). See `docs/decisions.md`. Queued below as Story 46f.
 
-**Story 46c — Scatter spread investigation** *(up next)*
+**Story 46c — Scatter spread investigation** *(in progress — see `docs/next-story.md`)*
 Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure first — may resolve as "no real bug". If real, fix the spiral step.
 
 **Story 46e — Corner piece alignment** *(after 46c)*

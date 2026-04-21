@@ -1,70 +1,89 @@
-# Story 46d: Fix piece label clipping on narrow pieces
+# Story 46c: Bench→table scatter spread investigation
 
 ## Context
 
-During 46b QA the user observed piece number labels with digits cut off by the piece cut mask. This is load-bearing behavior, not a bug in the naive sense — `src/utils/preferences.ts:353` explicitly states:
+During Story 45 QA the user observed: *"the scatter design or pattern of random placement of pieces from bench to table, still working but the spread is bigger than it used to be imo"*. The "imo" is load-bearing — it might be real, it might be perception. This story is investigation-first, fix-only-if-warranted.
 
-> // First child so snap highlight renders above; mask clips label to piece shape
+The spiral math lives in `src/canvas/bench.ts:961` (`spiralPlace`), not in the stub at `src/puzzle/scatter.ts` (gutted in Story 32 — don't touch it). The step size formula is:
 
-Story 37b designed label placement assuming roughly square pieces (the hardcoded 4×4 era) where a fixed-size label comfortably fits inside the piece interior. Story 46 shipped a dynamic grid: a 2048×102 panorama produces narrow pieces (tens of px tall), and a fixed-size label no longer fits inside the piece shape. The mask clip is doing what it was told to do; the label sizing is what's wrong.
+```ts
+const maxDim  = Math.max(_piecePixelW, _piecePixelH);        // line 975
+const stepSize = maxDim * Math.SQRT2 * 1.3;                  // line 976
+const b = stepSize / (2 * Math.PI);                          // line 977
+// Archimedean: r(θ) = b·θ, with θ = spiralIndex * 1.5
+```
+
+`stepSize` is calibrated to piece pixel dimensions. Before Story 46, pieces were uniform (4×4 grid → piece side ≈ image_side / 4). After Story 46, piece dimensions vary hugely: panorama ~30 px, phone ~150 px, tiny ~60 px. If the formula was tuned for the old piece size, the new dynamic sizes may produce a different-feeling spread.
+
+Viewport zoom is the other suspect. Screen-space spread = world-space radius × `viewport.scale`. If `pixi-viewport`'s default zoom now differs per image (it may, via fit-to-content logic), the visual spread can change without the spiral math changing.
 
 ## Requirements
 
-### Diagnosis first
+### Measure before touching code
 
-Read `src/utils/preferences.ts` starting around line 274 (the "Piece labels (Story 37b)" section). Identify:
-- How `createPieceLabel` sizes the Text and its background Graphics rect
-- Whether those sizes are absolute or piece-relative
-- Where the label is positioned relative to piece geometry (centering)
-- Both code paths that attach labels: the bench path (lines ~344–349 with counter-scaling) and the canvas path (line 351 — `label.rotation = -sprite.rotation`)
+Compute the radius at which the Nth piece lands, for three representative image sizes. Use existing fixtures where possible (`/test-image.jpg`, `/test-face.png`) plus one panorama-class fixture.
 
-Confirm the hypothesis: label size is fixed, so it overflows narrow pieces, so the piece-shape mask clips it.
+For each image:
+- Grid dimensions (from `computeGrid`)
+- Piece pixel dimensions (`_piecePixelW`, `_piecePixelH`)
+- Resulting `stepSize`, `b`
+- `r` at N = 5, 10, 16, 50
+- Current viewport default scale on that image
+- Resulting **screen-space** spread (r × viewport.scale) at the same N values
 
-### Fix
+Compare to the pre-Story-46 baseline (same math with 4×4 grid and each image's pre-dynamic piece dimensions — computable from the formula, no need to revert code).
 
-Pick one approach. Document the choice and alternatives in `decisions.md`.
+Document the table in `docs/decisions.md` under a new `## Scatter spread investigation (Story 46c)` section. This measurement is the acceptance artifact regardless of outcome.
 
-- **A. Scale labels to fit the piece's smaller dimension.** Compute label max size from `min(pieceW, pieceH) * K` (pick K by eye — probably 0.4–0.6). On narrow pieces, labels shrink; on square pieces, sizes match today's behavior.
-- **B. Move labels above the piece mask.** Attach the label container as a sibling overlay rather than a sprite child. Sync position + rotation via ticker. Breaks the "label inside piece shape" design intent but guarantees no clipping.
-- **C. Hybrid.** Apply A's dynamic sizing only when min-dimension falls below a threshold. Preserves the current look on normal pieces; activates the fit logic for narrow ones.
+### Decide
 
-Bias toward A or C unless they prove infeasible — they preserve the existing design language. Don't reach for B unless necessary.
+One of three outcomes — pick the one the data supports, and say so plainly in `decisions.md`:
+
+- **A. No real bug.** Perception drift. Close without code change. The measurement table and decision are the deliverable.
+- **B. Real bug, step-size formula is wrong for dynamic piece sizes.** The `maxDim * √2 * 1.3` constant was tuned for the old uniform grid; propose a replacement that produces visually consistent spread across piece sizes. Options worth considering: pin to a viewport-relative constant, pin to an absolute world-space constant, use `sqrt(pieceW · pieceH)` (geometric mean) instead of `max`, or something else the data suggests.
+- **C. Real bug, viewport zoom is the issue.** World-space spread is fine; screen-space spread varies because viewport zoom varies per image. Fix by stabilizing the default zoom across image sizes (or noting it's out-of-scope here and routing to a separate story).
+
+### Fix (only if B or C)
+
+Pick the simplest change that makes spread consistent. No clever algorithm substitutions. Don't swap Archimedean for Fibonacci or hexagonal packing — the spiral's already doing its job; just get the step right.
+
+Leave alternatives considered in `decisions.md`. If data supports both B and C partially, bias toward the smaller diff.
 
 ## Constraints
 
-- **Do not touch the piece cut mask.** The mask is load-bearing for snap highlight rendering (per the line 353 comment) and everything else. The fix operates on label sizing, not mask geometry.
-- **Preserve the Story 37b rotation invariant.** Counter-rotation stays: `label.rotation = -sprite.rotation` on canvas, `-(piece.rot * Math.PI) / 180` in the bench counter-scaled path. If switching hierarchies (Approach B), the rotation math moves but must remain equivalent.
-- **Preserve the bench counter-scaling** (line 349: `label.scale.set(1 / sprite.scale.x)`). Labels render at native size regardless of bench thumbnail scale — this must still hold.
-- **Do not change label visual design.** Font family, color, stroke, and background style stay. If sizing forces a lower font size on narrow pieces, that's a dimensional change, not a design change.
-- **Do not change the preferences toggle behavior.** Whatever turns labels on/off stays as-is.
-- **Don't address the two TODOs already in the file** (`non-scaling labels` at low zoom, `BitmapText` for perf). Out of scope.
+- **Do not resurrect `src/puzzle/scatter.ts`.** It's an intentional stub (Story 32 history). Live code is `bench.ts spiralPlace`.
+- **Preserve "origin locks on first click" behavior** (per `decisions.md` Story 32). Rapid successive extractions must still build a coherent cluster near the viewport center.
+- **Preserve the viewport-pan origin reset** (`bench.ts:1646` region). Panning, then extracting again, resets the spiral origin to the new center.
+- **Do not touch the occupancy check** (bench.ts:993–1007) — it prevents placement overlap; independent of step size.
+- **Do not touch the keyboard extraction path** beyond what's required. `spiralExtractPiece` (called from `aria.ts:347`) must continue to work identically.
+- **Do not touch completion detection, snap logic, or piece rotation.**
 
 ## Files likely to touch
 
-- `src/utils/preferences.ts` — primary. `createPieceLabel`, the attach logic, `updateLabelBgAlpha` if sizing knobs need exposure
-- `src/canvas/scene.ts` — only if Approach B requires a new overlay container
-- `docs/decisions.md` — approach choice + alternatives considered
+- `src/canvas/bench.ts` — `spiralPlace` (line 961) and the `stepSize`/`b` formula
+- `docs/decisions.md` — the measurement table + decision record (required regardless of outcome)
+- Possibly `src/canvas/scene.ts` — only if outcome C requires viewport zoom adjustment and the fix lands there
 
 ## Acceptance
 
-User tests via the QA page. Write ACs into `public/qa.html` per the `/qa` command format. Target ACs:
+User tests via the QA page. Write ACs into `public/qa.html` per `/qa` format.
 
-- **AC-1: Normal (square-ish) pieces unchanged.** Load `/test-image.jpg`. Enable labels. Every label on bench and table is fully visible — no digit clipped. Visual size of labels matches pre-fix appearance (or acceptably close).
-- **AC-2: Narrow pieces (panorama).** Drop a 4000×200 panorama (or use a pre-normalized 2048×102 fixture). Enable labels. Every label on narrow pieces is fully visible — may be visibly smaller than AC-1's labels, but legible.
-- **AC-3: Rotated pieces.** Rotate a bench piece (double-tap or keyboard). Label stays upright (per Story 37b invariant) and fully visible. Same for canvas pieces after extraction.
-- **AC-4: Bench counter-scaling preserved.** Labels in the bench don't visually swell or shrink as bench thumbnails resize on window resize.
-- **AC-5: Toggle works.** Disable labels via preferences; labels disappear. Re-enable; labels reappear correctly on all pieces.
-- **AC-6: No regression in snap highlight or focus ring.** Snap highlight still renders above the label when a piece is dragged into place. 46b's focus ring still visible on bench.
+- **AC-1: Measurement delivered.** `docs/decisions.md` contains the three-image table (grid, piece dims, step, r at N=5/10/16/50, viewport scale, screen-space spread) plus pre-Story-46 baseline for comparison. Decision (A/B/C) stated plainly.
+- **AC-2 (if outcome A — no bug):** No production code changed. User reads the measurement note, agrees or pushes back. Story closes without a fix.
+- **AC-3 (if outcome B or C — fix shipped):** Extract 5–10 pieces from each of three test images. On-screen spread is comparable across images (not image-size-dependent). User eyeballs it and confirms.
+- **AC-4: Rapid-click clustering preserved.** Extract 5 pieces rapidly from bench without panning. All 5 land in a coherent visual cluster near viewport center.
+- **AC-5: Viewport-pan origin reset preserved.** Pan viewport, extract another piece. New piece's spiral origin is at the new viewport center.
+- **AC-6: Keyboard extraction still works.** `T` to open bench, Tab to a piece, Enter — piece extracts to the spiral location identically to click.
+- **AC-7: No regression in occupancy check.** Placing 20+ pieces rapidly — none visibly overlap.
 
 ## Out of scope
 
-- The low-zoom non-scaling label TODO (line 291–293 in preferences.ts)
-- BitmapText perf swap (line 285–286)
-- Story 46c (scatter spread investigation) — still a candidate
-- Story 46e (corner piece alignment — 3/4 corners not flush to board edge) — new candidate from 46b QA
-- Any visual redesign of labels
+- Story 46e (corner piece alignment — 3/4 corners not flush to board edge). Next after this.
+- Story 46f (label clipping Approach B overlay). Queued, not in the close-out sequence before Story 47.
+- Any redesign of the scatter algorithm itself. Fix step-size or zoom only; don't swap spirals for alternatives.
+- `src/puzzle/scatter.ts` stub — leave it.
+- Occupancy check perf — fine at current scale, not urgent.
 
-## Known candidates still open (for context only)
+## Known next in committed sequence
 
-- **Story 46c** — Scatter spread investigation (from Story 45 QA)
-- **Story 46e** — Corner piece alignment: 3 of 4 corner pieces sit with a small gap between the piece edge and the board edge (from 46b QA). Needs investigation into board rect position vs piece canonical positions.
+`docs/roadmap.md` commits to `46c → 46e → Story 47`. Story 46f (label clipping) is queued separately, not a blocker for 47.
