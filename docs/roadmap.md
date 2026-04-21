@@ -18,6 +18,7 @@
 | Story 44 | Drag-and-drop image load (2026-04-18) |
 | Story 45 | Image normalization — EXIF orientation, max 2048, JPEG re-encode (2026-04-18) |
 | Story 46 | Dynamic piece grid from image aspect ratio — `computeGrid`, 200-piece cap, removed hardcoded COLS/ROWS (2026-04-20) |
+| Story 46b | Fix bench piece clipping — tabs and focus ring (2026-04-21) |
 
 ---
 
@@ -25,11 +26,16 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-**Story 46b — Fix bench piece clipping** *(in progress — see `docs/next-story.md`)*
-Pieces with downward knobs and the magenta focus ring cut off at bench button bottom. Mask padding / button bounds fix.
+*Committed sequence: 46d → 46c → 46e → Story 47. No new bugs sneak ahead of this order; the 46-series closes out before Controlled Inputs begins.*
 
-**Story 46c (candidate) — Scatter spread investigation**
-Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure then fix if real.
+**Story 46d — Fix piece label clipping on narrow pieces** *(in progress — see `docs/next-story.md`)*
+Piece number labels clip on narrow pieces (panorama-sized). Label sizing is fixed; mask clip is load-bearing. Resize labels to fit piece geometry.
+
+**Story 46c — Scatter spread investigation** *(up next after 46d)*
+Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure first — may resolve as "no real bug". If real, fix the spiral step.
+
+**Story 46e — Corner piece alignment** *(after 46c)*
+3/4 corner pieces sit with a small gap between the piece edge and the board edge. Investigate static offset vs new logic. From 46b QA.
 
 ---
 

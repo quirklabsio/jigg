@@ -1,58 +1,70 @@
-# Story 46b: Fix bench piece clipping — tabs and focus ring
+# Story 46d: Fix piece label clipping on narrow pieces
 
-The user reported this during Story 45 manual QA and confirmed it persisted through Story 46: bench pieces with downward-facing tabs get their knob tip sliced off at the bottom of the bench body, and the magenta active/focus ring on the currently-focused piece is clipped the same way. Both symptoms point to the `_piecesContainer` mask in `src/canvas/bench.ts:85-86` (and refreshed around line 875) not leaving room for the legitimate overflow that tabs and the focus ring are designed to produce.
+## Context
 
-The clip is doing exactly what Story 32 set it up to do ("prevents overflow during layout") — the problem is the mask rect's geometry doesn't know about tab overhang or ring thickness, both of which are intentional visual features that exist *outside* the piece's nominal grid cell.
+During 46b QA the user observed piece number labels with digits cut off by the piece cut mask. This is load-bearing behavior, not a bug in the naive sense — `src/utils/preferences.ts:353` explicitly states:
+
+> // First child so snap highlight renders above; mask clips label to piece shape
+
+Story 37b designed label placement assuming roughly square pieces (the hardcoded 4×4 era) where a fixed-size label comfortably fits inside the piece interior. Story 46 shipped a dynamic grid: a 2048×102 panorama produces narrow pieces (tens of px tall), and a fixed-size label no longer fits inside the piece shape. The mask clip is doing what it was told to do; the label sizing is what's wrong.
 
 ## Requirements
 
 ### Diagnosis first
 
-Find where the magenta focus/active ring is drawn on bench pieces. `SWATCH_HC_ACTIVE_CLR = 0xff00ff` (`bench.ts:507`) is for filter-strip swatches in HC mode — confirm whether the piece-focus ring is a different code path. Likely locations: `bench.ts`, `preferences.ts`, `aria.ts` focus handlers, or a per-button Graphics overlay. Note the actual ring thickness and where it's positioned relative to the piece sprite's bounding box.
+Read `src/utils/preferences.ts` starting around line 274 (the "Piece labels (Story 37b)" section). Identify:
+- How `createPieceLabel` sizes the Text and its background Graphics rect
+- Whether those sizes are absolute or piece-relative
+- Where the label is positioned relative to piece geometry (centering)
+- Both code paths that attach labels: the bench path (lines ~344–349 with counter-scaling) and the canvas path (line 351 — `label.rotation = -sprite.rotation`)
 
-Measure the tab overhang. Tab height is a function of piece size (~20–25% per existing cutter convention). For a bench piece scaled to slot size `S`, maximum overhang below the piece nominal bounding box is roughly `tabHeight ≈ 0.25 * S` in any of the four directions.
+Confirm the hypothesis: label size is fixed, so it overflows narrow pieces, so the piece-shape mask clips it.
 
 ### Fix
 
-Pick one approach and implement it. The dev decides based on what the code structure supports most cleanly — this list is the option space, not a preference:
+Pick one approach. Document the choice and alternatives in `decisions.md`.
 
-- **A. Pad the mask rect** — widen `_piecesMask` by `max(tabOverhang, ringThickness) + margin` on all four edges. Keeps piece positioning unchanged; the clip just relaxes.
-- **B. Shrink pieces within button bounds** — reserve padding inside each bench button for tab + ring, render the piece sprite smaller so overflow fits inside the existing mask.
-- **C. Per-button scissor** — drop the container mask for focused pieces and rely on individual button bounds (more complex; flag if you discover A and B both have fatal issues).
+- **A. Scale labels to fit the piece's smaller dimension.** Compute label max size from `min(pieceW, pieceH) * K` (pick K by eye — probably 0.4–0.6). On narrow pieces, labels shrink; on square pieces, sizes match today's behavior.
+- **B. Move labels above the piece mask.** Attach the label container as a sibling overlay rather than a sprite child. Sync position + rotation via ticker. Breaks the "label inside piece shape" design intent but guarantees no clipping.
+- **C. Hybrid.** Apply A's dynamic sizing only when min-dimension falls below a threshold. Preserves the current look on normal pieces; activates the fit logic for narrow ones.
 
-Whichever you pick, leave a short `decisions.md` note explaining the choice and the alternatives considered.
+Bias toward A or C unless they prove infeasible — they preserve the existing design language. Don't reach for B unless necessary.
 
 ## Constraints
 
-- **Do not touch piece geometry.** `cutter.ts`, tab heights, piece texture regions stay exactly as they are. This is a bench-rendering fix, not a piece-cutting fix.
-- **Do not regress horizontal clipping.** Pieces must still not bleed past the left/right ends of the tray (scroll overflow was one of the original reasons for the mask — see `decisions.md` Story 32). The fix adjusts vertical breathing room, not horizontal.
-- **Do not change the focus ring colour or behaviour.** The magenta ring's existence is correct; it's just clipped.
-- **Do not touch filter strip layout.** Keep `_filterContainer` positioning unchanged (`bench.ts:1524`).
-- **Do not introduce a new focus indicator system.** Use the one that already exists — just make it visible.
+- **Do not touch the piece cut mask.** The mask is load-bearing for snap highlight rendering (per the line 353 comment) and everything else. The fix operates on label sizing, not mask geometry.
+- **Preserve the Story 37b rotation invariant.** Counter-rotation stays: `label.rotation = -sprite.rotation` on canvas, `-(piece.rot * Math.PI) / 180` in the bench counter-scaled path. If switching hierarchies (Approach B), the rotation math moves but must remain equivalent.
+- **Preserve the bench counter-scaling** (line 349: `label.scale.set(1 / sprite.scale.x)`). Labels render at native size regardless of bench thumbnail scale — this must still hold.
+- **Do not change label visual design.** Font family, color, stroke, and background style stay. If sizing forces a lower font size on narrow pieces, that's a dimensional change, not a design change.
+- **Do not change the preferences toggle behavior.** Whatever turns labels on/off stays as-is.
+- **Don't address the two TODOs already in the file** (`non-scaling labels` at low zoom, `BitmapText` for perf). Out of scope.
 
 ## Files likely to touch
 
-- `src/canvas/bench.ts` — primary; mask geometry or button slot geometry
-- Possibly `src/canvas/preferences.ts` or `src/utils/aria.ts` if the focus ring lives there and needs a thickness adjustment coordinated with the mask
+- `src/utils/preferences.ts` — primary. `createPieceLabel`, the attach logic, `updateLabelBgAlpha` if sizing knobs need exposure
+- `src/canvas/scene.ts` — only if Approach B requires a new overlay container
+- `docs/decisions.md` — approach choice + alternatives considered
 
 ## Acceptance
 
-The user will test these through the QA page (`http://localhost:5173/qa`). Write ACs into `public/qa.html` per the `/qa` command format.
+User tests via the QA page. Write ACs into `public/qa.html` per the `/qa` command format. Target ACs:
 
-- **AC-1: Tabs fully visible, all rotations.** Load `/test-image.jpg` or a phone-JPEG-size fixture. Scroll the bench to find pieces with tabs pointing in each of the four directions. Every tab tip is visible — none sliced off at any tray edge.
-- **AC-2: Focus ring fully visible.** Press `T` to open bench, Tab to reach it, arrow-right through pieces. The magenta active/focus ring is fully rendered — not clipped at top, bottom, or (where applicable) sides.
-- **AC-3: Horizontal overflow still prevented.** Rapidly flick between filters and scroll the bench; no piece bleeds past the left or right end of the tray strip.
-- **AC-4: Resize, tray open/close still correct.** Trigger a window resize and toggle the tray open/closed with `T`; mask geometry refreshes correctly, pieces stay inside the bench body.
-- **AC-5: No regression in other bench features.** Filter strip renders correctly; swatch active states still show correctly; keyboard navigation still moves focus as before; piece extraction still works.
+- **AC-1: Normal (square-ish) pieces unchanged.** Load `/test-image.jpg`. Enable labels. Every label on bench and table is fully visible — no digit clipped. Visual size of labels matches pre-fix appearance (or acceptably close).
+- **AC-2: Narrow pieces (panorama).** Drop a 4000×200 panorama (or use a pre-normalized 2048×102 fixture). Enable labels. Every label on narrow pieces is fully visible — may be visibly smaller than AC-1's labels, but legible.
+- **AC-3: Rotated pieces.** Rotate a bench piece (double-tap or keyboard). Label stays upright (per Story 37b invariant) and fully visible. Same for canvas pieces after extraction.
+- **AC-4: Bench counter-scaling preserved.** Labels in the bench don't visually swell or shrink as bench thumbnails resize on window resize.
+- **AC-5: Toggle works.** Disable labels via preferences; labels disappear. Re-enable; labels reappear correctly on all pieces.
+- **AC-6: No regression in snap highlight or focus ring.** Snap highlight still renders above the label when a piece is dragged into place. 46b's focus ring still visible on bench.
 
 ## Out of scope
 
-- **Story 46c (scatter spread investigation)** — separate candidate story. Do not touch spiral geometry in this session.
-- Arrow-key piece movement on the table (Story 72 deferred post-launch).
-- Any change to piece cut generation, textures, or WASM pipeline.
-- Any change to focus-ring colour, thickness-by-design, or the active-state visual language.
+- The low-zoom non-scaling label TODO (line 291–293 in preferences.ts)
+- BitmapText perf swap (line 285–286)
+- Story 46c (scatter spread investigation) — still a candidate
+- Story 46e (corner piece alignment — 3/4 corners not flush to board edge) — new candidate from 46b QA
+- Any visual redesign of labels
 
-## Known adjacent items (for context only — not to fix)
+## Known candidates still open (for context only)
 
-- Scatter spread from Story 45 testing: still open as candidate Story 46c.
-- If you notice the focus ring is drawn once globally and re-used, that's fine — don't refactor focus-ring architecture as part of this fix.
+- **Story 46c** — Scatter spread investigation (from Story 45 QA)
+- **Story 46e** — Corner piece alignment: 3 of 4 corner pieces sit with a small gap between the piece edge and the board edge (from 46b QA). Needs investigation into board rect position vs piece canonical positions.
