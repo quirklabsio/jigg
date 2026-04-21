@@ -25,8 +25,8 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-**Story 46b (candidate) — Bench piece clipping**
-Pieces with downward knobs and the magenta active ring cut off at bench button bottom. Mask padding / button bounds fix.
+**Story 46b — Fix bench piece clipping** *(in progress — see `docs/next-story.md`)*
+Pieces with downward knobs and the magenta focus ring cut off at bench button bottom. Mask padding / button bounds fix.
 
 **Story 46c (candidate) — Scatter spread investigation**
 Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure then fix if real.

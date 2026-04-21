@@ -1,35 +1,50 @@
-Produce a chat-only QA handoff for the work just completed. The tester has not seen the code and may have forgotten what the story was about — write for that reader.
+Produce the QA handoff for the work just completed. The primary artifact is the QA page at `http://localhost:5173/qa`. Chat output is a thin pointer plus the context the user needs before opening the page.
 
-Output this, in chat, in order:
+## Before running /qa
+
+### 1. Update `STORY` and `FIXTURES` at the top of `public/qa.html`
+
+Find the `const STORY = { ... }` block (around line 301). Replace with:
+- `number` — story number (integer)
+- `title` — short imperative title, matching `docs/next-story.md`
+- `criteria` — array of `{ id: 'AC-N', text: '...' }`. Each AC's text should embed the expected outcome so the user can judge Pass/Fail from reading it alone (not "it works" — "bench shows 165 ± 10 pieces, pieces look square-ish").
+
+Find the `const FIXTURES = [ ... ]` block. Replace with one entry per candidate fixture — both existing `public/` assets (e.g. `/test-image.jpg`) and any new `/qa-scratch/` images created this story. Each entry:
+- `src` — the path the app loads (e.g. `/qa-scratch/foo.jpg` or `/test-image.jpg`)
+- `name` — display label
+- `dims` — e.g. `'2048 × 1536'`
+- `acs` — list of AC ids this fixture exercises
+- `expect` — one-line "what the user should see"
+- `qaFile` — scratch fixtures only: filesystem path, e.g. `'qa-scratch/synthetic-2048x1536.jpg'`
+- `recommended` — `true` if you are nominating this fixture for promotion to `/test/fixtures/`
+- `recommendReason` — one-line rationale, visible on the page and included in the copied QA Report
+
+### 2. Drop new fixtures into `/qa-scratch/`
+
+Gitignored, local-only. A nominated fixture's `qaFile` must point to a real file. See `test/fixtures/README.md` for the three-tier system.
+
+### 3. Pre-nominate fixtures for promotion
+
+Tick `recommended: true` on any scratch fixture you believe belongs in `/test/fixtures/images/<area>/`. The user ticks/unticks in the page UI. **Never promote unilaterally.** After the user signs off, they tell you which nominations they accepted; you do the actual move + `fixtures.json` entry then.
+
+`recommendReason` is not fluff — answer: "what does this fixture uniquely prove that a user-supplied file wouldn't?"
+
+## /qa chat output
+
+Keep it thin — the page carries the weight.
 
 **Lead with:** `Done.`
 
-**1. Refreshed acceptance criteria.** Copy the criteria from `docs/next-story.md` and amend to reflect what actually shipped. If scope expanded, add the new criteria. If a criterion moved, note the move. If one was dropped, say why. This list is what the user ticks through when testing.
+**1. Pointer.** `QA page live at http://localhost:5173/qa — N ACs, M fixtures (K nominated for promotion).`
 
-**2. Test steps.** Concrete click-paths, key presses, drop targets, URLs. Each step maps to one or more acceptance criteria. No "verify it works" hand-waving — say exactly what to do and what to look for.
+**2. Out of scope.** Things the user should NOT flag as bugs: deferred sub-tasks, known limitations, adjacent features that weren't touched.
 
-**3. Test fixtures.** Drop any test images needed for this story into `/qa-scratch/` (gitignored, local-only scratch). Do not promote anything into `/test/fixtures/` — that's a human decision made after actual testing. `/qa` produces artifacts; the user decides what's worth keeping.
+**3. What's coming up.** Next 2–3 stories from the Next column of `docs/roadmap.md` (title + one-line outcome), so the tester knows what's deliberately unfinished vs. a bug.
 
-For each file dropped into `/qa-scratch/` this story, report:
-- Path (e.g. `qa-scratch/iphone-portrait-exif.jpg`)
-- Which acceptance criterion it exercises (from section 1)
-- Why a user-supplied file wouldn't prove the criterion as reliably
+## Do / Don't
 
-Size guidance: keep images under 1 MB where the story allows — a 1200×1600 portrait JPEG proves EXIF rotation as well as a 5 MB one.
-
-If no fixtures were needed, say so and explain reproduction (e.g. "use any portrait-oriented phone photo"). Don't invent paths that don't exist.
-
-See `test/fixtures/README.md` for the three-tier system (scratch → promoted → external) and the promotion rules. `/qa` only operates on the scratch tier.
-
-**4. Out of scope.** Things the user should NOT test in this pass — deferred sub-tasks, known limitations, unrelated adjacent features that weren't touched. Prevents the user from chasing non-bugs.
-
-**5. What's coming up.** Read the Next column of `docs/roadmap.md` and list the next 2–3 stories in the current epic (title + one-line outcome each). This gives the tester context on what's deliberately unfinished vs. what's a bug. Example: "Story 46 — Rebuild Puzzle on Image Load: piece regeneration after image load. So if extracting pieces still reflects the old puzzle grid, that's a Story 46 concern, not a Story 45 bug."
-
-**Do not:**
-- Write to `docs/next-story.md` (BA-owned)
-- Run `/refine` — that's a separate step, after QA confirms the work
-- Create `qa-checklist.md` or any handoff file — this command is chat-only by design
-
-**Do:**
-- Drop test images in `/qa-scratch/` for user testing. Report what was created and why. Promotion decisions happen after actual testing — not here.
-- Keep each section scannable — this is a checklist, not prose
+- **Do not** write to `docs/next-story.md` (BA-owned).
+- **Do not** run `/refine` — separate step, after the user confirms QA passed.
+- **Do not** promote fixtures unilaterally. Nominate only; user approves; dev does the move.
+- **Do not** create any other handoff files. The QA page + chat is the complete handoff.
+- **Do** keep the chat output short. The page is the primary interface.
