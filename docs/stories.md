@@ -19,6 +19,22 @@ Files changed:
 
 -->
 
+## Story 46c: Bench→table scatter spread investigation
+
+**Shipped:** 2026-04-21
+
+**Outcome B — real bug fixed.** The `spiralPlace` step-size formula (`bench.ts:976`) used raw texture pixels (`maxDim * √2 * 1.3`) for a world-space step. Sprites are placed with `sprite.scale.set(_canvasScale)`, so world-space piece width = `maxDim × _canvasScale`. The formula was missing the `_canvasScale` factor, making spread proportional to `1 / canvasScale`. For the old test image (800×600, canvasScale=1.5) the spread was 1.46× piece widths — compact and felt right. For phone images (2048×1536, canvasScale=0.586) the spread was 3.75× — visibly wider. Story 46 did not introduce the bug; it became observable because Story 44/45 made real images the default input.
+
+Fix: `stepSize = maxDim * _canvasScale * Math.SQRT2 * 1.3`. Spread factor is now constant at 2.20× piece widths at N=5 for all image sizes. Viewport.scale stays at 1.0 for all images (no auto-fit in loadScene); Outcome C was ruled out.
+
+Full measurement table and decision in `docs/decisions.md` §Scatter spread investigation.
+
+Files changed:
+- `src/canvas/bench.ts` — `stepSize` formula now includes `_canvasScale`; occupancy check `hw`/`hh` also corrected to world units (`textureRegion * _canvasScale / 2`)
+- `docs/decisions.md` — new "Scatter spread investigation (Story 46c)" section
+
+---
+
 ## Story 46d: Fix piece label clipping on narrow pieces
 
 **Closed without code fix:** 2026-04-21

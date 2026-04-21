@@ -973,12 +973,12 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   const N = usePuzzleStore.getState().pieces.length;
   const maxDim  = Math.max(_piecePixelW, _piecePixelH);
-  const stepSize = maxDim * Math.SQRT2 * 1.3;
+  const stepSize = maxDim * _canvasScale * Math.SQRT2 * 1.3;
   const b = stepSize / (2 * Math.PI);
 
   const { groupsById, piecesById } = usePuzzleStore.getState();
-  const hw = piece.textureRegion.w / 2;
-  const hh = piece.textureRegion.h / 2;
+  const hw = piece.textureRegion.w * _canvasScale / 2;
+  const hh = piece.textureRegion.h * _canvasScale / 2;
 
   let worldX = spiralOriginX;
   let worldY = spiralOriginY;
@@ -997,8 +997,8 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
         if (!p || !isOnTable(p)) continue;
         const px = group.position.x + p.pos!.x;
         const py = group.position.y + p.pos!.y;
-        if (Math.abs(cx - px) < hw + p.textureRegion.w / 2 &&
-            Math.abs(cy - py) < hh + p.textureRegion.h / 2) {
+        if (Math.abs(cx - px) < hw + p.textureRegion.w * _canvasScale / 2 &&
+            Math.abs(cy - py) < hh + p.textureRegion.h * _canvasScale / 2) {
           occupied = true;
           break;
         }

@@ -12,7 +12,9 @@ Always read these files before responding:
 
 For spec work, also read:
 - `docs/spec-integration.md` — Type imports and git workflow
-- `docs/engine-conventions.md` — Runtime invariants
+
+For any work touching piece positions, coordinate math, or world-space logic:
+- `docs/engine-conventions.md` — Coordinate systems, stage rules, rotation, cluster lifecycle
 
 ## Story Implementation
 - `docs/next-story.md` is the handoff contract — **BA owns this file exclusively. Dev reads only, never writes, never clears, never overwrites.**
@@ -23,6 +25,7 @@ For spec work, also read:
 - **QA handoff at end of work.** Before declaring done, run `/qa`. Primary artifact is the QA page at `http://localhost:5173/qa` (`public/qa.html`) — update its `STORY` and `FIXTURES` data to match the current story, pre-nominate any scratch fixtures you recommend for promotion (user ticks/unticks, dev does the promotion later). Chat output is a thin pointer plus out-of-scope and roadmap preview. See `.claude/commands/qa.md` for the format and `test/fixtures/README.md` for the fixture tiers.
 
 ## Key References
-- Patterns: `docs/gotchas.md`
-- Architecture: `docs/architecture.md`  
+- Runtime invariants, coordinate systems, stage rules: `docs/engine-conventions.md`
+- Surprising failures / environment traps: `docs/gotchas.md`
+- Architecture: `docs/architecture.md`
 - Accessibility: `docs/accessibility.md`

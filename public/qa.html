@@ -249,8 +249,8 @@
 <body>
 
   <div class="header">
-    <div class="header-story">Story 46b · QA Checklist</div>
-    <div class="header-title">Fix bench piece clipping — tabs and focus ring</div>
+    <div class="header-story" id="headerStory"></div>
+    <div class="header-title" id="headerTitle"></div>
   </div>
 
   <!-- ── Acceptance Criteria ─────────────────────────────────── -->
@@ -299,32 +299,32 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '46d',
-      title: 'Fix piece label clipping on narrow pieces',
+      number: '46c',
+      title: 'Bench→table scatter spread investigation',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Normal (square-ish) pieces unchanged. Load test-image.jpg. Enable labels (Preferences → Piece numbers). Every label on bench and table is fully visible — no digit clipped. Visual size matches pre-fix appearance (or acceptably close).',
-        },
-        {
-          id: 'AC-2',
-          text: 'Narrow pieces (panorama). Drop the panorama fixture (2048×102). Enable labels. Every label on narrow bench pieces is fully visible — may be visibly smaller than AC-1 labels, but legible and not clipped.',
+          text: 'Measurement delivered. docs/decisions.md contains the three-image table (grid, piece dims, stepSize, r at N=5/10/16/50, canvasScale, spread factor) plus pre-Story-46 baseline for comparison. Decision (B — real bug, formula fixed) stated plainly.',
         },
         {
           id: 'AC-3',
-          text: 'Rotated pieces. Rotate a bench piece (double-tap or keyboard R). Label stays upright and fully visible. Extract the piece to the canvas; label remains upright and unclipped.',
+          text: 'Consistent spread across image sizes. Extract 5–10 pieces from each of the three test images (test-image.jpg, phone 2048×1536, panorama 2048×102). On-screen gap between pieces feels visually similar across all three — not noticeably wider for larger images than smaller ones.',
         },
         {
           id: 'AC-4',
-          text: 'Bench counter-scaling preserved. Labels in the bench do not visually swell or shrink as the window is resized (i.e. bench thumbnail slots reflow).',
+          text: 'Rapid-click clustering preserved. Extract 5 pieces rapidly from the bench without panning. All 5 land in a coherent visual cluster near the viewport center — not scattered to random positions.',
         },
         {
           id: 'AC-5',
-          text: 'Toggle works. Disable labels via Preferences; labels disappear from all pieces. Re-enable; labels reappear correctly on bench and table pieces.',
+          text: 'Viewport-pan origin reset preserved. Extract a piece (note its cluster position), pan the viewport to a different area, extract another piece. The new piece\'s spiral origin is near the new viewport center, not the original center.',
         },
         {
           id: 'AC-6',
-          text: 'No regression in snap highlight or focus ring. Drag a piece near its correct board position — snap highlight renders above the label. Keyboard-navigate in bench — 46b focus ring is still visible.',
+          text: 'Keyboard extraction works. Open bench (T), Tab to a piece, press Enter — piece extracts to the spiral location. Repeat for 3 pieces; they cluster correctly near viewport center.',
+        },
+        {
+          id: 'AC-7',
+          text: 'No overlap regression. Extract 20+ pieces rapidly from the bench. No two pieces visibly overlap after extraction (occupancy check still effective).',
         },
       ],
     };
@@ -334,27 +334,37 @@
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-1', 'AC-3', 'AC-4', 'AC-5', 'AC-6'],
-        expect: 'All (130) — 13×10',
+        acs: ['AC-3', 'AC-4', 'AC-5', 'AC-6', 'AC-7'],
+        expect: '130 pieces (13×10). canvasScale=1.5 — spread should look compact, ~2× piece width at N=5.',
       },
       {
         src: '/test-face.png',
         name: 'test-face.png',
         dims: '512 × 512',
-        acs: ['AC-1', 'AC-5'],
-        expect: 'All (81) — 9×9',
+        acs: ['AC-3', 'AC-7'],
+        expect: '81 pieces (9×9). canvasScale ~1.5 — same compact spread as test-image.',
       },
       {
-        src: '/qa-scratch/synthetic-2048x102.jpg',
-        name: 'synthetic-2048×102 (panorama)',
+        src: '/qa-scratch/grid_phone-aspect_2048x1536_165pieces.jpg',
+        name: 'phone 2048×1536',
+        dims: '2048 × 1536',
+        acs: ['AC-3', 'AC-4', 'AC-7'],
+        expect: '165 pieces (15×11). canvasScale≈0.586 — pre-fix was 3.75× spread; post-fix should look similar to test-image.',
+        qaFile: 'qa-scratch/grid_phone-aspect_2048x1536_165pieces.jpg',
+      },
+      {
+        src: '/qa-scratch/grid_panorama-extreme_2048x102_mingrid.jpg',
+        name: 'panorama 2048×102',
         dims: '2048 × 102',
-        acs: ['AC-2', 'AC-3', 'AC-4', 'AC-5'],
-        expect: 'All — 2 rows, narrow pieces',
-        qaFile: 'qa-scratch/synthetic-2048x102.jpg',
-        nominate: true,
+        acs: ['AC-3', 'AC-4', 'AC-7'],
+        expect: '68 pieces (34×2). canvasScale≈0.703 — spread should look comparable to test-image, not excessively wide.',
+        qaFile: 'qa-scratch/grid_panorama-extreme_2048x102_mingrid.jpg',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────
+
+    document.getElementById('headerStory').textContent = `Story ${STORY.number} · QA Checklist`;
+    document.getElementById('headerTitle').textContent = STORY.title;
 
     // State: null = untested, true = pass, false = fail
     const acState = Object.fromEntries(STORY.criteria.map(ac => [ac.id, null]));

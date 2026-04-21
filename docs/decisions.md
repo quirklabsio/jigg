@@ -233,6 +233,63 @@ Story 46d investigated label clipping caused by the piece-shape mask. The root c
 - **`qa-scratch/` served via Vite middleware, not committed to `public/`** — scratch images are gitignored by definition; putting them in `public/` would commit them. A small `configureServer` plugin in `vite.config.ts` serves `qa-scratch/` at `/qa-scratch/` during development only. Nothing in the plugin runs at build time or ships to production.
 - **Three-tier clipboard fallback: `navigator.clipboard` → `execCommand` → modal** — `navigator.clipboard.writeText` requires document focus; it fails silently in split-window QA setups (picker in one tab, app in another). `execCommand('copy')` works without focus. If both fail (sandboxed iframe, some mobile browsers), a modal shows the report text pre-selected so the user can `⌘C` manually. Each tier is tried in order; the modal is the last resort, never the default.
 
+## Scatter spread investigation (Story 46c)
+
+**Decision: Outcome B — real bug, step-size formula does not account for `canvasScale`.**
+
+The `spiralPlace` formula (`bench.ts:976`) computes step size in texture pixels:
+```ts
+const stepSize = maxDim * Math.SQRT2 * 1.3;   // maxDim in texture px
+```
+But spiral positions are world coordinates, where a piece occupies `maxDim × canvasScale` world units (because sprites are placed with `sprite.scale.set(_canvasScale)`). The formula should multiply by `_canvasScale`:
+```ts
+const stepSize = maxDim * _canvasScale * Math.SQRT2 * 1.3;
+```
+
+Without the fix, spread factor(N) = `√2 × 1.3 × N × 1.5 / (2π × canvasScale)` — depends on `canvasScale`. Images that are larger than the screen (canvasScale < 1) produce a spread many times wider than expected. With the fix, spread factor(N) = `√2 × 1.3 × N × 1.5 / (2π)` ≈ `0.439 × N`, constant for all images.
+
+**Viewport scale:** `viewport.scale = 1.0` for all images — `loadScene` has no `setZoom` or fit call; pixi-viewport defaults to scale 1. Screen-space spread equals world-space spread throughout. Outcome C is not the issue.
+
+**The bug predates Story 46.** The formula was already canvasScale-blind. It went unnoticed because the only pre-45 test image (`test-image.jpg`, 800×600) happened to produce `canvasScale = 1.5` — giving compact 1.46× spread. Real phone images (2048×1536, `canvasScale ≈ 0.586`) give 3.75× spread. Story 46 did not widen the spread; it exposed the flaw by making real images the default input.
+
+### Measurement table
+
+Assumptions: 1440×900 screen, `viewport.scale = 1.0`.  
+`r(N)` values are world units = screen pixels at `viewport.scale = 1`. Spread factor = `r(N) / screen_piece_width`.
+
+**Pre-Story-46 baseline (4×4 hard-coded grid)** — only `test-image.jpg` was used in practice.
+
+| Image | Grid | maxDim (px) | canvasScale | stepSize | r(N=5) | r(N=10) | r(N=16) | r(N=50) | screen piece (px) | spread@N=5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| test-image.jpg 800×600 | 4×4=16 | 200 | 1.500 | 367.7 | 438.9 | 877.8 | 1404.5 | 4388.9 | 300 | 1.46× |
+| phone 2048×1536 | 4×4=16 | 512 | 0.586 | 942.4 | 1124.9 | 2249.8 | 3599.7 | 11249 | 300 | 3.75× |
+| panorama 2048×102 | 4×4=16 | 512 | 0.703 | 942.4 | 1124.9 | 2249.8 | 3599.7 | 11249 | 360 | 3.12× |
+
+**Post-Story-46, pre-fix (dynamic `computeGrid`)** — same formula, different piece dimensions.
+
+| Image | Grid | maxDim (px) | canvasScale | stepSize | r(N=5) | r(N=10) | r(N=16) | r(N=50) | screen piece (px) | spread@N=5 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| test-image.jpg 800×600 | 13×10=130 | 61 | 1.500 | 112.2 | 133.9 | 267.9 | 428.6 | 1339.4 | 91.5 | 1.46× |
+| phone 2048×1536 | 15×11=165 | 139 | 0.586 | 255.8 | 305.3 | 610.7 | 977.1 | 3053.5 | 81.5 | 3.75× |
+| panorama 2048×102 | 34×2=68 | 60 | 0.703 | 110.3 | 131.7 | 263.4 | 421.4 | 1316.9 | 42.2 | 3.12× |
+
+**Spread factor is unchanged from pre-46** — Story 46 did not alter the formula. The spread factor depends only on `canvasScale` (image size) and N, not on grid dimensions or piece count.
+
+**Post-fix (stepSize = maxDim × _canvasScale × √2 × 1.3)** — spread factor = 0.439 × N for all images.
+
+| Image | stepSize (fixed) | r(N=5) | r(N=10) | r(N=16) | r(N=50) | spread@N=5 |
+|---|---|---|---|---|---|---|
+| test-image.jpg 800×600 | 168.4 | 200.9 | 401.9 | 643.0 | 2009.3 | 2.20× |
+| phone 2048×1536 | 150.0 | 179.0 | 358.0 | 572.8 | 1790.1 | 2.20× |
+| panorama 2048×102 | 77.6 | 92.6 | 185.3 | 296.5 | 926.4 | 2.20× |
+
+The fixed spread (2.20× at N=5) is wider than the old test-image.jpg experience (1.46×) but narrower than the current phone-image experience (3.75×), and — critically — consistent across all image sizes.
+
+**Alternatives considered and rejected:**
+- Tune the 1.3 constant down to ~0.865 to preserve 1.46× — a smell that would re-break for any non-1.0 viewport scale; the unit mismatch is the actual bug.
+- Cap `canvasScale` at 1.0 to clamp the fix for large images — hides the fact that small images (canvasScale > 1) had the formula going the other way (steps too large relative to pieces); consistent is better.
+- Use geometric mean `sqrt(pieceW × pieceH)` instead of `max` — orthogonal; doesn't fix the canvasScale omission and adds complexity.
+
 ## fixtures.json format (test/fixtures)
 
 - **`notes` at top level, not inside `expected`** — notes describe what the fixture tests; `expected` describes the system output. Mixing them makes `expected` harder to use as an assertion shape. `notes` is prose for humans; `expected` is data for test runners.

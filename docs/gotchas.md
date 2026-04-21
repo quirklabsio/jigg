@@ -2,7 +2,9 @@
 
 # Development Gotchas — Jigg-specific Issues
 
-*Common pitfalls and non-obvious behaviors in the Jigg codebase.*
+*Things that bite you even when you know the system — surprising failures, silent mismatches, environment traps.*
+
+**A gotcha is not a rule or a convention.** If it's a known invariant, a lifecycle rule, or a coordinate-space definition, it belongs in `engine-conventions.md`, not here. Ask: "Would a careful dev who read engine-conventions.md still get burned by this?" If yes — it's a gotcha. If no — it's a convention; put it there.
 
 ## WASM Integration
 
@@ -22,29 +24,6 @@ const result = analyze_image(imageData)
 
 ### Legacy Pattern (Pre-Story 3)
 ~~`import(/* @vite-ignore */ '/wasm/jigg_analysis.js')` — Do not use this pattern. It was replaced by direct wasm-pkg imports for better bundling.~~
-
-## PixiJS Coordinate Systems
-
-### Local vs Global Positions
-```typescript
-// WRONG: Assumes global coordinates
-const globalX = piece.pos.x
-
-// RIGHT: piece.pos is currently local group offset  
-const globalX = group.position.x + piece.pos.x
-```
-
-**Current behavior:** `piece.pos` stores local offset within group  
-**Future behavior:** Will store global coordinate (persistence epic)
-
-### Rotation Conversion
-```typescript
-// Spec uses degrees, PixiJS uses radians
-piece.rot = 90                                    // Spec: degrees
-sprite.rotation = piece.rot * Math.PI / 180       // PixiJS: radians
-```
-
-**Common mistake:** Forgetting to convert between degrees/radians.
 
 ## Stage Transition Rules
 
@@ -289,6 +268,7 @@ THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - P
 If you add a new permanent element inside `_piecesContainer` above (or below) the piece grid — e.g. a second toolbar row, a notification bar — the available height shrinks and `THUMBNAIL_SIZE` must be recalculated. Failing to do so causes piece cells to overflow the mask (tab knobs sliced) and the focus ring to go off-screen (clipped at the canvas boundary).
 
 The `_focusRing` Graphics lives on `app.stage`, not inside `_piecesContainer`. **The container mask does not clip the ring.** The ring is clipped only by the canvas (WebGL viewport) boundary. If the sprite's bottom in screen space exceeds `screenH`, the ring drawn `FOCUS_RING_PADDING` pixels outside will be partially off-canvas and invisible. Reducing `THUMBNAIL_SIZE` is the correct fix — expanding the mask alone cannot recover off-screen content.
+
 
 ## Small images produce *fewer* pieces than large images (MIN_PIECE_SIDE effect)
 

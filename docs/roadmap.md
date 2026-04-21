@@ -30,8 +30,8 @@
 
 **Story 46d — CLOSED without fix.** Label clipping requires Approach B (overlay layer above mask). See `docs/decisions.md`. Queued below as Story 46f.
 
-**Story 46c — Scatter spread investigation** *(in progress — see `docs/next-story.md`)*
-Bench→table Archimedean spiral appears wider than pre-Story-45 behaviour. Measure first — may resolve as "no real bug". If real, fix the spiral step.
+**Story 46c — Scatter spread investigation** *(shipped 2026-04-21)*
+Outcome B: `stepSize` formula was missing `_canvasScale` factor. Fixed in `bench.ts:976`. Spread is now consistent across image sizes (~2.2× piece width at N=5 for all images).
 
 **Story 46e — Corner piece alignment** *(after 46c)*
 3/4 corner pieces sit with a small gap between the piece edge and the board edge. Investigate static offset vs new logic. From 46b QA.

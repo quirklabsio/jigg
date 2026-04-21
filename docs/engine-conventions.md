@@ -85,6 +85,76 @@ cluster.forEach(piece => {
 
 **Origin piece:** Lowest `PieceDefinition.index` in cluster (for deterministic behavior).
 
+## Coordinate Systems
+
+Four coordinate spaces are in play. Mixing them silently produces wrong results.
+
+### 1. Texture pixels
+
+Raw pixel dimensions of the sliced piece image. Stored in `piece.textureRegion.w/h`.
+
+```
+textureRegion.w = Math.floor(imageWidth / cols)   // e.g. 136 for 2048px / 15 cols
+```
+
+**Never use texture pixels as distances in world space.** They are only valid for texture UV math, sprite frame construction, and occupancy-check thresholds that have been converted (see §3 below).
+
+---
+
+### 2. World units
+
+PixiJS's internal coordinate space. The viewport world is `WORLD_SIZE × WORLD_SIZE` (4000 × 4000). At `viewport.scale = 1.0` (the default — no auto-fit runs at startup), 1 world unit = 1 CSS pixel.
+
+Piece sprites enter world space with `sprite.scale.set(_canvasScale)`, where:
+
+```
+_canvasScale = Math.min(screenW / imageW, screenH / imageH)
+```
+
+So a piece with `textureRegion.w = 136 px` occupies `136 × _canvasScale` **world units** in width.
+
+**`_canvasScale` varies per image.** A 2048×1536 image on a 1440×900 screen → `_canvasScale ≈ 0.586`. An 800×600 image → `_canvasScale = 1.5`. Code that works on the dev test image (800×600) will break silently on phone images if it treats texture pixels as world units.
+
+**Converting texture pixels → world units:**
+```ts
+const worldHalfW = piece.textureRegion.w * _canvasScale / 2;
+```
+
+---
+
+### 3. Group-local space
+
+`piece.pos` is an offset relative to `group.position`, not an absolute world coordinate:
+
+```ts
+// world position of a piece:
+const worldX = group.position.x + piece.pos!.x;
+const worldY = group.position.y + piece.pos!.y;
+```
+
+Both `group.position` and `piece.pos` are in world units. Piece canonical positions (`piece.canonical`) are also in world units and are absolute (not group-relative).
+
+**Future:** `piece.pos` will store absolute world coordinates when the persistence epic ships. `group.position` will become the canonical anchor. Until then, always add `group.position` when you need absolute world coords.
+
+---
+
+### 4. Screen pixels
+
+What the user actually sees: `world units × viewport.scale`. At default zoom (`viewport.scale = 1.0`) screen pixels equal world units. When the user pinches or scrolls to zoom, `viewport.scale` changes and the same world-space distance maps to a different number of screen pixels.
+
+Snap distances, focus ring thickness, and other screen-space constants must account for `viewport.scale` if they need to be zoom-stable. The focus ring is drawn on `app.stage` (above the viewport) for this reason — it uses screen coordinates directly.
+
+---
+
+### Quick reference
+
+| Space | Unit | Where used | Convert to world |
+|---|---|---|---|
+| Texture pixels | `textureRegion.w/h` | Sprite frames, UV math | `× _canvasScale` |
+| World units | `group.position`, `piece.pos`, `piece.canonical` | All PixiJS positions | — |
+| Group-local | `piece.pos` offset | Piece positions within a group | `+ group.position` |
+| Screen pixels | Visible px on display | Focus ring, snap highlight, DOM overlays | `÷ viewport.scale` |
+
 ## Rotation Handling
 
 ### Storage Formats

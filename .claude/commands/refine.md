@@ -20,8 +20,9 @@ Then reconcile. For each doc touched:
 
 - Something changed about **what exists or how it fits together** → `docs/architecture.md`
 - A new **trade-off or choice was made** → `docs/decisions.md`
-- A new **implementation detail, pattern, or constraint** → the relevant implementation doc (`engine-conventions.md`, `drag-and-drop.md`, `snap-detection.md`, `wasm-pipeline.md`, `accessibility.md`, `conventions.md`, `spec-integration.md`)
-- A new **anti-pattern or failure mode** → `docs/gotchas.md`
+- A new **runtime invariant, convention, or coordinate-system rule** → `docs/engine-conventions.md`
+- Other **implementation details, patterns, or constraints** → the relevant implementation doc (`drag-and-drop.md`, `snap-detection.md`, `wasm-pipeline.md`, `accessibility.md`, `conventions.md`, `spec-integration.md`)
+- A **surprising failure mode** that bites even when you know the system → `docs/gotchas.md`. The test: "would a dev who read engine-conventions.md still get burned by this?" If yes — gotcha. If no — it's a convention; put it in engine-conventions.md.
 
 Create a new implementation doc in `docs/` only if no existing file fits. Do not create new docs for the other two layers — there is exactly one architecture doc and one decisions doc.
 
