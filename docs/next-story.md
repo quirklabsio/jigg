@@ -1,91 +1,78 @@
-# Story 46e: Fix corner piece alignment — board size mismatch
+# Story 47: Choose-image file picker (minimal UI)
 
 ## Context
 
-User observed during 46b QA: 3 of 4 corner pieces sit with a small gap between the piece edge and the board edge. Top-left aligns; top-right, bottom-left, and bottom-right all show visible whitespace.
+Story 44 introduced drag-and-drop as a dev-tool entry for arbitrary images; Story 45 normalized them; Story 46 made the puzzle rebuild around any grid. End users don't drag files onto web apps as a first instinct though — they click buttons. Story 47 is the first of the Controlled Inputs epic ("make it a product, not a dev tool"): add a minimal DOM button that triggers the native file picker, routing the chosen file through the same pipeline drag-and-drop already uses.
 
-### Root cause (confirmed by inspection)
-
-The board is drawn at the full image dimensions:
-
-```ts
-// src/canvas/board.ts:24-25
-const bw = imageWidth  * scale;
-const bh = imageHeight * scale;
-```
-
-But piece dimensions are truncated in the cutter (both `src/canvas/scene.ts` and `src/puzzle/cutter.ts`):
-
-```ts
-const pieceW = Math.floor(imageWidth  / cols);
-const pieceH = Math.floor(imageHeight / rows);
-```
-
-So the total piece coverage is `cols * pieceW × rows * pieceH`, which is less than `imageWidth × imageHeight` by the remainder pixels. Corner pieces at canonical positions `(0,0)`, `((cols-1)*pieceW, 0)`, `(0, (rows-1)*pieceH)`, `((cols-1)*pieceW, (rows-1)*pieceH)` snap correctly, but the board rect extends past the right/bottom edges of the piece coverage by up to `cols-1` px on the right and `rows-1` px on the bottom (scaled by `scale`).
-
-Example: 2048 × 1536 image, 15 × 11 grid → pieceW = 136, pieceH = 139. Piece coverage 2040 × 1529. Board 2048 × 1536. Gap: 8 px right, 7 px bottom (world units, then × scale for screen).
-
-This is a Story-46-introduced bug. Pre-dynamic grids (the 4×4 era on 800×600, 2048×2048) happened to divide evenly.
+No design flourish. One button, one click, reuse the existing path.
 
 ## Requirements
 
-### Fix
+Add a persistent DOM `<button>` element to `index.html` (a sibling of `#app`, not inside the pixi-managed region). Label it clearly — "Choose Image" is the roadmap's suggested text; you can pick any equivalent imperative label but avoid verbose copy.
 
-The snap area — where pieces can land — is `cols * pieceW × rows * pieceH`. The board should match the snap area, not the image. One canonical fix:
+On click:
+1. Programmatically create a hidden `<input type="file" accept="image/*">` and trigger `.click()` on it (the standard pattern for styled upload triggers — a real `<input>` is clunky to style, a hidden one driven by a button is accessible and clean).
+2. On `change`, read `files[0]`. Apply the existing gate `file.type.startsWith('image/')`.
+3. Call `normalizeImage(file)` — the exact same function Story 45 added.
+4. Store to `sessionStorage` under the existing `SESSION_KEY` (`'jigg:pendingImageUrl'`).
+5. `window.location.reload()`.
 
-**A. Shrink the board to `cols * pieceW × rows * pieceH`.** The remainder pixels of the image are not part of any piece's texture frame anyway; they're invisible in puzzle-solving context. Update `createBoard` in `src/canvas/board.ts` to compute `bw = cols * pieceW * scale` and `bh = rows * pieceH * scale`. The caller in `scene.ts` already has `piecePixelW`/`piecePixelH` — either pass them through, or compute `Math.floor(imageWidth / cols)` inside `createBoard` (caller already passes `cols` and `rows`).
+This is the drag-and-drop pipeline, reused. **Do not duplicate the logic.** Extract the shared "process-and-load-image" path from `main.ts`'s drop handler into a single helper (e.g. `loadImageFile(file)`) and call it from both the drop handler and the new click handler. The drop handler must continue to work identically after the refactor.
 
-**B. Extend last-row/last-col pieces by the remainder.** Piece widths/heights become position-dependent. Last-col piece is `imageWidth - (cols-1) * pieceW` wide. Requires changes in cutter, snap, render. Significantly more invasive. Do not pick unless A has a fatal issue.
+### Styling
 
-**C. Pad or crop the image pre-cut so dimensions divide evenly.** Re-normalize at image load. Loses a few pixels of content but clean. Ripples into the ingest pipeline (Story 44/45 territory) — probably wrong layer to fix at.
+Inline styles in `index.html`'s existing `<style>` block. No separate stylesheet. Keep it visually small and unobtrusive:
 
-**Bias toward A.** If you pick anything else, explain why in `decisions.md`.
+- Fixed position, one corner of the viewport (top-right is the default recommendation — top-left may conflict with future settings or landmark focus)
+- ~8–12 px padding, system font, neutral background (off-white or pale gray) matching the existing `#f5f5f3` body background so it doesn't shout
+- Subtle hover state
+- Clear focus ring (honor the default browser outline or provide an equivalent; accessibility is non-negotiable)
 
-### Verify nothing else depends on `imageWidth/imageHeight`-sized board
+### Accessibility
 
-Before implementing, confirm snap detection, completion detection, and anything reading the board rect don't assume `imageWidth × imageHeight` matches the snap area. Quick grep:
-
-- `src/puzzle/snap.ts` — how does board-snap locate the target?
-- `src/puzzle/completion.ts` — does completion check any global bounds?
-- `src/canvas/scene.ts` — does anything pass `imageWidth/imageHeight` as an implicit board size?
-
-Most likely snap uses canonical positions (per `engine-conventions.md` §"Grid-based correct positions") which are derived from `pieceW`/`pieceH` and are self-consistent — snap logic should be unaffected. But verify, don't assume.
+- It's a real `<button>`, not a styled `<div>`. Tab lands on it. Enter/Space activates. Screen readers announce "button, Choose Image".
+- The button must remain reachable regardless of the bench/table keyboard mode (see `decisions.md` §"Keyboard Mode Switching — `inert` model"). It is NOT inside the bench or table landmark — it's a top-level document control, so the `inert` management on `benchLandmark` / `table` does not touch it.
+- Do not interfere with existing keyboard shortcuts (T, Tab, Enter, etc.). The button responding to its own click/keydown is fine; global keydown handlers in `scene.ts` still fire.
+- Confirm the button tabs into a sensible order — probably first (before the puzzle landmark) or last, whichever fits naturally. Don't force a specific tabindex unless necessary.
 
 ## Constraints
 
-- **Do not touch `Math.floor` in piece dimension computation.** Integer piece dimensions are load-bearing for texture frame integrity (see `decisions.md` §"textureRegion is the authoritative grid size"). The board must adapt to the pieces, not the other way around.
-- **Do not change piece canonical positions.** They're correct.
-- **Do not touch the shadow/zIndex/layout logic** in `createBoard` — only the `bw`/`bh` computation.
-- **Do not change how the board is centered on screen.** The `(screenWidth - bw) / 2` centering math stays; only the `bw`/`bh` inputs change.
-- **Do not touch the ingest pipeline** (`main.ts`, `imageNormalize.ts`). Option C is out of scope.
+- **Do not change the image pipeline.** `normalizeImage`, `sessionStorage`, reload-based rebuild — all stays. This story is a new entry point, not a rewrite.
+- **Do not remove or weaken drag-and-drop.** Both entry points coexist. Drop still works exactly as before.
+- **Do not introduce a loading spinner or progress UI.** Normalization is fast at 2048 max; a spinner adds ceremony for a non-problem. If perf is ever a real issue, that's a future story.
+- **Do not add a custom file-type error dialog.** Non-image selection is silently ignored, matching Story 44's behavior. User picks the file; we trust the `accept` attribute to guide them.
+- **Do not style the button into something clever.** "Minimal UI" means it looks like a button, not like a brand.
+- **Do not touch pixi UI layers** (`scene.ts` tray, filter strip, etc.). This is a DOM button outside the canvas.
+- **Do not pre-empt the Settings panel (Story 70).** If you find yourself thinking about a panel, a dropdown, or a menu, step back — a single button is the entire surface.
 
 ## Files likely to touch
 
-- `src/canvas/board.ts` — `createBoard` signature (possibly) and `bw`/`bh` computation
-- `src/canvas/scene.ts` — caller of `createBoard`, only if signature changes
-- `docs/decisions.md` — short note explaining the fix and alternatives
-- `docs/engine-conventions.md` — add a line noting "board dimensions = cols × pieceW by rows × pieceH, NOT imageWidth × imageHeight" (per the `/refine` routing rule, this is a coordinate-system rule that belongs in engine-conventions)
+- `index.html` — add the `<button>`, add inline styles for it
+- `src/main.ts` — extract `loadImageFile(file)` helper, wire it to both the drop handler (refactor) and the new click handler
 
 ## Acceptance
 
-User tests via QA page. Write ACs into `public/qa.html`.
+User tests via QA page. Write ACs into `public/qa.html` per the `/qa` command format.
 
-- **AC-1: All four corners flush on a typical image.** Load `/test-image.jpg`. Solve or place the four corner pieces. Each corner piece's outer edges align with the board's outer edges — no visible whitespace gap on any side.
-- **AC-2: All four corners flush on a non-divisible image.** Load a fixture with dimensions that don't divide evenly by the computed grid (any phone-sized photo will do — 2048×1536 with a 15×11 grid is the canonical case). Same corner-alignment check.
-- **AC-3: All four corners flush on a panorama.** Load a panorama (or the 2048×102 normalized panorama). Corners flush.
-- **AC-4: Board centered on screen.** Board appears horizontally and vertically centered in the viewport at default zoom. No off-center drift introduced by the size change.
-- **AC-5: No regression in snap.** Pieces still snap to their canonical positions. Solve a few pieces end-to-end.
-- **AC-6: No regression in completion detection.** Solve the puzzle. Completion event still fires.
-- **AC-7: No regression in shadow/visual design.** Board still has its drop shadow; no clipping or visual artifact from the size change.
+- **AC-1: Button visible on load.** The "Choose Image" button is visible in the corner of the viewport on initial load. Doesn't overlap the tray, filter strip, or other existing UI.
+- **AC-2: Click opens native picker.** Clicking the button opens the OS file picker. The picker filter shows image types only (`accept="image/*"`).
+- **AC-3: Picked image loads.** Pick any JPEG or PNG from the QA page's fixture list (or any image on disk). The page reloads and the puzzle regenerates around the chosen image. Behavior is identical to drag-and-drop of the same file.
+- **AC-4: Non-image silently ignored.** If the user picks a non-image file via a file picker that allowed it (rare given `accept`, but possible), nothing happens — no error, no reload. Matches Story 44 drop behavior.
+- **AC-5: Drag-and-drop still works.** Drop an image onto the canvas. Loads identically. Both entry points functional.
+- **AC-6: Keyboard accessible.** Tab to the button. It receives a visible focus ring. Press Enter — picker opens. Press Space — picker opens. Screen readers announce it as a button with the correct label.
+- **AC-7: Tabs through without breaking keyboard modes.** Open the tray with `T`. Tab. Focus lands sensibly (button reachable; bench landmark still navigable; no accidental inert violations). Close the tray with `T`. Tab still works correctly on the table side.
+- **AC-8: No regression in puzzle solving.** Load an image via the button, solve a few pieces, extract via keyboard, snap to the board. All Story 40–46e behaviors still work.
 
 ## Out of scope
 
-- Story 46f (label clipping Approach B overlay) — queued separately, not in the close-out sequence.
-- Story 47 (file picker) — starts after 46e ships.
-- Any change to piece dimensions, cut generation, WASM pipeline, snap tolerance.
-- Any redesign of the board (colors, border, slot markers). Size-of-rectangle only.
-- Image pre-padding / pre-cropping at ingest time.
+- Curated image set (Story 48)
+- Metadata shape (Story 49)
+- Landing screen with "Play Today" / "Choose Image" fork (Story 52 — that's further out and includes a second button)
+- Settings panel (Story 70)
+- Any progress UI, error dialog, or file-type feedback
+- Visual design beyond "minimal system button"
+- Story 46f (label clipping Approach B) — still queued separately; not a blocker
 
 ## Known next
 
-After 46e: Story 47 kicks off the Controlled Inputs epic. 46f (label clipping Approach B) stays queued but is not a blocker for 47.
+After 47: Story 48 (Curated Image Set — hardcoded) kicks off the "baked-in images" work, still inside Controlled Inputs. 46f queued independently.

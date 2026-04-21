@@ -28,11 +28,7 @@
 
 ### Epic: Real Image Unlock *(kill the hardcoded world)*
 
-*Committed sequence: 46c → 46e → Story 47. No new bugs sneak ahead of this order; the 46-series closes out before Controlled Inputs begins.*
-
-**Story 46d — CLOSED without fix.** Label clipping requires Approach B (overlay layer above mask). See `docs/decisions.md`. Queued below as Story 46f.
-
-**Story 46e — SHIPPED.** Corner piece alignment — board and canonical-position origin both now use `cols × pieceW × rows × pieceH`.
+*46-series close-out complete. 46d closed without fix; 46f queued below as a standalone follow-up (not blocking Controlled Inputs).*
 
 **Story 46f — Fix piece label clipping (Approach B)**
 Move labels from sprite children to a sibling overlay container above the sprite layer. Sync position + rotation per-frame via ticker. No mask clipping ever; labels render at full size on any piece size including 1000+ piece puzzles. Counter-rotation invariant (Story 37b) moves to the sync path but remains equivalent. See `docs/decisions.md` for the full analysis.
@@ -41,7 +37,7 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 ### Epic: Controlled Inputs *(make it a product, not a dev tool)*
 
-**Story 47 — File Picker (minimal UI)**
+**Story 47 — File Picker (minimal UI)** *(in progress — see `docs/next-story.md`)*
 "Choose Image" button. Uses same pipeline as drag/drop.
 
 **Story 48 — Curated Image Set (hardcoded)**
