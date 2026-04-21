@@ -188,6 +188,12 @@ Note: `JiggGlue.uri` not yet available (Persistence, Story 53). Search for `dev:
 - **Diagonal slash on empty swatches — softened contrast** — `0x777777` at `alpha: 0.6`, 1px width. Signals "temporarily empty", not "removed" or "invalid". No strikethrough on text filters — same reasoning.
 - **`FilterDef` extended** — added `count: number` and `isActive: boolean`. Both `initFilterButtons` and `updateFilterButtonLabels` in `aria.ts` derive `disabled` and `aria-label` from these fields directly.
 
+## File picker — pre-created input element (Story 47)
+
+- **`<input type="file">` pre-created and appended to `document.body`, not created per-click** — creating a detached `<input>` and triggering `.click()` on it works in modern browsers, but some browsers add a perceivable delay before the picker opens. Appending the input to the DOM before clicking removes that delay by keeping the element in a live document. The element is hidden (`display: none`) and persists for the lifetime of the tab.
+- **`fileInput.value = ''` after each selection** — without the reset, selecting the same file a second time fires no `change` event (the browser sees no diff). The reset makes every pick explicit and allows the same file to be re-loaded after editing it on disk.
+- **`handleImageFile` is the single entry point for both drag-and-drop and button-click** — extracted in Story 46; Story 47 simply calls it from the new picker path. Both paths share the exact `normalizeImage → sessionStorage → reload` pipeline with no duplication.
+
 ## Drag-and-drop image load (Story 44)
 
 - **`FileReader.readAsDataURL` over `URL.createObjectURL`** — the story prompt suggested blob URLs. Blob URLs are bound to the originating document; after `window.location.reload()` the resource is gone and `Assets.load` returns null. Data URLs are self-contained strings — they cost more memory (base64 overhead) and hit the 5 MB `sessionStorage` quota for large images, but they survive the reload without any lifecycle management. The quota risk is acceptable for a dev-tool story; Story 45 will normalise image dimensions before this matters in production.

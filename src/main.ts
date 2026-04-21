@@ -18,6 +18,23 @@ await loadScene(app, imageUrl);
 // Enable the hit layer — sprites and drag wiring are set up inside loadScene.
 activateDrag();
 
+// "Choose Image" button — opens native file picker, feeds same pipeline as drag-and-drop.
+// Input is pre-created and kept in the DOM so browsers open the picker without delay.
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.accept = 'image/*';
+fileInput.style.display = 'none';
+document.body.appendChild(fileInput);
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0];
+  if (file && file.type.startsWith('image/')) {
+    handleImageFile(file);
+  }
+  fileInput.value = ''; // reset so the same file can be picked again
+});
+const chooseBtn = document.getElementById('choose-image-btn') as HTMLButtonElement;
+chooseBtn.addEventListener('click', () => fileInput.click());
+
 // Drag-and-drop image replacement (dev tool — no teardown path yet, so reload).
 // Stores a data URL (not a blob URL) so it survives the page reload.
 container.addEventListener('dragover', (e) => {

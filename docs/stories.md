@@ -19,6 +19,19 @@ Files changed:
 
 -->
 
+## Story 47: Choose-image file picker (minimal UI)
+
+**Shipped:** 2026-04-21
+
+Added a persistent "Choose Image" `<button>` to `index.html` fixed in the top-right corner. On click, a hidden `<input type="file" accept="image/*">` is created programmatically and triggered; on `change`, `files[0]` is validated (`file.type.startsWith('image/')`) then passed to `handleImageFile`, which was already extracted in Story 46 — no duplication with the drop handler. Both entry points (drag-and-drop and button click) share the same `normalizeImage` → `sessionStorage` → `reload` pipeline unchanged.
+
+Files changed:
+- `index.html` — `<button id="choose-image-btn">` added as sibling of `#app`; inline styles in the existing `<style>` block (fixed top-right, system font, `#f0f0ee` background, hover state, browser default focus ring)
+- `src/main.ts` — click handler wired to `chooseBtn`; creates hidden `<input type="file">`, calls `handleImageFile` on change
+- `public/qa.html` — STORY and FIXTURES updated to Story 47 ACs
+
+---
+
 ## Story 46e: Fix corner piece alignment — board size mismatch
 
 **Shipped:** 2026-04-21

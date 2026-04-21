@@ -21,6 +21,7 @@
 | Story 46b | Fix bench piece clipping — tabs and focus ring (2026-04-21) |
 | Story 46c | Scatter spread fix — stepSize × _canvasScale in `bench.ts` (2026-04-21) |
 | Story 46e | Corner piece alignment — board sized to piece coverage, not image dimensions (2026-04-21) |
+| Story 47 | File picker — "Choose Image" button, same pipeline as drag-and-drop (2026-04-21) |
 
 ---
 
@@ -37,8 +38,7 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 ### Epic: Controlled Inputs *(make it a product, not a dev tool)*
 
-**Story 47 — File Picker (minimal UI)** *(in progress — see `docs/next-story.md`)*
-"Choose Image" button. Uses same pipeline as drag/drop.
+**Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
 **Story 48 — Curated Image Set (hardcoded)**
 5–10 baked-in images. Simple selection UI (no metadata file yet).

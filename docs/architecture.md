@@ -20,11 +20,14 @@ Pieces live in one of two **stages**: the bench (the unsolved tray) or the table
 
 ## Rendering
 
-PixiJS owns the canvas. All puzzle pieces, visual feedback, snap highlights, and background rendering happen inside the PixiJS scene graph. The DOM is not used for anything a user can see in the puzzle itself.
+PixiJS owns the canvas. All puzzle pieces, visual feedback, snap highlights, and background rendering happen inside the PixiJS scene graph.
 
-The exception is **accessibility**: a parallel DOM layer sits alongside the PixiJS canvas. This layer holds ARIA landmarks, a hidden button tree that screen readers navigate, and a live announcement region. It is visually hidden but structurally present and fully wired to puzzle state.
+The DOM contributes two layers alongside the canvas:
 
-These two layers — PixiJS canvas and DOM accessibility tree — are kept in sync as piece state changes.
+1. **Accessibility layer** — visually hidden landmarks, a hidden button tree for screen readers, and a live announcement region, fully wired to puzzle state.
+2. **App shell controls** — visible top-level DOM elements outside the canvas (e.g. the "Choose Image" button). These are siblings of `#app` in the document, never inside the PixiJS-managed region, and are not affected by the `inert` management on the bench/table landmarks.
+
+The PixiJS scene and both DOM layers are kept in sync as piece state changes.
 
 ---
 

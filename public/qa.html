@@ -299,36 +299,40 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '46e',
-      title: 'Fix corner piece alignment — board size mismatch',
+      number: '47',
+      title: 'Choose-image file picker (minimal UI)',
       criteria: [
         {
           id: 'AC-1',
-          text: 'All four corners flush on a typical image. Load /test-image.jpg. Solve or place the four corner pieces. Each corner piece\'s outer edges align with the board\'s outer edges — no visible whitespace gap on any side.',
+          text: 'Button visible on load. The "Choose Image" button is visible in the top-right corner of the viewport on initial load. Does not overlap the tray, filter strip, or other existing UI.',
         },
         {
           id: 'AC-2',
-          text: 'All four corners flush on a non-divisible image. Load the phone 2048×1536 fixture (15×11 grid, remainder 8px right / 7px bottom). Place all four corner pieces — edges flush with board on all sides.',
+          text: 'Click opens native picker. Clicking the button opens the OS file picker. The picker filter shows image types only (accept="image/*").',
         },
         {
           id: 'AC-3',
-          text: 'All four corners flush on a panorama. Load the panorama 2048×102 fixture. Corner pieces flush with board edges.',
+          text: 'Picked image loads. Pick any JPEG or PNG. The page reloads and the puzzle regenerates around the chosen image. Behavior is identical to drag-and-drop of the same file.',
         },
         {
           id: 'AC-4',
-          text: 'Board centered on screen. Board appears horizontally and vertically centered in the viewport at default zoom for each fixture. No off-center drift introduced by the size change.',
+          text: 'Non-image silently ignored. If the user somehow picks a non-image file, nothing happens — no error, no reload.',
         },
         {
           id: 'AC-5',
-          text: 'No regression in snap. Pieces still snap to their canonical positions. Solve a few pieces end-to-end on at least two fixtures.',
+          text: 'Drag-and-drop still works. Drop an image onto the canvas. Loads identically to before. Both entry points functional.',
         },
         {
           id: 'AC-6',
-          text: 'No regression in completion detection. Solve the full puzzle on test-image.jpg. Completion event still fires.',
+          text: 'Keyboard accessible. Tab to the button — it receives a visible focus ring. Press Enter — picker opens. Press Space — picker opens.',
         },
         {
           id: 'AC-7',
-          text: 'No regression in shadow/visual design. Board still has its drop shadow; no clipping or visual artifact from the size change.',
+          text: 'Tabs through without breaking keyboard modes. Open the tray with T. Tab. Button is reachable; bench landmark still navigable. Close the tray with T. Tab still works correctly on the table side.',
+        },
+        {
+          id: 'AC-8',
+          text: 'No regression in puzzle solving. Load an image via the button, solve a few pieces, extract via keyboard, snap to the board. All Story 40–46e behaviors still work.',
         },
       ],
     };
@@ -338,24 +342,8 @@
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-1', 'AC-4', 'AC-5', 'AC-6', 'AC-7'],
-        expect: '130 pieces (13×10). 800/13=61r7, 600/10=60r0 — 7px right remainder. Top-right and bottom-right corners should now be flush.',
-      },
-      {
-        src: '/qa-scratch/grid_phone-aspect_2048x1536_165pieces.jpg',
-        name: 'phone 2048×1536',
-        dims: '2048 × 1536',
-        acs: ['AC-2', 'AC-4', 'AC-5', 'AC-7'],
-        expect: '165 pieces (15×11). pieceW=136, pieceH=139. Coverage 2040×1529 vs image 2048×1536 — 8px right, 7px bottom gap pre-fix. All four corners should now be flush.',
-        qaFile: 'qa-scratch/grid_phone-aspect_2048x1536_165pieces.jpg',
-      },
-      {
-        src: '/qa-scratch/grid_panorama-extreme_2048x102_mingrid.jpg',
-        name: 'panorama 2048×102',
-        dims: '2048 × 102',
-        acs: ['AC-3', 'AC-4', 'AC-7'],
-        expect: '68 pieces (34×2). pieceW=60, pieceH=51. Coverage 2040×102 vs image 2048×102 — 8px right gap pre-fix. Corners should be flush.',
-        qaFile: 'qa-scratch/grid_panorama-extreme_2048x102_mingrid.jpg',
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-5', 'AC-6', 'AC-7', 'AC-8'],
+        expect: '130 pieces (13×10). Use as the baseline fixture for all picker and regression ACs.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────
