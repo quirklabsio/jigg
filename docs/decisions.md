@@ -356,3 +356,20 @@ The board was drawn at `imageWidth × imageHeight`. Piece dimensions are `Math.f
 `cols`/`rows` were already in the `createBoard` signature (previously `void`-ed). No change to the centering math, shadow, or call-site signature.
 
 Options B (extend last-row/col pieces by remainder) and C (pad image at ingest to even dimensions) were ruled out per the story prompt. B requires invasive changes to cutter, snap, and render; C modifies the ingest pipeline and loses image content. A is the correct layer: the board must adapt to the pieces, not the other way around.
+
+## Curated image set + forceGrid override (Story 48)
+
+### forceGrid sessionStorage key, not a loadScene URL param
+The curated `forceGrid` is stored in a separate `sessionStorage` key (`jigg:forceGrid`) alongside `jigg:pendingImageUrl`. The boot code reads both keys and passes the grid to `loadScene`. Alternative was a query-string param on the reload URL, but sessionStorage is already the established pattern for cross-reload state and avoids URL parsing.
+
+### forceGrid validated in loadScene, not at the call site
+The guard (`cols >= 2 && rows >= 2 && cols * rows <= 200`) lives inside `loadScene` rather than in `main.ts` or `images.ts`. `loadScene` is the owner of `computeGrid` and grid constraints — it's the correct layer to enforce them. Callers pass intent; the scene enforces invariants.
+
+### Picker panel reuses the Story 47 "Choose Image" button, not a new button
+The story prompt ruled out adding a second button. Repurposing the existing button as a dialog trigger is the minimal change: one button still opens the image flow, the flow just has a richer first step (pick from curated set or upload). No UI chrome was added.
+
+### `<dialog>` for the picker panel
+Native `<dialog>` provides Escape handling, `showModal()` focus management, and `::backdrop` for free, at zero JS cost. The main gap (focus-return on close, outside-click detection) is covered by the `cancel` event and a click listener on the dialog element itself (checking `e.target === dialog` detects backdrop clicks without a separate overlay element).
+
+### forceGrid cleared from sessionStorage on every non-curated load
+`handleImageFile` always calls `sessionStorage.removeItem(SESSION_GRID_KEY)` before reloading. This ensures a user who picks a curated image, then drops their own file, does not accidentally inherit the previous forced grid.

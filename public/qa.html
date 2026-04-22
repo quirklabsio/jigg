@@ -257,7 +257,7 @@
   <div class="section-label">Acceptance Criteria</div>
   <div class="progress-row">
     <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="progress-label" id="progressLabel">0 / 7</div>
+    <div class="progress-label" id="progressLabel">0 / 10</div>
   </div>
   <div class="ac-list" id="acList"></div>
 
@@ -299,51 +299,81 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '47',
-      title: 'Choose-image file picker (minimal UI)',
+      number: '48',
+      title: 'Curated image set + dev regression fixture',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Button visible on load. The "Choose Image" button is visible in the top-right corner of the viewport on initial load. Does not overlap the tray, filter strip, or other existing UI.',
+          text: 'Panel opens from the existing button. Click "Choose Image". A small panel appears near the button showing 7 thumbnails and an "Upload your own…" affordance. No duplicate or secondary button was added.',
         },
         {
           id: 'AC-2',
-          text: 'Click opens native picker. Clicking the button opens the OS file picker. The picker filter shows image types only (accept="image/*").',
+          text: 'Curated selection loads. Click any curated thumbnail. The page reloads and the puzzle rebuilds around that image. Behavior matches drag-and-drop for the same image.',
         },
         {
           id: 'AC-3',
-          text: 'Picked image loads. Pick any JPEG or PNG. The page reloads and the puzzle regenerates around the chosen image. Behavior is identical to drag-and-drop of the same file.',
+          text: 'Regression fixture produces exactly 9 pieces. Click the "Regression test (3×3)" entry. Bench shows exactly 9 pieces in a 3×3 grid. Filter strip shows Corners (4), Edges (4), Interior (1).',
         },
         {
           id: 'AC-4',
-          text: 'Non-image silently ignored. If the user somehow picks a non-image file, nothing happens — no error, no reload.',
+          text: 'Regression script is executable. Follow docs/regression-script.md end-to-end on the regression image. Every step is clear; full script finishes in under ~3 minutes; all steps pass.',
         },
         {
           id: 'AC-5',
-          text: 'Drag-and-drop still works. Drop an image onto the canvas. Loads identically to before. Both entry points functional.',
+          text: 'Upload fallback unchanged. Click "Upload your own…" inside the panel. Native file picker opens. Selecting an image loads it — identical to Story 47\'s flow.',
         },
         {
           id: 'AC-6',
-          text: 'Keyboard accessible. Tab to the button — it receives a visible focus ring. Press Enter — picker opens. Press Space — picker opens.',
+          text: 'Drag-and-drop unchanged. Drop an image onto the canvas (panel closed). Loads normally.',
         },
         {
           id: 'AC-7',
-          text: 'Tabs through without breaking keyboard modes. Open the tray with T. Tab. Button is reachable; bench landmark still navigable. Close the tray with T. Tab still works correctly on the table side.',
+          text: 'Keyboard access. Tab reaches the button. Enter/Space opens the panel. Focus moves into the panel. Arrow keys navigate thumbnails; Enter activates a selection. Escape closes the panel and returns focus to the button.',
         },
         {
           id: 'AC-8',
-          text: 'No regression in puzzle solving. Load an image via the button, solve a few pieces, extract via keyboard, snap to the board. All Story 40–46e behaviors still work.',
+          text: 'Panel closes on outside click. With panel open, click anywhere outside the panel. Panel closes.',
+        },
+        {
+          id: 'AC-9',
+          text: 'Screen reader announces. Panel announces as a dialog with its aria-label "Choose an image". Each thumbnail announces its image label.',
+        },
+        {
+          id: 'AC-10',
+          text: 'No regression in Story 40–47 behaviors. Tray open/close, bench filters, keyboard nav within bench/table, snap, rotation, completion detection all unchanged.',
         },
       ],
     };
 
     const FIXTURES = [
       {
+        src: '/curated/color-blocks-3x3.png',
+        name: 'color-blocks-3x3.png',
+        dims: '300 × 300',
+        acs: ['AC-3', 'AC-4'],
+        expect: 'Exactly 9 pieces (3×3 forced). 4 corners, 4 edges, 1 interior. Each piece is a solid distinct color.',
+        recommended: true,
+      },
+      {
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-5', 'AC-6', 'AC-7', 'AC-8'],
-        expect: '130 pieces (13×10). Use as the baseline fixture for all picker and regression ACs.',
+        acs: ['AC-5', 'AC-6', 'AC-10'],
+        expect: '130 pieces (13×10). Use for upload fallback and regression ACs.',
+      },
+      {
+        src: '/curated/earthrise.jpg',
+        name: 'earthrise.jpg',
+        dims: '1280 × 1280',
+        acs: ['AC-1', 'AC-2'],
+        expect: 'Square, cool tones, photographic. Loads as curated pick.',
+      },
+      {
+        src: '/curated/great-wave.jpg',
+        name: 'great-wave.jpg',
+        dims: '1280 × 860',
+        acs: ['AC-1', 'AC-2'],
+        expect: 'Landscape, graphic, cool. Loads as curated pick.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────

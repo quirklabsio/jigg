@@ -20,5 +20,16 @@
       "grid": { "cols": 34, "rows": 2 },
       "pieceCount": 68
     }
+  },
+  {
+    "file": "grid_forced-3x3_300x300_9pieces.png",
+    "case": "forced-grid-3x3",
+    "automated": false,
+    "notes": "forceGrid override: 3×3 = 9 pieces regardless of what computeGrid would produce (300×300 image would otherwise give a much smaller grid). Exercises all three piece classification types: 4 corners, 4 edges, 1 interior — the minimum grid that covers the full filter strip. Used as the dev regression fixture.",
+    "input": { "dimensions": [300, 300], "forceGrid": { "cols": 3, "rows": 3 } },
+    "expected": {
+      "grid": { "cols": 3, "rows": 3 },
+      "pieceCount": 9
+    }
   }
 ]

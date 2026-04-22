@@ -22,6 +22,7 @@
 | Story 46c | Scatter spread fix — stepSize × _canvasScale in `bench.ts` (2026-04-21) |
 | Story 46e | Corner piece alignment — board sized to piece coverage, not image dimensions (2026-04-21) |
 | Story 47 | File picker — "Choose Image" button, same pipeline as drag-and-drop (2026-04-21) |
+| Story 48 | Curated image set + dev regression fixture — picker panel, 7 images, forceGrid plumbing, regression-script.md (2026-04-21) |
 
 ---
 
@@ -46,8 +47,8 @@ White / near-white pieces blend into the off-white board — real UX bug with ar
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
 
-**Story 48 — Curated Image Set + dev regression fixture** *(in progress — see `docs/next-story.md`)*
-5–10 public-domain baked-in images with a minimal picker panel triggered by the existing "Choose Image" button. One entry is a `forceGrid: {cols:3, rows:3}` regression fixture with a seeded `docs/regression-script.md`. 47b absorbed into this story.
+**Story 48 — Curated Image Set + dev regression fixture** ✅ Shipped 2026-04-21
+7 public-domain images with a picker panel triggered by the existing "Choose Image" button. Regression fixture uses `forceGrid: {cols:3, rows:3}`. `docs/regression-script.md` seeded. 47b absorbed.
 
 **Story 49 — Minimal Metadata Shape**
 Introduce lightweight structure: `id`, `title`, `source` (string only). Stored inline with curated set.

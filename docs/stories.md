@@ -19,6 +19,32 @@ Files changed:
 
 -->
 
+## Story 48: Curated image set + dev regression fixture
+
+**Shipped:** 2026-04-21
+
+Added a 7-image public-domain curated set and a minimal picker panel triggered by the existing "Choose Image" button.
+
+**Picker panel**: The button now opens a `<dialog>` (positioned near the button, not a full-screen modal) with a 3-column thumbnail grid and an "Upload your own…" fallback at the bottom. Focus moves to the first thumbnail on open; arrow-key navigation across the grid; Tab/Shift+Tab cycles through all focusable elements; Escape closes and returns focus to the button; click outside (backdrop) closes. The pre-47 file-picker path is unchanged — "Upload your own…" just triggers the same `fileInput.click()`.
+
+**Curated set** (`src/curated/images.ts`): 7 entries — Regression test (3×3, color blocks), Earthrise (NASA), The Great Wave (Hokusai), The Starry Night (Van Gogh), Sunflowers (Van Gogh), Girl with a Pearl Earring (Vermeer), Water Lilies (Monet). Variety covers portrait/landscape/square, graphic/photographic, cool/warm. All pre-normalized to ≤ 2048px and ≤ 300 KB, stored in `public/curated/`.
+
+**forceGrid plumbing**: `loadScene` gains an optional `{ cols, rows }` parameter. When provided and valid (≥ 2×2, ≤ 200 pieces), it bypasses `computeGrid`. `main.ts` stores it in a separate `jigg:forceGrid` sessionStorage key alongside `jigg:pendingImageUrl` and reads it at boot. `handleImageFile` always clears the key so an upload after a curated pick never inherits a stale forced grid.
+
+**Regression fixture**: The `color-blocks-3x3.png` entry uses `forceGrid: { cols: 3, rows: 3 }` — 9 pieces with 4 corners, 4 edges, 1 interior; each piece a distinct solid color for unambiguous placement. Loads and verifies in ~2 minutes. Seeded `docs/regression-script.md` with the end-to-end steps.
+
+Files changed:
+- `src/curated/images.ts` — new; typed `CuratedImage` interface + `CURATED_IMAGES` array
+- `public/curated/*.jpg` + `public/curated/color-blocks-3x3.png` — 7 new image assets
+- `index.html` — `<dialog id="image-picker-dialog">` with thumbnail grid, upload button, close button, and all associated styles
+- `src/main.ts` — full picker wiring (thumbnail population, arrow-key nav, focus trap, backdrop/Escape close, `loadImageUrl` helper, `SESSION_GRID_KEY` sessionStorage)
+- `src/canvas/scene.ts` — `loadScene` accepts optional `forceGrid`; validates and bypasses `computeGrid` when present
+- `docs/regression-script.md` — new; 7-step manual test for the core puzzle loop
+- `docs/decisions.md` — new section on forceGrid, sessionStorage key, panel reuse, `<dialog>` choice, grid-key clearing
+- `public/qa.html` — STORY and FIXTURES updated to Story 48 ACs (10 criteria)
+
+---
+
 ## Story 47: Choose-image file picker (minimal UI)
 
 **Shipped:** 2026-04-21

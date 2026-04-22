@@ -25,9 +25,21 @@ PixiJS owns the canvas. All puzzle pieces, visual feedback, snap highlights, and
 The DOM contributes two layers alongside the canvas:
 
 1. **Accessibility layer** — visually hidden landmarks, a hidden button tree for screen readers, and a live announcement region, fully wired to puzzle state.
-2. **App shell controls** — visible top-level DOM elements outside the canvas (e.g. the "Choose Image" button). These are siblings of `#app` in the document, never inside the PixiJS-managed region, and are not affected by the `inert` management on the bench/table landmarks.
+2. **App shell controls** — visible top-level DOM elements outside the canvas (the "Choose Image" button and image picker `<dialog>`). These are siblings of `#app` in the document, never inside the PixiJS-managed region, and are not affected by the `inert` management on the bench/table landmarks.
 
 The PixiJS scene and both DOM layers are kept in sync as piece state changes.
+
+---
+
+## Image Entry Points
+
+There are two paths by which an image reaches the puzzle:
+
+1. **File upload / drag-and-drop**: A `File` object passes through `normalizeImage` (EXIF correction, resize to ≤ 2048px, JPEG re-encode) and the resulting data URL is stored in `sessionStorage` (`jigg:pendingImageUrl`). No `forceGrid`.
+
+2. **Curated pick**: A URL from `CURATED_IMAGES` (e.g. `/curated/earthrise.jpg`) is stored directly in `sessionStorage` — no `normalizeImage`, because curated images are pre-normalized at asset-build time. If the curated entry has a `forceGrid`, it is stored separately in `jigg:forceGrid` and `loadScene` bypasses `computeGrid`.
+
+Both paths end at `window.location.reload()`. On boot, `main.ts` reads both sessionStorage keys and passes them to `loadScene`. The curated URL path is slightly more direct — PixiJS loads the asset URL via its standard `Assets.load` pipeline, same as for data URLs.
 
 ---
 

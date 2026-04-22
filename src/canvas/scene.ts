@@ -433,7 +433,11 @@ function guardFocusWithinApp(): void {
 
 // ─── Scene entry point ────────────────────────────────────────────────────────
 
-export async function loadScene(app: Application, imageUrl: string): Promise<void> {
+export async function loadScene(
+  app: Application,
+  imageUrl: string,
+  forceGrid?: { cols: number; rows: number },
+): Promise<void> {
   const texture = await Assets.load<Texture>(imageUrl);
 
   // Extract pixel data once — used for both color zone computation and WASM worker
@@ -444,7 +448,17 @@ export async function loadScene(app: Application, imageUrl: string): Promise<voi
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = new Uint8Array(imageData.data.buffer);
 
-  const { cols, rows } = computeGrid(texture.width, texture.height);
+  // Use forceGrid override when provided; validate it respects the engine constraints.
+  let { cols, rows } = computeGrid(texture.width, texture.height);
+  if (forceGrid) {
+    const { cols: fc, rows: fr } = forceGrid;
+    if (fc >= 2 && fr >= 2 && fc * fr <= 200) {
+      cols = fc;
+      rows = fr;
+    } else {
+      console.warn(`loadScene: forceGrid ${fc}×${fr} violates constraints (min 2×2, max 200 pieces) — ignored`);
+    }
+  }
 
   const scale = Math.min(app.screen.width / texture.width, app.screen.height / texture.height);
   const piecePixelW = Math.floor(texture.width  / cols);

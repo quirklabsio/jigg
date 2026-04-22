@@ -286,7 +286,13 @@ If you add a new permanent element inside `_piecesContainer` above (or below) th
 The `_focusRing` Graphics lives on `app.stage`, not inside `_piecesContainer`. **The container mask does not clip the ring.** The ring is clipped only by the canvas (WebGL viewport) boundary. If the sprite's bottom in screen space exceeds `screenH`, the ring drawn `FOCUS_RING_PADDING` pixels outside will be partially off-canvas and invisible. Reducing `THUMBNAIL_SIZE` is the correct fix — expanding the mask alone cannot recover off-screen content.
 
 
-## Small images produce *fewer* pieces than large images (MIN_PIECE_SIDE effect)
+## Regression fixture (300×300, forceGrid 3×3): pieces hard to grab after zooming out
+
+The color-blocks regression image is 300×300 px. `canvasScale` for this image is ~3.0 (pieces are 300×300 world units each). Pieces scatter across a large world-space region relative to screen size. If you zoom out to see all pieces at once, they become small on screen — and the spatial-hash hit test, which works in world coordinates, may reject clicks that appear "dead center" in screen space when the viewport is significantly zoomed.
+
+**This is expected behavior** for the regression fixture; it is optimized for classification correctness (all three piece types present), not ergonomic play. For the regression script, work at the default viewport scale (don't zoom out) or extract pieces one at a time at normal zoom.
+
+
 
 `computeGrid` aims for `TARGET_PIECES=160`, but for small images the `MIN_PIECE_SIDE=60` floor overrides the target — raising the piece size forces fewer, larger pieces.
 

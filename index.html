@@ -22,11 +22,109 @@
         z-index: 10000;
       }
       #choose-image-btn:hover { background: #e4e4e2; }
+
+      /* ── Image picker dialog ───────────────────────────────────────────── */
+      #image-picker-dialog {
+        position: fixed;
+        top: 50px;
+        right: 12px;
+        margin: 0;
+        padding: 16px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        background: #fafaf8;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+        z-index: 9999;
+        width: 340px;
+        max-height: 80vh;
+        overflow-y: auto;
+        font-family: system-ui, sans-serif;
+      }
+      #image-picker-dialog::backdrop {
+        background: transparent;
+      }
+      #image-picker-close {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: none;
+        border: none;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        color: #555;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+      #image-picker-close:hover { background: #e4e4e2; }
+      #image-picker-dialog h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 12px;
+        padding-right: 24px;
+      }
+      #image-picker-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .curated-thumb {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: none;
+        border: 2px solid transparent;
+        border-radius: 6px;
+        padding: 4px;
+        cursor: pointer;
+        font-family: system-ui, sans-serif;
+        font-size: 10px;
+        color: #444;
+        text-align: center;
+        line-height: 1.2;
+        transition: border-color 0.1s;
+      }
+      .curated-thumb:hover { border-color: #999; background: #f0f0ee; }
+      .curated-thumb:focus { outline: 3px solid #ff00ff; outline-offset: 1px; }
+      .curated-thumb img {
+        width: 88px;
+        height: 66px;
+        object-fit: cover;
+        border-radius: 3px;
+        display: block;
+        margin-bottom: 4px;
+      }
+      #image-picker-upload {
+        width: 100%;
+        padding: 8px;
+        background: #f0f0ee;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: system-ui, sans-serif;
+        font-size: 13px;
+        color: #333;
+        text-align: center;
+      }
+      #image-picker-upload:hover { background: #e4e4e2; }
+      #image-picker-upload:focus { outline: 3px solid #ff00ff; outline-offset: 2px; }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <button id="choose-image-btn" type="button">Choose Image</button>
+
+    <dialog id="image-picker-dialog" aria-label="Choose an image">
+      <button id="image-picker-close" aria-label="Close image picker" type="button">×</button>
+      <h2>Choose an image</h2>
+      <div id="image-picker-grid" role="group" aria-label="Curated images">
+        <!-- Populated by main.ts from CURATED_IMAGES -->
+      </div>
+      <button id="image-picker-upload" type="button">Upload your own…</button>
+    </dialog>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
