@@ -385,4 +385,20 @@ exif = piexif.dump({'0th': {piexif.ImageIFD.Orientation: 6}})
 
 ---
 
+## PixiJS `FillGradient` with `textureSpace: 'local'` uses normalized [0, 1] coords, not pixels
+
+When you construct a `FillGradient` with `textureSpace: 'local'`, the `start` and `end` coordinates must be in **normalized [0, 1] space** mapped to the shape's bounding box — not in pixel coordinates. Using pixel values (e.g. `end: { x: 0, y: 128 }` for a 128px tall rect) stretches the gradient over 128× the intended area, rendering the entire shape transparent with no error, no warning, and no visual indication that anything is wrong.
+
+```ts
+// WRONG: y: 128 stretches the gradient 128× — rect shows only the invisible transparent slice
+const grad = new FillGradient({ type: 'linear', start: { x: 0, y: 0 }, end: { x: 0, y: 128 }, textureSpace: 'local' });
+
+// RIGHT: y: 1 maps to the bottom of the shape's bounding box
+const grad = new FillGradient({ type: 'linear', start: { x: 0, y: 0 }, end: { x: 0, y: 1 }, textureSpace: 'local' });
+```
+
+**Failure mode:** the gradient appears to not render at all. No console error. The shape draws transparently. Easy to diagnose by cranking alpha to 1.0 — if still invisible, the coordinate scale is wrong.
+
+**Alternative:** use `textureSpace: 'global'` (or omit it if the default changes) and provide actual pixel/world coordinates. `'local'` is more convenient when you want the gradient to track the shape's bounds automatically, but requires the normalized convention.
+
 *Report new gotchas to maintain this list.*

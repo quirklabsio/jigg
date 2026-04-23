@@ -299,74 +299,85 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '47a-spike',
-      title: 'Piece contrast audit + WCAG recommendation',
+      number: '47a',
+      title: 'Bench piece uplight glow',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Context × piece-color matrix in decisions.md. A table covering every context (board, workspace, each bg preset, bench normal, bench HC) × every piece-color bucket (pure white, near-white, pure black, near-black, mid-gray, sat. red, blue, green). Each cell has a measured contrast ratio.',
+          text: 'Glow visible on every bench piece (normal mode). Load any test image. Every piece in the bench has a visible soft glow behind it — brighter at the bottom of the slot, fading upward. Confirm by looking at the bottom edge of each piece cell against the dark bench.',
         },
         {
           id: 'AC-2',
-          text: 'Every failing cell flagged. Cells below 3:1 normal / 4.5:1 HC are explicitly called out with ❌ symbols. No hand-waving.',
+          text: 'Dark pieces materially more visible. Load spike-47a-pure-black.png or spike-47a-split-wb.png. Black pieces in the bench are discernible where they were previously invisible. Judge whether the improvement meets your bar; adjust BENCH_GLOW_ALPHA_MAX / BENCH_GLOW_FADE_STOP in bench.ts if not.',
         },
         {
           id: 'AC-3',
-          text: 'Existing treatments audited. BevelFilter, OutlineFilter sandwich, DropShadowFilter (now live — not disabled) each have a documented section: what they contribute and measured maximum contrast at the piece boundary.',
+          text: 'Light pieces not harmed. Load spike-47a-pure-white.png. White/near-white bench pieces still look fine — not washed out, not over-bright, no visible artifact at the glow boundary.',
         },
         {
           id: 'AC-4',
-          text: 'One primary recommendation with justification. The recommendation references specific matrix cells as evidence. 1–2 alternatives briefly documented with tradeoffs named.',
+          text: 'HC mode unchanged. Enable high contrast (check the HC checkbox or Shift+H). Glow disappears from all bench pieces. The HC sandwich stroke is visible and unchanged.',
         },
         {
           id: 'AC-5',
-          text: 'Follow-up story brief present. Concrete scope (title, files, ~5 ACs, constraints) that BA can turn into the next-story prompt with minimal rewriting.',
+          text: 'HC toggle mid-session clean. Enable HC → glow removes cleanly. Disable HC → glow returns cleanly. Repeat 3× — no residual layers, no double-glow, no duplicate brightness.',
         },
         {
           id: 'AC-6',
-          text: 'No production code committed. Load the spike test images (pure white, pure black, split W/B) via the picker and visually confirm the audit findings match what you see. Then verify: git diff src/ returns empty.',
+          text: 'Canvas pieces have no glow. Extract a piece (click or keyboard Enter). The extracted piece on the workspace/board has no glow. The vacated bench slot also has no glow (it is now empty).',
+        },
+        {
+          id: 'AC-7',
+          text: 'Story 46b regressions pass. Load any image. Tabs with downward knobs render fully; focus ring is visible below each bench piece. Glow clipping follows the same mask geometry — no overflow past the tray body.',
+        },
+        {
+          id: 'AC-8',
+          text: 'Filter strip + tray behaviors unchanged. Filter cycling (] / [), tray open/close (T), piece extraction, keyboard nav — all unaffected by the glow layer.',
+        },
+        {
+          id: 'AC-9',
+          text: 'Perf stable. Load a large-grid image (2048×2048 or similar, ~169 pieces). Frame rate matches pre-change baseline — no visible jank during tray scroll or filter change. Check browser devtools Performance tab if in doubt.',
         },
       ],
     };
 
     const FIXTURES = [
       {
-        src: '/qa-scratch/spike-47a-pure-white.png',
-        name: 'spike-47a-pure-white.png',
-        dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-6'],
-        expect: 'Solid white puzzle. Pieces should be nearly invisible against the white board — confirms white-on-white failure. Bench shows white pieces: should be well-visible (dark bench). Load with Upload your own… in the picker.',
-        recommended: true,
-      },
-      {
         src: '/qa-scratch/spike-47a-pure-black.png',
         name: 'spike-47a-pure-black.png',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-6'],
-        expect: 'Solid black puzzle. Pieces should be visible on the white board but nearly invisible on the bench — confirms black-on-bench failure. Load with Upload your own… in the picker.',
+        acs: ['AC-1', 'AC-2', 'AC-6'],
+        expect: 'Solid black puzzle. Bench pieces should now show a warm glow at their bottom edge — confirming the uplight lifts dark pieces off the dark bench. Previously completely invisible; should now be discernible.',
         recommended: true,
       },
       {
         src: '/qa-scratch/spike-47a-split-wb.png',
         name: 'spike-47a-split-wb.png',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-6'],
-        expect: 'Left half white, right half black. Single puzzle exercises both failure cases simultaneously. White-side pieces invisible on board; black-side pieces invisible on bench. Strong candidate for promotion as a long-term contrast regression fixture.',
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-6'],
+        expect: 'Left half white, right half black. Black bench pieces benefit from the glow; white bench pieces should look fine. Primary regression fixture for all future contrast work.',
         recommended: true,
+      },
+      {
+        src: '/qa-scratch/spike-47a-pure-white.png',
+        name: 'spike-47a-pure-white.png',
+        dims: '1024 × 1024',
+        acs: ['AC-1', 'AC-3', 'AC-6'],
+        expect: 'Solid white puzzle. Bench pieces should look fine with the glow — not washed out. Board pieces remain invisible (board contrast is Story 47b).',
       },
       {
         src: '/qa-scratch/spike-47a-mid-gray.png',
         name: 'spike-47a-mid-gray.png',
         dims: '1024 × 1024',
-        acs: ['AC-1'],
-        expect: 'Solid #808080 mid-gray. Pieces should be visible on board and on bench but invisible when the gray background preset (Shift+B) is active — confirms gray-on-gray failure.',
+        acs: ['AC-1', 'AC-3'],
+        expect: 'Solid #808080 mid-gray. Bench pieces should have visible glow. Board pieces visible (4:1 contrast). Background preset gray (Shift+B) makes board pieces invisible — that is expected and unchanged.',
       },
       {
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-6'],
-        expect: '130 pieces (13×10). Sanity check — normal photographic image. No new failures expected.',
+        acs: ['AC-7', 'AC-8', 'AC-9'],
+        expect: '130 pieces (13×10). Sanity check — normal photographic image. Confirm glow visible, no regressions in tab knobs / focus ring / filter strip / tray animations.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────

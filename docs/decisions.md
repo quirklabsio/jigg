@@ -376,6 +376,45 @@ Native `<dialog>` provides Escape handling, `showModal()` focus management, and 
 
 ---
 
+## Bench piece uplight glow (Story 47a)
+
+**Shipped:** 2026-04-22.
+
+### Why the stroke recommendation was rejected
+
+The 47a-spike recommended an always-on thin dual-tone stroke (inner white 1 px α 0.40 + outer black 1.5 px α 0.45) as the primary fix. This was rejected because it modifies the piece art itself: the OutlineFilter renders around the sprite's alpha mask, so any stroke—however faint—becomes part of the piece's visual boundary. Puzzle pieces are content (artwork), not chrome. Altering the visible boundary of every piece with a permanent synthetic ring is a content-level change, not a visibility aid.
+
+### Chosen approach: per-slot uplight glow (chrome only)
+
+The bench's visibility problem is a **bench** problem, not a piece problem. The fix lives in the bench layer only: each occupied bench slot gets a soft warm gradient behind the piece sprite. The gradient is brighter at the bottom of the slot (where the bench background is darkest relative to the piece) and fades to transparent by ~60% up the slot. Zero effect on the piece sprite, texture, filters, or geometry.
+
+Metaphor: pieces resting on a dimly lit shelf with ambient light rising from below.
+
+### Implementation
+
+- `addBenchGlowToContainer(container)` inserts a `Graphics` node at index 0 of the piece container (behind the sprite at index 1). Tagged `'bench-glow'` on `.label` for idempotent add/remove.
+- `layoutTrayPieces` calls `getGlowGradient()` and redraws the glow at the correct cell position on every layout pass (filter change, extraction, resize, load).
+- `FillGradient` with `textureSpace: 'local'` — gradient coords match the slot rect in local Graphics space. One shared gradient instance per puzzle session (cached in `_glowGradient`).
+- Glow is removed from a container in `extractPieceFromBench` (before reparent to viewport) — canvas pieces have no glow.
+
+### Tunable constants (top of bench.ts)
+
+| Constant | Default | Role |
+|---|---|---|
+| `BENCH_GLOW_COLOR` | `0xfff5e0` | Warm off-white uplight color |
+| `BENCH_GLOW_ALPHA_MAX` | `0.22` | Alpha at the bottom edge |
+| `BENCH_GLOW_FADE_STOP` | `0.60` | Fraction from bottom where alpha reaches 0 |
+
+### HC and the glow
+
+The glow is **unconditional** — it stays on in HC mode. The original story prompt called for HC-gating it off (theory: sandwich stroke provides 21:1 so no glow needed). QA showed that removing the glow in HC mode left dark pieces invisible on the dark bench, because the sandwich stroke handles edge contrast but does nothing for overall slot visibility. The two treatments are complementary, not redundant: glow = slot-level lift; sandwich = WCAG-strict edge contrast. Both coexist cleanly.
+
+### What this does and doesn't fix
+
+The glow lifts dark pieces off the bench for sighted users. It is intentionally **not WCAG-strict**: a pure-black piece in the bench reaches roughly 2:1–2.5:1 at the bottom edge of the slot, still below the 3:1 WCAG 1.4.11 threshold. This is accepted — bench pieces are transient (users extract them immediately), and the remaining visibility gap on the board side (white pieces on white board) is handled separately in Story 47b.
+
+---
+
 ## Piece contrast audit — WCAG 1.4.11 (Story 47a-spike)
 
 **Spike date:** 2026-04-22. **No production code changed this session.** This entry is the primary deliverable.

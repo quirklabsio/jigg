@@ -19,6 +19,25 @@ Files changed:
 
 -->
 
+## Story 47a: Bench piece uplight glow
+
+**Shipped:** 2026-04-22
+
+Per-slot vertical gradient (uplight glow) behind each bench piece. The glow is warm off-white (`#fff5e0`), max alpha 0.22 at the slot bottom, fading to transparent by 60% up the slot. Lifts dark pieces off the dark bench without touching piece sprites, textures, or filters.
+
+Implementation: `addBenchGlowToContainer` inserts a `Graphics` node at index 0 of each piece container (behind the sprite at index 1), tagged `'bench-glow'`. `layoutTrayPieces` redraws the glow at the correct cell position on every layout pass. `FillGradient` with `textureSpace: 'local'` — one shared gradient instance per puzzle session. Glow removed from the container in `extractPieceFromBench` before reparent to viewport (canvas pieces have no glow).
+
+Glow is unconditional (coexists with HC). Initial prompt called for HC-gating it off but QA showed removing it in HC mode left dark bench pieces invisible — the sandwich stroke handles edge contrast but not slot-level visibility. Both now coexist: glow lifts pieces off the bench; sandwich provides WCAG-strict edge contrast.
+
+Tunable constants exposed at top of `bench.ts`: `BENCH_GLOW_COLOR`, `BENCH_GLOW_ALPHA_MAX`, `BENCH_GLOW_FADE_STOP`.
+
+Files changed:
+- `src/canvas/bench.ts` — FillGradient import; glow constants; `_glowEnabled`/`_glowGradient` state; `getGlowGradient`, `addBenchGlowToContainer`, `removeBenchGlowFromContainer`, `addAllBenchGlows`, `removeAllBenchGlows` helpers; glow draw in `layoutTrayPieces`; glow removal in `extractPieceFromBench`; glow setup in `initTray`; HC subscription extended
+- `docs/decisions.md` — new "Bench piece uplight glow (Story 47a)" section
+- `public/qa.html` — STORY and FIXTURES updated to Story 47a ACs (9 criteria)
+
+---
+
 ## Story 47a-spike: Piece contrast audit + WCAG recommendation
 
 **Shipped:** 2026-04-22

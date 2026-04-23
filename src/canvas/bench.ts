@@ -3,6 +3,7 @@ import {
   Container,
   FederatedPointerEvent,
   FederatedWheelEvent,
+  FillGradient,
   Filter,
   Graphics,
   Point,
@@ -72,6 +73,14 @@ const FILTER_STRIP_HEIGHT = 36; // px — above the piece grid
 // If scene.ts ring constants change, update BENCH_RING_CLEARANCE here too.
 const BENCH_RING_CLEARANCE = 8; // ≥ FOCUS_RING_PADDING + FOCUS_RING_THICKNESS in scene.ts
 const THUMBNAIL_SIZE = TRAY_HEIGHT_OPEN - TRAY_HEIGHT_CLOSED - FILTER_STRIP_HEIGHT - PADDING - BENCH_RING_CLEARANCE; // 128
+
+// ─── Bench glow constants ─────────────────────────────────────────────────────
+// Tunable parameters for the per-slot uplight gradient. Exposed at top of file
+// for easy iteration during QA. Not in HC mode (sandwich stroke handles that).
+const BENCH_GLOW_COLOR     = 0xfff5e0;   // warm off-white uplight
+const BENCH_GLOW_ALPHA_MAX = 0.22;       // alpha at the bottom edge of the slot
+const BENCH_GLOW_FADE_STOP = 0.60;       // glow reaches zero alpha at this fraction from the bottom
+const BENCH_GLOW_TAG       = 'bench-glow'; // Graphics label for idempotent add/remove
 
 const FILTER_OPTIONS: { key: TrayFilter; label: string }[] = [
   { key: 'all',      label: 'All' },
@@ -144,6 +153,10 @@ let _loadingTickerFn: (() => void) | null = null;
 
 // HC store subscription — unsubscribed on teardown, replaced on re-init (AC-2)
 let _unsubscribeHC: (() => void) | null = null;
+
+// Glow state — whether the bench uplight glow is currently active (Story 47a)
+let _glowEnabled  = false;
+let _glowGradient: FillGradient | null = null;
 
 // DOM bench strip handle — focusable element for keyboard open, focus handoff on close
 let _benchStripHandle: HTMLButtonElement | null = null;
@@ -272,6 +285,60 @@ export function getVisibleBenchOrder(filter: TrayFilter): string[] {
   return all.filter((id) => piecesById[id]?.edgeType === filter);
 }
 
+// ─── Bench glow helpers (Story 47a) ──────────────────────────────────────────
+
+function getGlowGradient(): FillGradient {
+  if (!_glowGradient) {
+    const r = ((BENCH_GLOW_COLOR >> 16) & 0xff) / 255;
+    const g = ((BENCH_GLOW_COLOR >> 8)  & 0xff) / 255;
+    const b = (BENCH_GLOW_COLOR         & 0xff) / 255;
+    _glowGradient = new FillGradient({
+      type: 'linear',
+      start: { x: 0, y: 0 },
+      end:   { x: 0, y: 1 },   // 'local' textureSpace: 0–1 maps to bounding-box top–bottom
+      textureSpace: 'local',
+    });
+    // top 40% of slot: fully transparent; bottom 60%: linear ramp to BENCH_GLOW_ALPHA_MAX
+    _glowGradient.addColorStop(0,                         [r, g, b, 0]);
+    _glowGradient.addColorStop(1 - BENCH_GLOW_FADE_STOP,  [r, g, b, 0]);
+    _glowGradient.addColorStop(1,                         [r, g, b, BENCH_GLOW_ALPHA_MAX]);
+  }
+  return _glowGradient;
+}
+
+function addBenchGlowToContainer(container: Container): void {
+  if (container.getChildByLabel(BENCH_GLOW_TAG)) return;
+  const glow = new Graphics();
+  glow.label = BENCH_GLOW_TAG;
+  container.addChildAt(glow, 0); // index 0 → behind the sprite at index 1
+}
+
+function removeBenchGlowFromContainer(container: Container): void {
+  const glow = container.getChildByLabel(BENCH_GLOW_TAG) as Graphics | null;
+  if (!glow) return;
+  container.removeChild(glow);
+  glow.destroy();
+}
+
+function addAllBenchGlows(): void {
+  if (!_containerMap) return;
+  const { piecesById } = usePuzzleStore.getState();
+  for (const [id, container] of _containerMap) {
+    const piece = piecesById[id];
+    if (!piece || !isInBench(piece)) continue;
+    addBenchGlowToContainer(container);
+  }
+  _glowEnabled = true;
+}
+
+function removeAllBenchGlows(): void {
+  if (!_containerMap) return;
+  for (const container of _containerMap.values()) {
+    removeBenchGlowFromContainer(container);
+  }
+  _glowEnabled = false;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function screenW(): number {
@@ -392,6 +459,11 @@ function extractPieceFromBench(pieceId: string): void {
   // Create table button immediately — _buttonMap now holds the table button.
   const piece = usePuzzleStore.getState().piecesById[pieceId];
   if (piece) createTableButton(piece);
+
+  // Glow lives with the bench slot — remove it from the container before the
+  // container moves to the canvas (AC-6: canvas pieces must have no glow).
+  const extractedContainer = _containerMap?.get(pieceId);
+  if (extractedContainer) removeBenchGlowFromContainer(extractedContainer);
 
   _trayDisplayOrder = _trayDisplayOrder.filter((id) => id !== pieceId);
   // Reconcile after mutation — unconditional. Idempotent if bench is still non-empty.
@@ -850,6 +922,16 @@ function layoutTrayPieces(): void {
     container.x = 0;
     container.y = 0;
     container.visible = true;
+
+    // Update the glow behind the sprite for this slot
+    if (_glowEnabled) {
+      const glow = container.getChildByLabel(BENCH_GLOW_TAG) as Graphics | null;
+      if (glow) {
+        glow.clear();
+        glow.rect(0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE).fill(getGlowGradient());
+        glow.position.set(cellX, cellY);
+      }
+    }
   });
 
   // Total grid dimensions
@@ -1477,6 +1559,14 @@ export function initTray(
     sprite.filters   = [];
     sprite.eventMode = 'static';
   }
+
+  // Glow setup — reset gradient cache per puzzle load, add glows unconditionally.
+  // Glow coexists with HC: it lifts pieces off the dark slot; HC sandwich handles
+  // edge-level WCAG contrast. Removing the glow in HC left dark pieces invisible.
+  _glowGradient?.destroy();
+  _glowGradient  = null;
+  _glowEnabled   = false;
+  addAllBenchGlows();
 
   // Apply deterministic rotation to bench sprites.
   // TODO: Story 52 — read rotationEnabled from settings panel (PuzzleState.rotationEnabled)
