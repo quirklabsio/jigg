@@ -1,120 +1,99 @@
-# Story 47a-spike: Piece contrast audit and accessibility recommendation
+# Story 47a: Bench piece uplight glow
 
 ## Context
 
-User reports pieces disappearing into their surroundings: white pieces vanish against the off-white board (`#f5f5f3`), black pieces vanish against the dark bench background (`#1a1a1a` normal / `#000000` HC). Once you factor in the full matrix — bench vs. board vs. stage background, normal vs. HC mode, the Shift+B background-preset cycle from Story 37a, snap highlight states, Story 37d's sandwich stroke, BevelFilter baseline, the experimented-then-disabled DropShadowFilter — "just add a stroke" risks fighting or duplicating treatments that already exist.
+Story 47a-spike (shipped 2026-04-22, see `decisions.md` §"Piece contrast audit") measured that black and near-black pieces fall to 1.0–1.9:1 WCAG contrast against the dark bench — they disappear. The spike's original recommendation was a dual-tone always-on stroke on every piece. **That approach was rejected** because it alters the piece art itself (puzzle pieces are content, not chrome).
 
-This is a spike: no production code ships from this session. The deliverable is a measured audit and a concrete recommendation for the follow-up story that will implement the fix.
+Alternative direction: treat the bench's visibility problem as a **chrome** problem. Each bench slot gets a soft uplight glow behind the piece — a bottom-to-top bright gradient that lifts dark pieces off the bench background without touching the piece sprites, filters, or geometry. The metaphor is "pieces resting on a dimly lit shelf with ambient light rising from below."
 
-## Accessibility framing (non-negotiable)
+The board side of the contrast matrix (white pieces disappearing on the white board) is handled separately in Story 47b (adaptive board color), queued after this.
 
-**WCAG 2.1 SC 1.4.11 "Non-text Contrast"** — user-interface components and graphical objects that are essential for understanding a state must have a contrast ratio of at least **3:1** against adjacent colors. Puzzle pieces are essential graphical objects. This is the acceptance threshold for the audit: every piece/background pair must either hit 3:1 at the visible boundary already, or be called out as failing.
+## Scope framing
 
-For users with the High Contrast preference enabled (Story 37a), the target tightens — 4.5:1 where feasible, matching WCAG AA text contrast, reflecting the user's explicit signal that they need stronger visual separation.
+This is a **visual-discovery story**. The user explicitly wants to see it before judging whether the approach works. Prompt locks down regressions (HC mode, canvas pieces, filter strip, perf); leaves glow parameters (color, alpha, gradient curve) tunable in the QA loop. Expect 1–2 iteration cycles on the visual knobs.
 
 ## Requirements
 
-### 1. Build the context × piece-color matrix
+### The glow
 
-Enumerate every surface a piece renders against. At minimum:
-- **Board** in each of the Story 37a background presets — off-white `#f5f5f3`, charcoal, and the adaptive mid-gray band (see `decisions.md` §"Adaptive background thresholds").
-- **Bench body** in normal mode (`#1a1a1a` α 0.85) and HC mode (`#000000` α 1.0). Both the strip-closed state and the strip-open state.
-- **Workspace background** (`#f5f5f3` body CSS + WebGL clear).
-- **Snap highlight** — the pulse area during a board-snap attempt (HC-modified per Story 37d).
-- Any other context a piece visibly occupies (extracted mid-drag, placed-and-settled, cluster rendering).
+For each bench piece slot, insert a new `Graphics` node as a sibling of the piece sprite, rendered **behind** the sprite but **above** the button background. The glow fills the slot bounds with a **vertical linear gradient**: a light color at the bottom, fading to transparent by roughly 60% of the slot height.
 
-Piece-color buckets to test against each:
-- Pure white (`#ffffff`)
-- Near-white (`#f0f0f0`-ish — very common in photographs: clouds, highlights, skin)
-- Pure black (`#000000`)
-- Near-black (`#101010`-ish — shadows, hair, dark fabric)
-- Mid-gray (`#808080`)
-- Three saturated hues (red, blue, green at ~70% saturation) — sanity check, not the failure case
+Starting parameters (tunable, expose as top-of-file module constants for easy iteration):
 
-### 2. Audit existing piece-edge treatments
+- `BENCH_GLOW_COLOR`: warm off-white, starting `#fff5e0` or neutral `#f5f5f3` — dev picks what reads best in-canvas
+- `BENCH_GLOW_ALPHA_MAX`: starting `0.22` (at the bottom edge)
+- `BENCH_GLOW_FADE_STOP`: starting `0.60` (where alpha reaches 0)
+- Gradient shape: linear vertical. Radial is available if linear reads flat, but start linear.
 
-For each of the following, document what it contributes to piece/background contrast today:
-- **BevelFilter** (Story 13 baseline, adjusted in Story 37d) — what's its visible effect on the piece boundary? Does it help contrast or just add depth?
-- **OutlineFilter sandwich** (Story 37d, HC-only) — confirm it's HC-gated. Measure the contrast it provides in HC mode.
-- **DropShadowFilter** — currently disabled (see `decisions.md` §"Piece Shadows"). Revisit: would re-enabling it at `resolution: 1` with appropriate alpha restore sufficient contrast without the seam / complexity issues that got it disabled? Document the tradeoff.
-- **Piece background fill** under the texture (if any) — does the piece have any backdrop that participates in the visible boundary?
+The glow shape tracks the slot, not the piece. Empty slots (between or after extraction) have no glow — glow exists for rendered pieces only.
 
-### 3. Measure contrast
+### Context constraints (hard)
 
-For each cell in the matrix, compute the WCAG contrast ratio at the piece/background boundary. Use the standard formula: `(L1 + 0.05) / (L2 + 0.05)` where L1/L2 are relative luminances.
+- **Bench only.** Pieces extracted to the workspace or placed on the board receive no glow. The glow lives with the bench slot, not the piece identity.
+- **Not in HC mode.** High contrast preference enabled → glow is not added (or is removed if the toggle flips mid-session). HC's sandwich stroke (Story 37d) already provides 21:1 — adding a glow on top would double-treat and feel wrong.
+- **Chrome only.** Zero effect on the piece sprite, piece texture, piece filters, piece geometry. The glow is behind the piece; the piece renders on top unchanged.
+- **Aesthetic, not WCAG-strict.** This does not promise to hit 3:1 on every piece/bench combo. A black piece at the bottom of the glow will sit around 2:1–2.5:1; the top half of the piece still dissolves into the darker part of the bench. That's acceptable — pieces in the bench are transient, and users don't stare at the bench the way they stare at the board.
 
-For pieces whose boundary is a gradient (bevel highlight/shadow across the edge) or a filter-produced rim (outline sandwich), measure at the point of minimum contrast — the pessimistic number is the one that governs whether a piece "disappears."
+### Integration points
 
-Present results as a table in `decisions.md`. Flag every cell below 3:1 normal / 4.5:1 HC.
+- Bench piece containers live inside `_piecesContainer` (see `bench.ts:85-86`, mask setup from Story 32). The glow Graphics is a sibling of the piece sprite inside each piece's container — not a child of `_piecesContainer` directly (which would cover all slots).
+- The glow is **clipped by the existing `_piecesContainer` mask**, same as the piece sprite. This is correct: if a glow bleeds past the tray body, the mask crops it, same as Story 46b's piece clipping fix.
+- On piece extraction (Story 32 spiral + Story 41a keyboard extraction), the piece container is removed from the grid — glow goes with it. No explicit cleanup required.
 
-### 4. Recommend
+### HC gating
 
-Based on the measurements, recommend one primary approach and describe 1–2 alternatives. The option space (non-exhaustive):
+The HC preference toggle lives in `src/utils/preferences.ts`. Mirror the sandwich stroke pattern:
 
-- **Always-on contrast-aware edge stroke** — extend the HC sandwich stroke pattern (or a lighter version of it) to all modes. Pros: uses existing OutlineFilter infrastructure, per-piece contrast adapts automatically if the stroke color is computed from piece content. Cons: more rendering cost, may fight the BevelFilter depth illusion.
-- **Re-enable DropShadowFilter** with specific parameters that address the disabled-reasons. Pros: preserves current edge treatment, adds separation via offset shadow rather than rim stroke. Cons: shadow direction (45°, top-left convention) doesn't help on board edges where shadow falls into the board anyway.
-- **Board color tint** — retire the pure off-white in favor of a neutral mid-gray board (e.g. `#c8c8c6`) that contrasts with both white and black pieces. Pros: one change, solves the most acute failure (pieces-on-board). Cons: bench still has the black-on-dark problem; only solves half.
-- **Per-piece adaptive edge color** — sample the piece's edge pixels, pick a stroke color that maximizes contrast against both the piece and the expected background. Pros: always optimal. Cons: complexity, runtime cost, implementation risk.
-- **Hybrid** — combine a subtle board tint (addresses board case) with a thin always-on stroke (addresses bench case and serves as defence everywhere else).
+- On initial CUTS_COMPLETE: check HC preference. If off, add glow to every bench piece. If on, skip.
+- On HC toggle mid-session: remove glow from all bench pieces when HC turns on; re-add when HC turns off.
+- Use a named filter/child tag pattern (`'bench-glow'`) so add/remove is idempotent — same protection Story 37d uses for the sandwich.
 
-The recommendation should justify the choice with the measurement data, name the runtime cost, and name anything it might break (BevelFilter depth illusion, Story 37d sandwich stroke, snap highlight visibility).
+## Constraints (rephrased + extended)
 
-### 5. Follow-up story brief
-
-End the `decisions.md` entry with a concrete scope for the next story — the implementation of the recommended approach. Include:
-- Story title
-- Files likely to touch
-- 4–6 acceptance criteria measured against the same contrast matrix from step 1
-- Known constraints (don't break HC sandwich, don't break Bevel depth, etc.)
-
-BA will read this brief and write the formal next-story prompt from it.
-
-## Constraints
-
-- **No production code changes in this session.** A small throwaway measurement helper (e.g. a console-logged contrast calculation) is fine — don't commit it.
-- **Do not implement the fix.** That's the follow-up story. Resist the urge to "just try" a fix if the audit points somewhere obvious; the user needs the audit document regardless for future regression checks.
-- **Do not change existing preferences, HC behavior, or any accessibility primitive.** Inventory only.
-- **No performance optimization** on any existing filter. The spike measures, not tunes.
-- **No changes to the BevelFilter, OutlineFilter, or any filter config.** Auditing their effect is allowed; changing them isn't.
+- **Do not modify the bench background itself** (`#1a1a1a` α 0.85 normal — Story 37d). The glow is per-slot, not a bench-wide change.
+- **Do not apply the glow to pieces on the canvas** — bench only.
+- **Do not touch the piece sprite, its filters, its texture, or any existing piece-level work.** BevelFilter, DropShadowFilter, and HC sandwich all remain exactly as they are.
+- **Preserve all Story 46b fixes.** Tab overhang and focus ring clearance behave identically — glow clipping obeys the same mask geometry.
+- **Preserve Story 37d HC behavior.** HC mode is untouched here. The sandwich stroke continues to do its job; glow does not exist in HC.
+- **Do not change filter strip or tray open/close animations.**
+- **Do not pre-empt Story 47b** (adaptive board color). Board fill stays `#ffffff` in this session.
+- **Expose glow parameters as top-of-file module constants.** Not buried. This story is explicitly expected to iterate on color/alpha/fade-stop during QA.
 
 ## Files likely to touch
 
-- `docs/decisions.md` — primary deliverable: audit matrix, existing-treatment audit, recommendation, follow-up story brief
-- `public/qa.html` — update `STORY` and `FIXTURES` for the spike
-- Possibly `qa-scratch/*.png` — synthetic high-contrast test images (see below)
+- `src/canvas/bench.ts` — primary: add glow Graphics insertion per piece container; HC-gated add/remove
+- `src/utils/preferences.ts` — HC toggle wiring (may need a new exported function for `setBenchGlowEnabled(on)` or similar, mirroring `addSandwichStroke` / `removeSandwichStroke`)
+- `docs/decisions.md` — record the approach, final tuned parameters, and a short note on why the stroke alternative was rejected
+- `docs/engine-conventions.md` — possibly; if there's a useful invariant to record about "chrome vs content" for future contributors (dev's call)
 
 ## Acceptance
 
-This is a spike; ACs are about the document, not runtime behavior.
+User tests via QA page. Write ACs into `public/qa.html` per `/qa` format.
 
-- **AC-1: Context × piece-color matrix in `decisions.md`.** A table with every context (board × each bg preset, bench normal, bench HC, workspace, snap highlight) × every piece-color bucket. Each cell has a measured contrast ratio.
-- **AC-2: Every failing cell flagged.** Cells below 3:1 normal / 4.5:1 HC are explicitly called out. No hand-waving.
-- **AC-3: Existing treatments audited.** Each of BevelFilter, OutlineFilter sandwich, (disabled) DropShadowFilter documented: what it does today and how much it contributes (or doesn't) to the boundary contrast.
-- **AC-4: One primary recommendation with justification.** The recommendation references specific matrix cells as evidence. 1–2 alternatives briefly documented with the tradeoffs named.
-- **AC-5: Follow-up story brief.** Concrete scope (title, files, ~5 ACs, constraints) that BA can turn into the next-story prompt with minimal rewriting.
-- **AC-6: No production code committed.** `git diff src/` returns empty at the end of the session.
+Test with the synthetic fixtures from the spike: `qa-scratch/spike-47a-pure-white.png`, `qa-scratch/spike-47a-pure-black.png`, `qa-scratch/spike-47a-mid-gray.png`, `qa-scratch/spike-47a-split-wb.png`. Also confirm behavior on `/test-image.jpg` and one of the Story 48 curated images.
 
-## Test fixtures (spike)
-
-Create 3–4 synthetic high-contrast test images in `/qa-scratch/` — pre-normalized PNGs sized 1024×1024 (so they drop straight into the existing ingest pipeline):
-
-- `qa-scratch/spike-47a-pure-white.png` — solid `#ffffff`
-- `qa-scratch/spike-47a-pure-black.png` — solid `#000000`
-- `qa-scratch/spike-47a-mid-gray.png` — solid `#808080`
-- `qa-scratch/spike-47a-split-wb.png` — half-white half-black (50/50 split) so a single loaded puzzle has both failure cases simultaneously
-
-These make the worst-case boundary visible at a glance. User loads each through the 48 picker panel's "Upload your own…" affordance (or drag-drop) and verifies the audit's findings match what they see.
-
-Nominate any of these for promotion if the follow-up regression story would want them around. Likely yes — the `split-wb` image is a great long-term fixture for any contrast-related work.
+- **AC-1: Glow visible on every bench piece (normal mode).** Load any test image. Every piece in the bench has a visible soft glow behind it, brighter at the bottom of the slot, fading upward.
+- **AC-2: Dark pieces materially more visible.** Load `spike-47a-pure-black.png` or `spike-47a-split-wb.png`. Black pieces in the bench are discernible where they were previously invisible. User judges whether "discernible" meets their bar; dev tunes parameters if not.
+- **AC-3: Light pieces don't look harmed.** Load `spike-47a-pure-white.png`. White/near-white bench pieces still look fine — not washed out, not over-bright, no visible artifact.
+- **AC-4: HC mode unchanged.** Enable high contrast (Shift+H or whatever the toggle is — see `preferences.ts`). Glow disappears on all bench pieces; the HC sandwich stroke is visible and unchanged.
+- **AC-5: HC toggle mid-session clean.** Enable HC → glow removes cleanly. Disable HC → glow returns cleanly. No residual filters, no duplicate glow layers.
+- **AC-6: Canvas pieces have no glow.** Extract a piece (click or keyboard). The extracted piece on the workspace/board has no glow. The bench slot (if it still exists) has no glow either since it's empty.
+- **AC-7: Story 46b regressions all pass.** Tabs with downward knobs still render fully; focus ring still visible. Glow clipping obeys the same mask geometry.
+- **AC-8: Filter strip + tray behaviors unchanged.** Filter cycling, tray open/close (T key), piece extraction, keyboard nav — all unaffected.
+- **AC-9: Perf stable at 200-piece grid.** Load a large-grid image (2048×2048 or similar, yielding ~169 pieces). Frame rate matches pre-change baseline — measured via the FPS counter (F key, if exposed) or browser devtools. Dev notes the measurement in the QA report.
 
 ## Out of scope
 
-- Story 47c palette tuning / swap UI (still candidate)
-- Story 46f label clipping (still candidate)
-- Story 49 metadata shape
-- Any change to rendering pipeline, filters, board color, or piece geometry
-- Any implementation of the recommended fix — that's the follow-up story
+- **Story 47b — Adaptive board color.** Queued as the follow-up. Board stays `#ffffff` this session.
+- **Story 47c — Palette tuning + swap UI.** Still candidate.
+- **Story 46f — Label clipping Approach B.** Still candidate.
+- Glow on canvas pieces (post-extraction, placed on board, mid-drag). Bench only.
+- Per-piece adaptive glow color based on piece content. Uniform glow across all slots.
+- Animated glow (pulse, flicker). Static gradient only.
+- Changing the bench background itself (normal `#1a1a1a` or HC `#000000`).
+- Any piece-sprite-level treatment (stroke, outline, shadow) — rejected per user direction.
 
 ## Known next
 
-After this spike: Story 47a (implementation) follows, scoped from the spike's recommendation. Then the remaining 47-series candidates (47c palette) and 46f label clipping per BA judgement.
+- **Story 47b** (immediately after 47a ships): Adaptive board color — the board-side half of the contrast problem. Board becomes image-aware (likely k-means on piece luminances picks a board color), with a `Shift+B`-style preset override as escape valve.
+- Story 47c (palette tuning) and 46f (label clipping Approach B) remain candidates beyond 47b.

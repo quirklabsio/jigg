@@ -41,11 +41,11 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47a-spike — Piece contrast audit and accessibility recommendation** *(in progress — see `docs/next-story.md`)*
-User reports white pieces invisible on board, black pieces invisible on bench. Scope expanded: any piece color vs any background across board / bench / presets / HC mode. Spike delivers a WCAG contrast matrix, audit of existing treatments (Bevel, HC sandwich, disabled shadows), and a recommendation + follow-up story brief. No production code this session.
+**Story 47a — Bench piece uplight glow** *(in progress — see `docs/next-story.md`)*
+Dark pieces disappear on the dark bench (1.0–1.9:1 contrast per 47a-spike). Spike's dual-tone-stroke recommendation was rejected — taints piece art. Approach instead: per-slot vertical uplight gradient behind each bench piece, HC-gated off. Chrome treatment only; piece art untouched. Visual-discovery story, parameters tunable in QA loop.
 
-**Story 47a (pending) — Piece visibility fix**
-Implementation of the spike's recommendation. Scope will be written from the spike's follow-up brief.
+**Story 47b (pending) — Adaptive board color**
+Light pieces disappear on the white board (1.0–1.1:1). Make the board image-adaptive (k-means on piece luminances picks a contrasting board color), with a Shift+B-style preset override. Queued immediately after 47a ships.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
