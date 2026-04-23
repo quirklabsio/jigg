@@ -10,6 +10,33 @@ V1 is the free tier MVP — strictly frontend, no auth, no backend. Persistence 
 
 V2 introduces a paid subscription tier: user auth, backend, cross-device sync, and anything that requires server state. Nothing in V1 should take on backend dependencies that block this transition.
 
+## Board/Table asymmetry
+
+The board and the table are **not equivalent surfaces**. They share an interaction (pieces can be placed on both via drag/drop or snap) but have different roles, and that separation is intentional.
+
+- **Board** is the primary play surface. Its job is **correctness and clarity** — piece visibility, consistent playability. It is **system-controlled and image-aware**: color is derived deterministically from the loaded image at load time. **No user override, ever.**
+- **Table** is the staging surface. Its job is **flexibility and preference** — aesthetic comfort, environment. It stays **user-controlled** via the existing presets (Shift+B cycle per Story 37a).
+
+### Invariants
+
+- Board color is derived from the image at load time. Deterministic, no override.
+- Table appearance is independent of board color and user-controlled.
+- Given the same image, the board appearance is consistent across sessions.
+- The two surfaces are intentionally asymmetric despite the shared drop/snap interaction.
+
+### Why no board presets
+
+Allowing board customization would:
+- reintroduce the visibility failures that motivated Story 47 in the first place (pieces disappearing into surfaces)
+- add unnecessary user decisions to a surface that benefits from being predictable
+- weaken consistency across puzzles — the board should read the same way every session for the same image
+
+V1 prioritizes **"always readable by default"** over **"user-configurable"** on the board. This is a permanent product principle, not a V1-punt: there is no V2 path that opens the board to user color choice. The table is the customization surface; the board stays clean.
+
+### When the board needs to feel more "stage-like"
+
+The right lever is **visual hierarchy** (edge definition, drop shadow, elevation) — not user choice. Reserved for follow-up stories that tune the board's perceptual weight without exposing knobs.
+
 ## Stack
 - **PixiJS over Canvas 2D** — performance ceiling with 200 pieces, shadows, and shaders
 - **PixiJS over Three.js / Babylon.js** — full 3D engines are overkill for pseudo-3D effects

@@ -23,6 +23,8 @@
 | Story 46e | Corner piece alignment — board sized to piece coverage, not image dimensions (2026-04-21) |
 | Story 47 | File picker — "Choose Image" button, same pipeline as drag-and-drop (2026-04-21) |
 | Story 48 | Curated image set + dev regression fixture — picker panel, 7 images, forceGrid plumbing, regression-script.md (2026-04-21) |
+| Story 47a-spike | Piece contrast audit — WCAG matrix + recommendation (2026-04-22) |
+| Story 47a | Bench piece uplight glow — per-slot chrome, HC-gated off (2026-04-22) |
 
 ---
 
@@ -41,11 +43,11 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47a — Bench piece uplight glow** *(in progress — see `docs/next-story.md`)*
-Dark pieces disappear on the dark bench (1.0–1.9:1 contrast per 47a-spike). Spike's dual-tone-stroke recommendation was rejected — taints piece art. Approach instead: per-slot vertical uplight gradient behind each bench piece, HC-gated off. Chrome treatment only; piece art untouched. Visual-discovery story, parameters tunable in QA loop.
+**Story 47b — Adaptive board color** *(in progress — see `docs/next-story.md`)*
+Light pieces disappear on the white board (1.0–1.1:1 per 47a-spike). Board picks one of three presets (light / mid / dark) from image-luminance mean + spread at load. Board is system-controlled and image-aware (no user override, ever — see `decisions.md` §"Board/Table asymmetry"). Table appearance stays user-controlled via existing presets — the two surfaces are intentionally asymmetric.
 
-**Story 47b (pending) — Adaptive board color**
-Light pieces disappear on the white board (1.0–1.1:1). Make the board image-adaptive (k-means on piece luminances picks a contrasting board color), with a Shift+B-style preset override. Queued immediately after 47a ships.
+**Story 47d (candidate) — Board as stage: visual hierarchy**
+Follow-up to 47b. The board should read as a distinct, elevated plane against the table — not just a differently-colored rectangle. Work: strengthen board edge definition, tune drop shadow/elevation, ensure the 3 board color presets stay visually distinct from all table presets. Still no user-configurable knobs; this is pure system polish.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
@@ -182,6 +184,7 @@ Rotation toggle, snap sensitivity, background.
 **Story 85:** Social sharing.
 **Story 86:** Achievement system.
 *Reason: Post-launch, validate demand first.*
+
 
 ---
 
