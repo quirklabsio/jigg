@@ -1,118 +1,120 @@
-# Story 48: Curated image set + dev regression fixture
+# Story 47a-spike: Piece contrast audit and accessibility recommendation
 
 ## Context
 
-Story 47 shipped a "Choose Image" button that goes straight to a native file picker. That's fine for power users but gives a first-time user nothing to click through to. Story 48 adds a small baked-in set of public-domain images users can pick from, surfaced via the same button. One of those entries is a **designated dev regression fixture** — a small-grid image with documented manual-test steps (this absorbs the parked Story 47b into 48 per the fold-in decision).
+User reports pieces disappearing into their surroundings: white pieces vanish against the off-white board (`#f5f5f3`), black pieces vanish against the dark bench background (`#1a1a1a` normal / `#000000` HC). Once you factor in the full matrix — bench vs. board vs. stage background, normal vs. HC mode, the Shift+B background-preset cycle from Story 37a, snap highlight states, Story 37d's sandwich stroke, BevelFilter baseline, the experimented-then-disabled DropShadowFilter — "just add a stroke" risks fighting or duplicating treatments that already exist.
 
-Metadata stays lightweight per the roadmap — no JSON file (that's Story 49), no landing screen (Story 52), no settings panel (Story 70). Just a typed array and a minimal picker panel.
+This is a spike: no production code ships from this session. The deliverable is a measured audit and a concrete recommendation for the follow-up story that will implement the fix.
+
+## Accessibility framing (non-negotiable)
+
+**WCAG 2.1 SC 1.4.11 "Non-text Contrast"** — user-interface components and graphical objects that are essential for understanding a state must have a contrast ratio of at least **3:1** against adjacent colors. Puzzle pieces are essential graphical objects. This is the acceptance threshold for the audit: every piece/background pair must either hit 3:1 at the visible boundary already, or be called out as failing.
+
+For users with the High Contrast preference enabled (Story 37a), the target tightens — 4.5:1 where feasible, matching WCAG AA text contrast, reflecting the user's explicit signal that they need stronger visual separation.
 
 ## Requirements
 
-### The curated set
+### 1. Build the context × piece-color matrix
 
-Create a new module at `src/curated/images.ts` exporting a typed array. Each entry:
+Enumerate every surface a piece renders against. At minimum:
+- **Board** in each of the Story 37a background presets — off-white `#f5f5f3`, charcoal, and the adaptive mid-gray band (see `decisions.md` §"Adaptive background thresholds").
+- **Bench body** in normal mode (`#1a1a1a` α 0.85) and HC mode (`#000000` α 1.0). Both the strip-closed state and the strip-open state.
+- **Workspace background** (`#f5f5f3` body CSS + WebGL clear).
+- **Snap highlight** — the pulse area during a board-snap attempt (HC-modified per Story 37d).
+- Any other context a piece visibly occupies (extracted mid-drag, placed-and-settled, cluster rendering).
 
-```ts
-{
-  src: string;                     // path under public/curated/, e.g. '/curated/landscape-01.jpg'
-  label: string;                   // short display name, e.g. "Mountain lake"
-  forceGrid?: { cols: number; rows: number };  // optional grid override (used by the regression fixture)
-}
-```
+Piece-color buckets to test against each:
+- Pure white (`#ffffff`)
+- Near-white (`#f0f0f0`-ish — very common in photographs: clouds, highlights, skin)
+- Pure black (`#000000`)
+- Near-black (`#101010`-ish — shadows, hair, dark fabric)
+- Mid-gray (`#808080`)
+- Three saturated hues (red, blue, green at ~70% saturation) — sanity check, not the failure case
 
-Target set: **5–10 images** chosen for variety across the dimensions that matter: aspect ratio (at least one portrait, one landscape, one roughly square), palette complexity (at least one simple/graphic, one busy/photographic), and dominant-color spread (not all cool tones, not all warm). Dev picks the specific images.
+### 2. Audit existing piece-edge treatments
 
-**Public-domain only.** No personal photos. Good sources: Wikimedia Commons, Unsplash (public-domain license only), NASA, Met Open Access. Each image pre-normalized to ≤ 2048 px longest edge (to avoid Story 45's runtime normalization on every load) and ≤ 300 KB per file. Drop them in `public/curated/`.
+For each of the following, document what it contributes to piece/background contrast today:
+- **BevelFilter** (Story 13 baseline, adjusted in Story 37d) — what's its visible effect on the piece boundary? Does it help contrast or just add depth?
+- **OutlineFilter sandwich** (Story 37d, HC-only) — confirm it's HC-gated. Measure the contrast it provides in HC mode.
+- **DropShadowFilter** — currently disabled (see `decisions.md` §"Piece Shadows"). Revisit: would re-enabling it at `resolution: 1` with appropriate alpha restore sufficient contrast without the seam / complexity issues that got it disabled? Document the tradeoff.
+- **Piece background fill** under the texture (if any) — does the piece have any backdrop that participates in the visible boundary?
 
-### The regression fixture (the 47b fold-in)
+### 3. Measure contrast
 
-Exactly one entry in the curated set is the dev regression image:
-- **Grid: 3×3 = 9 pieces** via `forceGrid`. Chosen over 2×4=8 because 3×3 includes all three piece-classification types (4 corners, 4 edges, 1 interior) — that's the minimum grid that exercises the full bench filter strip.
-- **Content**: clearly distinct regions per piece — a simple geometric or high-contrast image where correct placement is obvious at a glance. An abstract color-block composition beats a photograph here. Dev picks.
-- **Label**: something like `"Regression test (3×3)"` — communicate the dev-tool nature in the label itself.
-- **Always present in the set.** It's not hidden behind a debug flag. If a user loads it they get a small puzzle. No harm.
+For each cell in the matrix, compute the WCAG contrast ratio at the piece/background boundary. Use the standard formula: `(L1 + 0.05) / (L2 + 0.05)` where L1/L2 are relative luminances.
 
-### The forceGrid plumbing
+For pieces whose boundary is a gradient (bevel highlight/shadow across the edge) or a filter-produced rim (outline sandwich), measure at the point of minimum contrast — the pessimistic number is the one that governs whether a piece "disappears."
 
-`computeGrid` currently derives `cols`/`rows` from image dimensions (Story 46). When a curated image with `forceGrid` is loaded, the override wins:
+Present results as a table in `decisions.md`. Flag every cell below 3:1 normal / 4.5:1 HC.
 
-- Pass the optional forced grid through the image-load path (same path Story 47 refactored into `loadImageFile(file)` — this needs a sibling or parameter for "load by URL + optional forced grid").
-- In `scene.ts`' `loadScene` (or wherever `computeGrid` is called), if a forced grid is provided, skip `computeGrid` and use the override. Otherwise behave as today.
-- The grid override must respect the existing constraints: `rows >= 2`, `cols >= 2`, `rows * cols <= 200`. Throw or console.warn and ignore if the override violates. 3×3 satisfies all constraints.
+### 4. Recommend
 
-### The picker panel
+Based on the measurements, recommend one primary approach and describe 1–2 alternatives. The option space (non-exhaustive):
 
-Repurpose the "Choose Image" button from Story 47. On click, it now opens a small panel (previously: triggered picker directly). The panel contains:
+- **Always-on contrast-aware edge stroke** — extend the HC sandwich stroke pattern (or a lighter version of it) to all modes. Pros: uses existing OutlineFilter infrastructure, per-piece contrast adapts automatically if the stroke color is computed from piece content. Cons: more rendering cost, may fight the BevelFilter depth illusion.
+- **Re-enable DropShadowFilter** with specific parameters that address the disabled-reasons. Pros: preserves current edge treatment, adds separation via offset shadow rather than rim stroke. Cons: shadow direction (45°, top-left convention) doesn't help on board edges where shadow falls into the board anyway.
+- **Board color tint** — retire the pure off-white in favor of a neutral mid-gray board (e.g. `#c8c8c6`) that contrasts with both white and black pieces. Pros: one change, solves the most acute failure (pieces-on-board). Cons: bench still has the black-on-dark problem; only solves half.
+- **Per-piece adaptive edge color** — sample the piece's edge pixels, pick a stroke color that maximizes contrast against both the piece and the expected background. Pros: always optimal. Cons: complexity, runtime cost, implementation risk.
+- **Hybrid** — combine a subtle board tint (addresses board case) with a thin always-on stroke (addresses bench case and serves as defence everywhere else).
 
-- A grid of thumbnails, one per curated entry (label below or overlay)
-- An "Upload your own…" affordance at the bottom of the panel that triggers the hidden `<input type="file">` — the pre-48 flow
-- Close affordances: Escape key, click outside the panel, or a small × in the panel corner
+The recommendation should justify the choice with the measurement data, name the runtime cost, and name anything it might break (BevelFilter depth illusion, Story 37d sandwich stroke, snap highlight visibility).
 
-Click on a curated thumbnail → `loadImageFile(url, { forceGrid })` (the URL equivalent of the existing file-object path) → same `sessionStorage + reload` pipeline Story 45/47 established.
+### 5. Follow-up story brief
 
-### Panel accessibility
+End the `decisions.md` entry with a concrete scope for the next story — the implementation of the recommended approach. Include:
+- Story title
+- Files likely to touch
+- 4–6 acceptance criteria measured against the same contrast matrix from step 1
+- Known constraints (don't break HC sandwich, don't break Bevel depth, etc.)
 
-Non-negotiable, consistent with the accessibility bar:
-- Panel is a `<dialog>` (preferred) or a landmark region with `role="dialog"` + `aria-label="Choose an image"`
-- Focus moves into the panel on open; trap focus inside while open (arrow keys navigate thumbnails, Tab cycles within)
-- Enter activates the focused thumbnail
-- Escape closes and returns focus to the "Choose Image" button
-- Thumbnails are real `<button>` elements with `aria-label` including the image label (e.g. `aria-label="Mountain lake"`); a screen reader announces them
-
-### The regression script document
-
-Create `docs/regression-script.md` — a short, durable manual-test doc. Seed it with the end-to-end steps for the regression fixture: load regression image → open bench → extract one piece via click → extract one via keyboard → rotate a piece → snap to board → merge two pieces into a cluster → solve to completion. Each step should call out what it verifies. ~2 minutes of clicks, covers the core loop.
-
-The doc is living — future stories add steps as they ship features. This first version just seeds it.
+BA will read this brief and write the formal next-story prompt from it.
 
 ## Constraints
 
-- **Do not introduce a metadata JSON file.** That's Story 49. The typed array in `src/curated/images.ts` is the entire metadata surface right now.
-- **Do not build a landing screen.** Story 52 owns the "Play Today / Choose Image" fork.
-- **Do not pre-empt Story 70's settings panel.** The picker panel is for image selection only — no rotation toggle, no snap sensitivity, no background controls.
-- **Do not change drag-and-drop.** Drop still works onto the canvas, same as today.
-- **Do not break 47's upload flow.** The "Upload your own…" option inside the panel must go through the exact same `loadImageFile(file)` helper. No duplication.
-- **Do not commit images that can't pass a public-domain check.** If unsure about a specific image's license, skip it. Seven good images beats ten with a lawyer-attracting eighth.
-- **Do not add image-level description text, credits, or license URLs to the array.** Those are Story 49's concern. Just `src`, `label`, optional `forceGrid`.
-- **Do not remove the existing `public/test-image.jpg` or `public/test-face.png`.** They're referenced by QA fixtures; this story is additive.
+- **No production code changes in this session.** A small throwaway measurement helper (e.g. a console-logged contrast calculation) is fine — don't commit it.
+- **Do not implement the fix.** That's the follow-up story. Resist the urge to "just try" a fix if the audit points somewhere obvious; the user needs the audit document regardless for future regression checks.
+- **Do not change existing preferences, HC behavior, or any accessibility primitive.** Inventory only.
+- **No performance optimization** on any existing filter. The spike measures, not tunes.
+- **No changes to the BevelFilter, OutlineFilter, or any filter config.** Auditing their effect is allowed; changing them isn't.
 
 ## Files likely to touch
 
-- `src/curated/images.ts` — new; the typed array
-- `public/curated/*.jpg` — new image assets (5–10 files, each ≤ 300 KB)
-- `index.html` — panel markup and inline styles (keep consistent with the existing `<style>` block)
-- `src/main.ts` — extend `loadImageFile` (or add a sibling) to accept a URL + optional `forceGrid`; repurpose the Choose Image button to open the panel; wire thumbnail clicks and the upload fallback
-- `src/canvas/scene.ts` (or wherever `computeGrid` is called) — honor the forced grid when present; fall through to `computeGrid` otherwise
-- `docs/regression-script.md` — new
-- `docs/decisions.md` — short note on the `forceGrid` override path and why the panel reused the 47 button rather than adding a second
+- `docs/decisions.md` — primary deliverable: audit matrix, existing-treatment audit, recommendation, follow-up story brief
+- `public/qa.html` — update `STORY` and `FIXTURES` for the spike
+- Possibly `qa-scratch/*.png` — synthetic high-contrast test images (see below)
 
 ## Acceptance
 
-User tests via QA page. Write ACs into `public/qa.html` per the `/qa` command format.
+This is a spike; ACs are about the document, not runtime behavior.
 
-- **AC-1: Panel opens from the existing button.** Click "Choose Image". A small panel appears near the button showing 5–10 thumbnails and an "Upload your own…" affordance. No duplicate or secondary button was added.
-- **AC-2: Curated selection loads.** Click any curated thumbnail. The page reloads and the puzzle rebuilds around that image. Behavior matches drag-and-drop for the same image.
-- **AC-3: Regression fixture produces exactly 9 pieces.** Click the regression entry. Bench shows exactly 9 pieces in a 3×3 grid. Filter strip shows 4 corners, 4 edges, 1 interior.
-- **AC-4: Regression script is executable.** Follow `docs/regression-script.md` end-to-end on the regression image. Every step is clear; full script finishes in under ~3 minutes; all steps pass.
-- **AC-5: Upload fallback unchanged.** Click "Upload your own…" inside the panel. Native file picker opens. Selecting an image loads it — identical to Story 47's flow.
-- **AC-6: Drag-and-drop unchanged.** Drop an image onto the canvas (panel closed). Loads normally.
-- **AC-7: Keyboard access.** Tab reaches the button. Enter/Space opens the panel. Focus moves into the panel. Arrow keys navigate thumbnails; Enter activates a selection. Escape closes the panel and returns focus to the button.
-- **AC-8: Panel closes on outside click.** With panel open, click anywhere outside the panel. Panel closes.
-- **AC-9: Screen reader announces.** Panel announces as a dialog with its `aria-label`. Each thumbnail announces its image label.
-- **AC-10: No regression in Story 40–47 behaviors.** Tray open/close, bench filters, keyboard nav within bench/table, snap, rotation, completion detection all unchanged.
+- **AC-1: Context × piece-color matrix in `decisions.md`.** A table with every context (board × each bg preset, bench normal, bench HC, workspace, snap highlight) × every piece-color bucket. Each cell has a measured contrast ratio.
+- **AC-2: Every failing cell flagged.** Cells below 3:1 normal / 4.5:1 HC are explicitly called out. No hand-waving.
+- **AC-3: Existing treatments audited.** Each of BevelFilter, OutlineFilter sandwich, (disabled) DropShadowFilter documented: what it does today and how much it contributes (or doesn't) to the boundary contrast.
+- **AC-4: One primary recommendation with justification.** The recommendation references specific matrix cells as evidence. 1–2 alternatives briefly documented with the tradeoffs named.
+- **AC-5: Follow-up story brief.** Concrete scope (title, files, ~5 ACs, constraints) that BA can turn into the next-story prompt with minimal rewriting.
+- **AC-6: No production code committed.** `git diff src/` returns empty at the end of the session.
+
+## Test fixtures (spike)
+
+Create 3–4 synthetic high-contrast test images in `/qa-scratch/` — pre-normalized PNGs sized 1024×1024 (so they drop straight into the existing ingest pipeline):
+
+- `qa-scratch/spike-47a-pure-white.png` — solid `#ffffff`
+- `qa-scratch/spike-47a-pure-black.png` — solid `#000000`
+- `qa-scratch/spike-47a-mid-gray.png` — solid `#808080`
+- `qa-scratch/spike-47a-split-wb.png` — half-white half-black (50/50 split) so a single loaded puzzle has both failure cases simultaneously
+
+These make the worst-case boundary visible at a glance. User loads each through the 48 picker panel's "Upload your own…" affordance (or drag-drop) and verifies the audit's findings match what they see.
+
+Nominate any of these for promotion if the follow-up regression story would want them around. Likely yes — the `split-wb` image is a great long-term fixture for any contrast-related work.
 
 ## Out of scope
 
-- Metadata file (`docs/curated.json` or similar) — Story 49
-- Landing screen / first-load fork — Story 52
-- Settings panel — Story 70
-- Dynamic image sources (MET API) — Stories 65–67
-- Story 47a (piece visibility on board) — still a candidate
-- Story 47c (palette tuning + swap UI) — still a candidate
-- Story 46f (label clipping Approach B) — still a candidate
-- Image attribution / credits text — Story 49
-- A "scroll through all 10" panel layout if the set stays under ~10; a grid that fits in-panel is sufficient
+- Story 47c palette tuning / swap UI (still candidate)
+- Story 46f label clipping (still candidate)
+- Story 49 metadata shape
+- Any change to rendering pipeline, filters, board color, or piece geometry
+- Any implementation of the recommended fix — that's the follow-up story
 
 ## Known next
 
-After 48: the remaining 47-series candidates (47a piece visibility, 47c palette), and Story 49 (metadata file). The roadmap has no committed order beyond "47a is probably the most pressing UX fix" — re-queue at BA-session time once 48 ships.
+After this spike: Story 47a (implementation) follows, scoped from the spike's recommendation. Then the remaining 47-series candidates (47c palette) and 46f label clipping per BA judgement.

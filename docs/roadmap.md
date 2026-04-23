@@ -41,8 +41,11 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47a (candidate) — Piece visibility on board**
-White / near-white pieces blend into the off-white board — real UX bug with arbitrary images. Options: darker board tint, piece edge stroke, subtle placed-piece shadow, or accessibility-preference-aware board color. User-surfaced after 47 shipped with real-world images.
+**Story 47a-spike — Piece contrast audit and accessibility recommendation** *(in progress — see `docs/next-story.md`)*
+User reports white pieces invisible on board, black pieces invisible on bench. Scope expanded: any piece color vs any background across board / bench / presets / HC mode. Spike delivers a WCAG contrast matrix, audit of existing treatments (Bevel, HC sandwich, disabled shadows), and a recommendation + follow-up story brief. No production code this session.
+
+**Story 47a (pending) — Piece visibility fix**
+Implementation of the spike's recommendation. Scope will be written from the spike's follow-up brief.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
