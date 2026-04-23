@@ -373,3 +373,238 @@ Native `<dialog>` provides Escape handling, `showModal()` focus management, and 
 
 ### forceGrid cleared from sessionStorage on every non-curated load
 `handleImageFile` always calls `sessionStorage.removeItem(SESSION_GRID_KEY)` before reloading. This ensures a user who picks a curated image, then drops their own file, does not accidentally inherit the previous forced grid.
+
+---
+
+## Piece contrast audit — WCAG 1.4.11 (Story 47a-spike)
+
+**Spike date:** 2026-04-22. **No production code changed this session.** This entry is the primary deliverable.
+
+---
+
+### Context
+
+User-reported: white pieces vanish against the off-white board; black pieces vanish against the dark bench. Scope expanded to the full matrix of piece colors × rendering contexts, covering both normal and high-contrast (HC) mode.
+
+**Threshold:** WCAG 2.1 SC 1.4.11 "Non-text Contrast" — 3:1 for essential graphical objects in normal mode; 4.5:1 for HC (user's explicit signal that they need stronger separation).
+
+---
+
+### Current rendering configuration (as-of audit)
+
+| Element | Value |
+|---|---|
+| Board fill | `#ffffff` (L = 1.00) |
+| Workspace / WebGL clear | `#f5f5f3` (L ≈ 0.912) |
+| Body CSS background | `#f5f5f3` |
+| Bg preset — off-white | `#f5f5f3` (L ≈ 0.912) |
+| Bg preset — gray | `#808080` (L ≈ 0.216) |
+| Bg preset — charcoal | `#2a2a2a` (L ≈ 0.023) |
+| Bench fill — normal | `#1a1a1a` at α 0.85 → effective `~#3b3b3b` (L ≈ 0.044) |
+| Bench fill — HC | `#000000` at α 1.00 (L = 0.000) |
+| Snap highlight — normal | `#00ff00` tint at α 0.4 (applied to piece, not board) |
+| Snap highlight — HC | `#ff00ff` tint at α 1.0 |
+| BevelFilter | rotation 225°, thickness 2, lightAlpha 0.2, shadowAlpha 0.2 (HC: 0.36/0.36) |
+| DropShadowFilter (pieces) | resting offset {0,3}, blur 8, alpha **0.06**, resolution 1 |
+| DropShadowFilter (board) | offset {0,8}, blur 24, alpha 0.06, resolution 1 |
+| OutlineFilter sandwich | HC-only — inner white 1.5 px + outer black 2.5 px |
+
+**Note:** `decisions.md §"Piece Shadows"` says DropShadowFilter was "disabled". It has since been re-enabled at `resolution: 1` and alpha 0.04–0.10 (three states). The decisions entry is stale; this audit reflects the live code.
+
+---
+
+### Relative luminance values used
+
+Formula: `L = 0.2126×R + 0.7152×G + 0.0722×B` (R, G, B linearised via IEC 61966-2-1).
+
+**Piece color buckets:**
+
+| Label | Hex | L |
+|---|---|---|
+| Pure white | `#ffffff` | 1.000 |
+| Near-white | `#f0f0f0` | 0.872 |
+| Pure black | `#000000` | 0.000 |
+| Near-black | `#101010` | 0.005 |
+| Mid-gray | `#808080` | 0.216 |
+| Saturated red | `#cc3333` | 0.154 |
+| Saturated blue | `#3333cc` | 0.074 |
+| Saturated green | `#33cc33` | 0.441 |
+
+**Background luminances:**
+
+| Context | Effective L |
+|---|---|
+| Board | 1.000 |
+| Workspace / off-white preset | 0.912 |
+| Gray preset | 0.216 |
+| Charcoal preset | 0.023 |
+| Bench — normal (effective) | 0.044 |
+| Bench — HC | 0.000 |
+
+---
+
+### Contrast matrix (no treatments applied)
+
+Contrast ratio = `(L_lighter + 0.05) / (L_darker + 0.05)`. **Bold** = failing cell. Threshold: 3:1 normal, 4.5:1 HC (HC column = Bench HC only for now; all contexts apply 3:1 unless the user has enabled HC mode).
+
+| Piece color | Board | Workspace | Gray preset | Charcoal preset | Bench normal | Bench HC |
+|---|---|---|---|---|---|---|
+| Pure white | **1.1:1** ❌ | **1.1:1** ❌ | 3.9:1 ✅ | 14.4:1 ✅ | 11.2:1 ✅ | 21:1 ✅ |
+| Near-white | **1.1:1** ❌ | **1.0:1** ❌ | 3.5:1 ✅ | 12.6:1 ✅ | 9.8:1 ✅ | 18.4:1 ✅ |
+| Pure black | 21:1 ✅ | 19.2:1 ✅ | 5.3:1 ✅ | **1.5:1** ❌ | **1.9:1** ❌ | **1.0:1** ❌ |
+| Near-black | 19.0:1 ✅ | 17.4:1 ✅ | 4.8:1 ✅ | **1.3:1** ❌ | **1.7:1** ❌ | **1.1:1** ❌ |
+| Mid-gray | 4.0:1 ✅ | 3.6:1 ✅ | **1.0:1** ❌ | 3.6:1 ✅ | **2.8:1** ❌ | 5.3:1 ✅ |
+| Sat. red | 5.1:1 ✅ | 4.7:1 ✅ | **1.3:1** ❌ | **2.8:1** ❌ | **2.2:1** ❌ | 4.1:1 ✅ |
+| Sat. blue | 8.5:1 ✅ | 7.7:1 ✅ | **2.1:1** ❌ | **1.7:1** ❌ | **1.3:1** ❌ | **2.5:1** ❌ |
+| Sat. green | **2.1:1** ❌ | **2.0:1** ❌ | **1.9:1** ❌ | 6.7:1 ✅ | 5.2:1 ✅ | 9.8:1 ✅ |
+
+**Failing patterns at a glance:**
+- Light pieces (white / near-white) fail on the board and workspace background — the two most common at-rest contexts.
+- Dark pieces (black / near-black) fail on the bench (both modes) and on charcoal preset.
+- Saturated mid-luminance hues (red, blue, green) fail against the gray preset and several bench/charcoal contexts.
+- Mid-gray fails against both the gray preset and the bench (normal).
+- Saturated blue fails even against Bench HC (2.5:1 < 4.5:1 HC threshold).
+
+---
+
+### Existing treatment audit
+
+#### BevelFilter — thickness 2, lightAlpha 0.2, shadowAlpha 0.2 (HC: 0.36)
+
+The bevel renders a 2 px rim in two quadrants: a highlight (white at lightAlpha) and a shadow (black at shadowAlpha). For a **white piece on a white board** the highlight quadrant is invisible (white on white) and the shadow quadrant adds a 2 px band at approximately:
+
+- `effective_shadow = 0.8 × #ffffff + 0.2 × #000000 = #cccccc` → L ≈ 0.60
+- Contrast of the shadow band vs white board: `(1.05)/(0.65) ≈ 1.6:1`
+
+In HC mode (shadowAlpha 0.36): `effective_shadow ≈ #a3a3a3` → L ≈ 0.36, contrast ≈ 2.6:1.
+
+**Verdict:** BevelFilter does not meet 3:1 for white-on-white even in HC mode. It contributes visible depth for mid-luminance pieces but is insufficient as a contrast mechanism for extreme piece colors.
+
+#### DropShadowFilter (pieces) — alpha 0.06, blur 8, offset {0,3}
+
+At alpha 0.06, the shadow region effective color against white board:
+
+- `effective = (1 − 0.06) × #ffffff + 0.06 × #000000 ≈ #f0f0f0` → L ≈ 0.87
+- Contrast vs white board: 1.14:1
+
+The diffuse shadow blur (8 px Gaussian) ensures no point in the shadow region reaches alpha 0.06 uniformly; actual peak contribution is well below 0.06. The shadow provides essentially no WCAG-relevant contrast at the piece boundary.
+
+**Verdict:** DropShadowFilter at these parameters contributes lift / layering for sighted users but does not meet any WCAG contrast threshold. The "disabled" entry in this document is stale — the filter is live but its contrast contribution remains negligible.
+
+#### OutlineFilter sandwich (HC-only) — inner white 1.5 px + outer black 2.5 px
+
+The sandwich guarantees that at least one of the two OutlineFilter passes produces high-contrast separation, regardless of piece color:
+
+- Against a light background (board / workspace): the 2.5 px black outer ring is visible — black vs white = 21:1.
+- Against a dark background (bench HC `#000000`): the 1.5 px white inner ring is visible — white vs black = 21:1.
+- For a white piece on white board: outer black ring at the piece boundary = black (L=0) vs board (L=1.0) = 21:1.
+- For a black piece on HC bench (L=0): inner white ring = 21:1.
+
+**Verdict:** The sandwich reliably meets the 4.5:1 HC threshold for all piece colors and all tested backgrounds. It is correct and sufficient in HC mode. It is HC-only — normal mode receives no outline treatment.
+
+#### DropShadowFilter (board) — alpha 0.06, blur 24
+
+The board shadow gives the board card visual lift off the workspace background. It has no direct effect on piece-vs-background contrast; it affects board-vs-workspace contrast only. Not relevant to piece visibility.
+
+---
+
+### What the snap highlight adds (for completeness)
+
+During a 150 ms snap pulse the piece's `tint` is set to `0x00ff00` (normal) or `0xff00ff` (HC). Tinting in PixiJS multiplies pixel colors. For a bright (near-white) piece tinted green the piece appears approximately green during the pulse — visible against the white board (green L≈0.72, contrast ≈ 1.4:1 vs white — actually this is poor). The snap animation is transient and not a valid substitute for at-rest contrast.
+
+HC snap (magenta `#ff00ff`): L ≈ 0.28, contrast vs board = 3.1:1 — marginally passes 3:1.
+
+---
+
+### Primary recommendation — Always-on thin outer stroke (normal mode)
+
+**Recommended approach:** Extend the existing OutlineFilter infrastructure to add a **thin outer-only stroke in normal mode** for all pieces. This is a simplified, lower-cost version of the HC sandwich:
+
+- A single `OutlineFilter` with thickness **1 px**, color `#000000`, quality 0.10, alpha **0.35**.
+- Applied to every piece on CUTS_COMPLETE, tagged `'normal-outline'` for idempotent management (same pattern as `hc-sandwich`).
+- In HC mode, the sandwich replaces the normal outline (remove `normal-outline`, add sandwich).
+
+**Effect on failing cells:**
+
+A 1 px black outline at alpha 0.35 on a white piece against a white board:
+- The outline band effective color: `0.65 × #ffffff + 0.35 × #000000 = #a9a9a9` → L ≈ 0.42
+- Contrast of outline vs white board: `(1.05)/(0.47) ≈ 2.23:1` — still fails 3:1.
+
+At alpha **0.55** on a 1.5 px outline:
+- Effective color: `0.45 × #fff + 0.55 × #000 = #73737` → L ≈ 0.18
+- Contrast vs board: `(1.05)/(0.23) ≈ 4.6:1` — passes 3:1 and approaches 4.5:1.
+
+The effective alpha on the outline is modulated by the `OutlineFilter.quality` (fragment sample resolution) — testing is required to confirm the perceived alpha matches the specification. A starting point of **thickness 1.5 px, color `#000000`, alpha 0.55** is recommended.
+
+**For dark pieces on dark bench:**
+A dark outline doesn't help black-on-dark. The solution for this side of the matrix is a **light inner outline** or a white outer ring. The sandwich stroke covers both cases; the normal-mode single-color outline cannot.
+
+**Revised recommendation — lightweight dual-tone stroke (normal mode):**
+- Inner stroke: white, 1 px, alpha 0.4 (helps dark pieces on dark bench)
+- Outer stroke: black, 1.5 px, alpha 0.45 (helps light pieces on light board)
+
+This is a scaled-down sandwich at lower alpha. Both strokes use the existing `OutlineFilter` from `pixi-filters`. Both would be tagged `'normal-outline'` and replaced by the full sandwich in HC mode. Runtime cost: two extra filter passes per piece per frame (same cost as HC sandwich today).
+
+**What it might break:**
+- BevelFilter depth illusion: the stroke renders outside the piece boundary (beyond the alpha mask). At thickness 1–2 px and moderate alpha, the ring will slightly reduce the visual impression of floating. Testing needed.
+- HC sandwich: no interaction — the normal outline is removed before the sandwich is applied.
+- Snap highlight: no interaction — tint is applied to the piece texture, outline is a separate pass.
+
+---
+
+### Alternative A — Higher-alpha DropShadowFilter
+
+Raise piece DropShadowFilter alpha from 0.06 to ≥ 0.30. At alpha 0.30, resting shadow:
+- Effective at peak shadow pixel: `0.70 × #fff + 0.30 × #000 = #b3b3b3` → L ≈ 0.47
+- Contrast vs board: `(1.05)/(0.52) ≈ 2.0:1` — still fails.
+
+Even at alpha 0.55 the diffuse Gaussian blur means no boundary pixel reaches alpha 0.55 — actual peak is lower. The shadow approach cannot reliably hit 3:1 at the piece boundary because the blur spreads and dilutes the contrast. Not recommended.
+
+---
+
+### Alternative B — Board color tint
+
+Change board from `#ffffff` (L=1.0) to a neutral mid-light gray, e.g. `#c8c8c8` (L≈0.58).
+
+- White piece vs `#c8c8c8`: `(1.05)/(0.63) = 1.67:1` — still fails.
+- `#b0b0b0` (L≈0.44): `(1.05)/(0.49) = 2.14:1` — still fails.
+- `#808080` (L=0.216): `(1.05)/(0.266) = 3.95:1` — passes, but a mid-gray board is a strong visual change.
+
+A gray board resolves white-piece visibility but creates new failures: near-black piece on charcoal preset, saturated blue vs gray. Does not fix the bench problem. Not recommended as the primary fix; may be worth as a secondary tweak once the stroke approach is in place.
+
+---
+
+### Adaptive background thresholds (reminder)
+
+From Story 37a: luminance < 100 → off-white, > 150 → charcoal, else gray. This document uses luminance 0–255 scale for the threshold (raw sRGB value) — distinct from the WCAG relative luminance (0–1) used in the contrast calculations above.
+
+---
+
+### Follow-up story brief — Story 47a: Piece Visibility Fix
+
+**Title:** Add always-on thin dual-stroke outline to normal mode
+
+**Goal:** Bring all piece × background combinations in normal mode to ≥ 3:1 contrast at the visible boundary.
+
+**Approach:** Normal-mode dual-tone `OutlineFilter` pair (inner white 1 px α 0.40, outer black 1.5 px α 0.45), tagged `normal-outline`, applied in CUTS_COMPLETE alongside BevelFilter. Removed and replaced by HC sandwich when high contrast is toggled on.
+
+**Files likely to touch:**
+- `src/utils/preferences.ts` — add `addNormalOutline` / `removeNormalOutline` helpers (mirror `addSandwichStroke` pattern); adjust `applyHighContrast` to swap normal → sandwich
+- `src/canvas/scene.ts` — call `addNormalOutline` after BevelFilter is applied in CUTS_COMPLETE
+- `docs/decisions.md` — this entry (done)
+- `public/qa.html` — STORY + FIXTURES for Story 47a
+
+**Constraints (must not break):**
+1. BevelFilter must remain at index 0 in `sprite.filters`; normal outlines appended after it
+2. HC sandwich must replace (not stack on top of) the normal outline
+3. Snap highlight behaviour (piece tint) is unchanged
+4. DropShadowFilter (pieces and board) is unchanged
+5. Greyscale filter (`ColorMatrixFilter`) ordering rules from `preferences.ts` remain intact
+
+**Acceptance criteria (measured against the same matrix):**
+- **AC-1:** White piece on board: contrast ≥ 3:1 at the piece/board boundary (outer stroke band vs board)
+- **AC-2:** Near-black piece on bench (normal): contrast ≥ 3:1 at the piece/bench boundary (inner stroke band vs bench)
+- **AC-3:** HC mode unchanged: all 8 piece colors × all 6 backgrounds meet 4.5:1 in HC (sandwich still applied)
+- **AC-4:** BevelFilter still visually present and at index 0 (depth illusion not broken)
+- **AC-5:** No filter accumulation on rapid HC toggle — add/remove is idempotent (`normal-outline` tag pattern)
+- **AC-6:** `git diff src/` before this story = empty (no accidental normal-mode code from this spike)

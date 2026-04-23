@@ -19,6 +19,38 @@ Files changed:
 
 -->
 
+## Story 47a-spike: Piece contrast audit + WCAG recommendation
+
+**Shipped:** 2026-04-22
+
+Spike — no production code changed. Deliverable is a documented audit in `docs/decisions.md` plus four synthetic PNG test images in `qa-scratch/`.
+
+**Audit findings:**
+- White / near-white pieces on the board (`#ffffff`) and workspace (`#f5f5f3`) produce 1.0–1.1:1 contrast — complete invisibility. The board background is white and the off-white workspace is nearly identical. Both fail WCAG 1.4.11 (threshold: 3:1).
+- Black / near-black pieces on the bench (normal effective `~#3b3b3b`, HC `#000000`) produce 1.0–1.9:1 contrast — the bench swallows them. Charcoal preset (2a2a2a) also fails for dark pieces.
+- Saturated green (#33cc33, L≈0.44) fails on the board and workspace despite being visually "bright" — its luminance is too close to white for WCAG compliance.
+- Saturated blue (#3333cc, L≈0.07) fails on gray preset, charcoal preset, both bench modes — including bench HC (2.5:1 < 4.5:1 threshold).
+- Mid-gray (#808080) fails on the gray preset (1:1 — identical color) and just barely on normal bench (2.8:1).
+
+**Existing treatment audit:**
+- BevelFilter (thickness 2, alpha 0.2): provides at most 1.6:1 contrast at the shadow rim of a white piece on a white board (2.6:1 in HC at alpha 0.36). Does not meet 3:1 at any severity.
+- DropShadowFilter (alpha 0.06): decisions.md "Piece Shadows" entry is stale — DropShadowFilter is live and active in the current code (re-enabled with resolution:1, alpha 0.04–0.10 three states). At alpha 0.06 the shadow region effective contrast vs white board is ~1.1:1. Negligible.
+- OutlineFilter sandwich (HC-only, inner white 1.5 px + outer black 2.5 px): reliably achieves 21:1 at the visible boundary for all piece/background combinations. Correct and sufficient in HC mode. Not applied in normal mode.
+
+**Recommendation:** Always-on lightweight dual-tone stroke in normal mode — inner white 1 px α 0.40 + outer black 1.5 px α 0.45 — tagged `normal-outline`, replaced by the full HC sandwich when high contrast is toggled on. Alternatives documented: (A) higher-alpha DropShadow (cannot reliably reach 3:1 due to blur dilution), (B) board color tint (solves board but not bench, visually disruptive). See decisions.md for full matrix and story brief.
+
+Files changed:
+- `docs/decisions.md` — contrast audit matrix, treatment audit, recommendation, follow-up story brief (Story 47a)
+- `public/qa.html` — STORY and FIXTURES updated to Story 47a-spike ACs (6 criteria)
+- `qa-scratch/spike-47a-pure-white.png` — synthetic test: solid #ffffff 1024×1024
+- `qa-scratch/spike-47a-pure-black.png` — synthetic test: solid #000000 1024×1024
+- `qa-scratch/spike-47a-mid-gray.png` — synthetic test: solid #808080 1024×1024
+- `qa-scratch/spike-47a-split-wb.png` — synthetic test: left-half white / right-half black 1024×1024
+
+Nominated for fixture promotion: `spike-47a-split-wb.png` — exercises both white-on-board and black-on-bench failure cases simultaneously; strong candidate for any future contrast regression work.
+
+---
+
 ## Story 48: Curated image set + dev regression fixture
 
 **Shipped:** 2026-04-21

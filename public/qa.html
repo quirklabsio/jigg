@@ -299,81 +299,74 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '48',
-      title: 'Curated image set + dev regression fixture',
+      number: '47a-spike',
+      title: 'Piece contrast audit + WCAG recommendation',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Panel opens from the existing button. Click "Choose Image". A small panel appears near the button showing 7 thumbnails and an "Upload your own…" affordance. No duplicate or secondary button was added.',
+          text: 'Context × piece-color matrix in decisions.md. A table covering every context (board, workspace, each bg preset, bench normal, bench HC) × every piece-color bucket (pure white, near-white, pure black, near-black, mid-gray, sat. red, blue, green). Each cell has a measured contrast ratio.',
         },
         {
           id: 'AC-2',
-          text: 'Curated selection loads. Click any curated thumbnail. The page reloads and the puzzle rebuilds around that image. Behavior matches drag-and-drop for the same image.',
+          text: 'Every failing cell flagged. Cells below 3:1 normal / 4.5:1 HC are explicitly called out with ❌ symbols. No hand-waving.',
         },
         {
           id: 'AC-3',
-          text: 'Regression fixture produces exactly 9 pieces. Click the "Regression test (3×3)" entry. Bench shows exactly 9 pieces in a 3×3 grid. Filter strip shows Corners (4), Edges (4), Interior (1).',
+          text: 'Existing treatments audited. BevelFilter, OutlineFilter sandwich, DropShadowFilter (now live — not disabled) each have a documented section: what they contribute and measured maximum contrast at the piece boundary.',
         },
         {
           id: 'AC-4',
-          text: 'Regression script is executable. Follow docs/regression-script.md end-to-end on the regression image. Every step is clear; full script finishes in under ~3 minutes; all steps pass.',
+          text: 'One primary recommendation with justification. The recommendation references specific matrix cells as evidence. 1–2 alternatives briefly documented with tradeoffs named.',
         },
         {
           id: 'AC-5',
-          text: 'Upload fallback unchanged. Click "Upload your own…" inside the panel. Native file picker opens. Selecting an image loads it — identical to Story 47\'s flow.',
+          text: 'Follow-up story brief present. Concrete scope (title, files, ~5 ACs, constraints) that BA can turn into the next-story prompt with minimal rewriting.',
         },
         {
           id: 'AC-6',
-          text: 'Drag-and-drop unchanged. Drop an image onto the canvas (panel closed). Loads normally.',
-        },
-        {
-          id: 'AC-7',
-          text: 'Keyboard access. Tab reaches the button. Enter/Space opens the panel. Focus moves into the panel. Arrow keys navigate thumbnails; Enter activates a selection. Escape closes the panel and returns focus to the button.',
-        },
-        {
-          id: 'AC-8',
-          text: 'Panel closes on outside click. With panel open, click anywhere outside the panel. Panel closes.',
-        },
-        {
-          id: 'AC-9',
-          text: 'Screen reader announces. Panel announces as a dialog with its aria-label "Choose an image". Each thumbnail announces its image label.',
-        },
-        {
-          id: 'AC-10',
-          text: 'No regression in Story 40–47 behaviors. Tray open/close, bench filters, keyboard nav within bench/table, snap, rotation, completion detection all unchanged.',
+          text: 'No production code committed. Load the spike test images (pure white, pure black, split W/B) via the picker and visually confirm the audit findings match what you see. Then verify: git diff src/ returns empty.',
         },
       ],
     };
 
     const FIXTURES = [
       {
-        src: '/curated/color-blocks-3x3.png',
-        name: 'color-blocks-3x3.png',
-        dims: '300 × 300',
-        acs: ['AC-3', 'AC-4'],
-        expect: 'Exactly 9 pieces (3×3 forced). 4 corners, 4 edges, 1 interior. Each piece is a solid distinct color.',
+        src: '/qa-scratch/spike-47a-pure-white.png',
+        name: 'spike-47a-pure-white.png',
+        dims: '1024 × 1024',
+        acs: ['AC-1', 'AC-6'],
+        expect: 'Solid white puzzle. Pieces should be nearly invisible against the white board — confirms white-on-white failure. Bench shows white pieces: should be well-visible (dark bench). Load with Upload your own… in the picker.',
         recommended: true,
+      },
+      {
+        src: '/qa-scratch/spike-47a-pure-black.png',
+        name: 'spike-47a-pure-black.png',
+        dims: '1024 × 1024',
+        acs: ['AC-1', 'AC-6'],
+        expect: 'Solid black puzzle. Pieces should be visible on the white board but nearly invisible on the bench — confirms black-on-bench failure. Load with Upload your own… in the picker.',
+        recommended: true,
+      },
+      {
+        src: '/qa-scratch/spike-47a-split-wb.png',
+        name: 'spike-47a-split-wb.png',
+        dims: '1024 × 1024',
+        acs: ['AC-1', 'AC-6'],
+        expect: 'Left half white, right half black. Single puzzle exercises both failure cases simultaneously. White-side pieces invisible on board; black-side pieces invisible on bench. Strong candidate for promotion as a long-term contrast regression fixture.',
+        recommended: true,
+      },
+      {
+        src: '/qa-scratch/spike-47a-mid-gray.png',
+        name: 'spike-47a-mid-gray.png',
+        dims: '1024 × 1024',
+        acs: ['AC-1'],
+        expect: 'Solid #808080 mid-gray. Pieces should be visible on board and on bench but invisible when the gray background preset (Shift+B) is active — confirms gray-on-gray failure.',
       },
       {
         src: '/test-image.jpg',
         name: 'test-image.jpg',
         dims: '800 × 600',
-        acs: ['AC-5', 'AC-6', 'AC-10'],
-        expect: '130 pieces (13×10). Use for upload fallback and regression ACs.',
-      },
-      {
-        src: '/curated/earthrise.jpg',
-        name: 'earthrise.jpg',
-        dims: '1280 × 1280',
-        acs: ['AC-1', 'AC-2'],
-        expect: 'Square, cool tones, photographic. Loads as curated pick.',
-      },
-      {
-        src: '/curated/great-wave.jpg',
-        name: 'great-wave.jpg',
-        dims: '1280 × 860',
-        acs: ['AC-1', 'AC-2'],
-        expect: 'Landscape, graphic, cool. Loads as curated pick.',
+        acs: ['AC-6'],
+        expect: '130 pieces (13×10). Sanity check — normal photographic image. No new failures expected.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────
