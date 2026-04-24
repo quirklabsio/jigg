@@ -59,6 +59,48 @@ Files changed:
 
 ---
 
+## Story 47d: Board as stage — visual hierarchy
+
+**Shipped:** 2026-04-24
+
+Rebuilt `createBoard` in `src/canvas/board.ts` as a deterministic 8-layer painter's-algorithm Graphics stack — no filters anywhere, all depth from pixel offsets and layer interference.
+
+**Mesa concept:** board = flat top face (surface) sitting on visible walls (edge layer offset right+down). The shadow system grounds the mesa to the table without any blur.
+
+**Final layer order:**
+
+1. **Shadow base** — rect at offset (−1, +2), α 0.12 — uniform grounding anchor
+2. **Shadow bias** — rect at offset (+1, +4), α 0.10 — pushed toward bottom-right
+3. **Contact pin** — rect at offset (0, +3), α 0.18 — tight base strip
+4. **Edge (mesa walls)** — rect at `(left + 5, top + 7)`, darkened fill color — the physical walls
+5. **Surface** — board fill rect at `(left, top)`
+6. **Center glow** — canvas `Sprite` with a radial gradient (white α 0.018 center → transparent at edges) — gives the board "body" vs. flat fill
+7. **Noise grain** — `TilingSprite`, 128×128 grayscale noise, α 0.06 — material feel
+8. **Highlight** — `1 / DPR` px white lines on top + left edges, α 0.12 — light catch
+
+**Shadow interference trick:** layers 1–3 use slightly different offsets that "disagree." At top-left they separate (lighter); at bottom-right they stack (darker). The eye reads this as a coherent light source (top-left) without any gradient. `S2_OFFSET_Y` and `S2_ALPHA` are the tuning knobs.
+
+**Key lesson:** `DropShadowFilter` blur = "Photoshop effect" regardless of alpha. The correct primitive for physical depth is offset-stacked rects. Tried blur-based approaches repeatedly; all rejected for the same reason.
+
+**Bench glow flash fixed:** `removeBenchGlowFromContainer` now called before reparenting in all three extraction paths in `bench.ts` (spiral-place click, drag extraction, `zoomToPlacePiece`).
+
+**Deviations from prompt:** The story prompt called for a drop shadow + edge stroke approach. The actual implementation went through ~6 iterations before settling on the pure-geometry mesa approach. The center glow and directional bias shadow were added as extensions beyond the original scope.
+
+Files changed:
+- `src/canvas/board.ts` — complete rewrite; `Sprite` and `TilingSprite` imports; all shadow/mesa/grain/glow logic
+- `src/canvas/bench.ts` — glow flash fix (three extraction paths)
+- `docs/decisions.md` — "Board visual hierarchy" section rewritten to match actual approach
+- `public/qa.html` — STORY and FIXTURES updated to Story 47d ACs
+
+Files changed:
+- `src/canvas/board.ts` — complete rewrite: 4-layer mesa stack, noise grain, no filters; `darkenColor`, `hexLuminance`, `noiseTexture` helpers; removed all DropShadowFilter usage
+- `src/canvas/bench.ts` — early glow removal in three extraction paths
+- `docs/gotchas.md` — DropShadowFilter DPR pixelation; filter performance; "offset not blur" principle
+- `docs/decisions.md` — "Board visual hierarchy (Story 47d)" section
+- `public/qa.html` — STORY and FIXTURES updated to Story 47d (12 ACs)
+
+---
+
 ## Story 47a-spike: Piece contrast audit + WCAG recommendation
 
 **Shipped:** 2026-04-22

@@ -1105,6 +1105,9 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   const groupId = `group-${pieceId}`;
 
+  // Strip glow before reparent so it never renders on the canvas even for one frame.
+  removeBenchGlowFromContainer(container);
+
   (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
   _viewport.addChild(container);
   container.x = 0;
@@ -1188,6 +1191,9 @@ function extractToCanvas(
   const sprite    = _spriteMap.get(pieceId);
   const container = _containerMap.get(pieceId);
   if (!sprite || !container) return;
+
+  // Strip glow before reparent so it never renders on the canvas even for one frame.
+  removeBenchGlowFromContainer(container);
 
   // Reparent from grid container into viewport
   (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
@@ -1281,6 +1287,9 @@ function completeZoomAnimation(
     _zoomTickerFn = null;
   }
 
+  // Strip glow before reparent so it never renders on the canvas even for one frame.
+  removeBenchGlowFromContainer(container);
+
   // Reparent from app.stage → viewport (world-space)
   _app.stage.removeChild(container);
   _viewport.addChild(container);
@@ -1331,6 +1340,10 @@ function zoomToPlacePiece(pieceId: string): void {
   const spriteScreen = sprite.getGlobalPosition();
   const startScreenX = spriteScreen.x;
   const startScreenY = spriteScreen.y;
+
+  // Strip glow before the container leaves the tray — the animation flies on
+  // app.stage where the bench glow must not render.
+  removeBenchGlowFromContainer(container);
 
   // Reparent from tray grid → app.stage (screen-space, above viewport)
   _gridContainer.removeChild(container);

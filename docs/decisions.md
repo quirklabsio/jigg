@@ -53,7 +53,39 @@ Thresholds: spread cutoff `0.60`, mean window `0.3–0.7`, binary cutoff `0.5`. 
 
 ### When the board needs to feel more "stage-like"
 
-The right lever is **visual hierarchy** (edge definition, drop shadow, elevation) — not user choice. Reserved for follow-up stories that tune the board's perceptual weight without exposing knobs.
+The right lever is **visual hierarchy** (edge definition, drop shadow, elevation) — not user choice. Implemented in Story 47d.
+
+### Board visual hierarchy (Story 47d)
+
+**Core principle: depth from pixel offsets, not blur.** `DropShadowFilter` blur reads as a graphic design effect ("Photoshop look"). Stacked offset rects read as physical objects instantly. The entire board is built from pure `Graphics` geometry — no filters of any kind.
+
+`createBoard` in `src/canvas/board.ts` builds an 8-layer painter's-algorithm stack:
+
+**Shadow system — three overlapping rects, no gradients:**
+
+The contact shadow uses layer *interference* to fake directional bias. Two rects with slightly different offsets disagree on where the shadow falls:
+
+| Layer | Offset X | Offset Y | Alpha | Purpose |
+|-------|---------|---------|-------|---------|
+| S1 base   | −1 | +2 | 0.12 | Uniform grounding anchor |
+| S2 bias   | +1 | +4 | 0.10 | Pushes weight toward bottom-right |
+| S3 pin    |  0 | +3 | 0.18 | Tight contact strip at board base |
+
+Interference logic: at top-left the layers *separate* (less overlap → lighter); at bottom-right they *stack* (more overlap → darker). The eye reads the difference as a consistent light source (top-left) without any gradient computation. Tuning knobs: `S2_OFFSET_Y` (3–5) and `S2_ALPHA` (0.08–0.12).
+
+**Mesa geometry:**
+- **Edge layer** — same-size rect as the surface, offset `(DEPTH_X=5, DEPTH_Y=7)` px right+down, filled with `darkenColor(fill, 0.45–0.55)`. Surface covers the edge at top-left, leaving 5 px right wall and 7 px bottom wall visible. Zero blur, perfectly crisp.
+- **Surface** — board fill rect at `(left, top)`. Painter's algorithm places it over everything below.
+
+**Surface texture system:**
+- **Center glow** — per-puzzle `Sprite` with a canvas-generated radial gradient: white at α 0.018 at center → transparent at edges (radius 85% of diagonal). Gives the board a slight convex body; looks wrong when absent, invisible when present. Not cached — board dimensions vary per puzzle.
+- **Noise grain** — `TilingSprite` with a 128×128 procedurally generated grayscale noise texture at α 0.06. Cached as `_noiseTexture` singleton across puzzle loads. Breaks dead-flat fill → material feel (felt/slate).
+
+**Highlight** — `1 / devicePixelRatio` px white lines on top and left edges at α 0.12. Dividing by DPR is mandatory — omitting it produces a 2px blurry line on retina.
+
+**`cacheAsTexture`** — the whole container is baked to a GPU texture at load time (`resolution: DPR`). Zero shader cost per frame.
+
+No user knobs, no coupling to table color (asymmetry principle preserved).
 
 ## Stack
 - **PixiJS over Canvas 2D** — performance ceiling with 200 pieces, shadows, and shaders
@@ -108,7 +140,7 @@ The right lever is **visual hierarchy** (edge definition, drop shadow, elevation
 - **Off-white WebGL clear color over Graphics rect**: Previously used a dark charcoal `Graphics` rect with `SimplexNoiseFilter`. Story 18b switched to off-white `#f5f5f3`. A `Graphics` rect produced triangle-seam artifacts on retina displays (see gotchas.md), so the background is now handled entirely by the WebGL clear color (`app.init({ background: '#f5f5f3' })`). Zero geometry, no possible seams. Body CSS background also set to `#f5f5f3` to prevent black gaps at canvas edges.
 
 ## Piece Shadows (DropShadowFilter)
-- **Disabled after experimentation**: Container-wrapped DropShadowFilter was implemented (resting/dragging/placed states) but produced two issues: (1) `resolution: DPR` caused a thin vertical seam on retina displays, (2) at `resolution: 1` the effect was too subtle at low alpha values (0.04–0.10) to justify the rendering overhead and code complexity. Shadows disabled for now. Container wrapper architecture remains in place for future use. If re-enabled, use `resolution: 1` and mutate filter properties in place (never replace the `filters` array).
+- **Re-enabled at `resolution: 1`, low alpha**: Initial experimentation disabled piece shadows because `resolution: DPR` caused a thin vertical seam on retina displays and `resolution: 1` at low alpha (0.04–0.10) was too subtle to justify the overhead. They were later re-enabled at `resolution: 1` and alpha 0.04–0.10 as lift/layering cues for sighted users — not as contrast mechanisms (they don't reach 3:1 WCAG). If you mutate filter state, always mutate properties in place; never replace the `filters` array reference.
 
 ## Rendering / Shaders
 - **lightAngle hardcoded to 45° (top-left)** — no UI for light direction, universal jigsaw convention. `BevelFilter rotation: 225` (= lightAngle + 180 in BevelFilter's convention). Revisit if surface texture story needs it.
