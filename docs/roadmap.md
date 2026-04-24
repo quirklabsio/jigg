@@ -26,6 +26,7 @@
 | Story 47a-spike | Piece contrast audit — WCAG matrix + recommendation (2026-04-22) |
 | Story 47a | Bench piece uplight glow — per-slot chrome, HC-gated off (2026-04-22) |
 | Story 47b | Adaptive board color — three-preset algorithm (light/mid/dark) chosen from image luminance mean + spread at load time; no user override (2026-04-23) |
+| Story 47d | Board as stage — 8-layer painter's-algorithm mesa (offset-stacked rects + noise grain + center glow + edge highlights); no filters, all pure geometry (2026-04-24) |
 
 ---
 
@@ -44,11 +45,8 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47d — Board as stage: visual hierarchy** *(in progress — see `docs/next-story.md`)*
-Follow-up to 47b. The board should read as a distinct, elevated plane against the table — not just a differently-colored rectangle. Three levers: stronger drop shadow (alpha 0.06 → 0.18 starting point), always-on contrast-adaptive edge stroke (1 px, color derived from board fill luminance), and explicit 3×3 verification across all board × table combinations. Still no user-configurable knobs; pure system polish. Asymmetry principle preserved (board color stays independent of table color).
-
-**Story 47e (candidate) — HC bench visibility**
-Surfaced from 47b QA: in HC mode, black pieces on the dark bench produce no visible boundary — sandwich stroke (Story 37d) likely not applied to bench thumbnails, and Story 47a's uplight glow is HC-gated off on the premise that HC sandwich handles bench (clearly wrong at thumbnail scale). Proposed fix: extend sandwich to bench thumbnails AND ungate the uplight glow in HC mode. Accessibility-critical.
+**Story 47e — Extend HC sandwich stroke to bench thumbnails** *(in progress — see `docs/next-story.md`)*
+User confirmed HC bench issue persists after 47a's coexisting-glow revision. Root cause confirmed: `applyHighContrast` (preferences.ts) iterates the scene spriteMap; bench.ts has its own separate spriteMap that never receives the sandwich. Fix: extend sandwich application to bench thumbnails so HC bench gets both the uplight glow (slot-level visibility) and the sandwich stroke (WCAG-strict edge contrast). Additive, not substitutive.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.

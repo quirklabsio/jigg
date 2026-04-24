@@ -1,100 +1,89 @@
-# Story 47d: Board as stage — visual hierarchy
+# Story 47e: Extend HC sandwich stroke to bench thumbnails
 
 ## Context
 
-Story 47b shipped the adaptive board color (3-preset algorithm: light / mid / dark picked from image luminance at load). Board now has the *right* color for visibility, but still reads as "a differently-colored rectangle" rather than a distinct, elevated surface. The table it sits on is also user-configurable via existing presets (Story 37a Shift+B cycle: off-white / gray / charcoal).
+User confirmed the HC bench visibility issue persists after Story 47a's revision (which made the uplight glow unconditional / coexistent with HC). Dark pieces on the HC bench still read as solid black silhouettes — the glow alone can't separate piece-edge from bench-background when the piece content is near-black and the HC bench is pure black (`#000000` α 1.0 per Story 37d).
 
-The problem is most acute in the **3×3 diagonal**: when board fill matches the currently-selected table preset (e.g. light board on off-white table, dark board on charcoal table), the only visual separation between play surface and staging surface is the board's current drop shadow at `alpha: 0.06` — which barely renders. In those cases the board dissolves into the table.
+Root cause confirmed by inspection:
 
-This story makes the board read as a stage. Visual hierarchy only — no user knobs, no preset changes, no algorithm changes. Pure system polish on the board's perceptual weight and boundary.
+- HC sandwich stroke is applied in `applyHighContrast` at [src/utils/preferences.ts:152](src/utils/preferences.ts#L152), which iterates a `spriteMap: Map<string, Sprite>` passed in by caller.
+- The caller (scene.ts) passes its **canvas piece sprite map**. Bench thumbnails live in their own separate map at [src/canvas/bench.ts:105](src/canvas/bench.ts#L105) — `let _spriteMap: Map<string, Sprite> | null = null`.
+- The two maps are completely disconnected. `applyHighContrast` has never touched bench thumbnails.
 
-Per `decisions.md` §"Board/Table asymmetry": board is system-controlled, table is user-controlled. This story does NOT touch board color derivation (Story 47b) or table presets (Story 37a). It operates on the board's rendering only.
+Fix: make the HC sandwich cover bench sprites too. In HC mode, bench pieces get **both** the uplight glow (Story 47a) and the sandwich stroke — glow gives slot-level visibility, sandwich gives WCAG-strict edge contrast. Neither is sufficient alone; together they solve the problem.
 
 ## Requirements
 
-Three changes to `createBoard` in `src/canvas/board.ts`, tuned together in the QA loop:
+### Extend sandwich application to bench
 
-### 1. Stronger drop shadow (elevation)
+Implementation approach is dev's choice — the option space:
 
-Current shadow: `offset: {x:0, y:8}, blur: 24, alpha: 0.06`. This is too subtle to read as elevation against any table preset except the lightest one.
+- **A. Secondary sprite-map registration in `preferences.ts`.** Add `registerBenchSpriteMap(map: Map<string, Sprite>)` alongside the existing `registerApplyFn`. `applyHighContrast` iterates both the canvas and bench maps, applying the sandwich to any sprite found. Cleanest — preferences.ts stays the single source for filter management.
+- **B. Export the sandwich helpers and have `bench.ts` wire its own HC subscription.** Export `addSandwichStroke` / `removeSandwichStroke` from preferences.ts; `bench.ts` subscribes to HC changes (mirroring its existing pattern for labels or glow) and applies the sandwich to `_spriteMap` entries.
+- **C. Pass the bench sprite map through `applyHighContrast`'s signature.** Add a second optional map parameter; scene.ts passes both. Simpler but spreads the responsibility.
 
-Starting parameters (tunable):
-- `alpha: 0.18` — up from 0.06; the board should visibly cast a soft shadow
-- `offset: {x:0, y:12}` — up from 8; amplifies the "sitting above" cue
-- `blur: 28` — slightly softer falloff to avoid a hard shadow edge
+Bias toward **A** — it keeps filter lifecycle centralized in `preferences.ts` and mirrors how scene.ts's spriteMap is registered today. But the dev decides based on what reads cleanly.
 
-Keep `resolution: 1` (the retina-pixel-seam fix from the existing board shadow), keep `quality: 3`.
+### Cover the lifecycle
 
-### 2. Always-on contrast-adaptive edge stroke (boundary)
+- **Initial CUTS_COMPLETE:** if HC is on at puzzle load, bench thumbnails get the sandwich as soon as they're created.
+- **HC toggle mid-session:** on → add sandwich to every bench thumbnail; off → remove. Uses the existing `_tag: 'hc-sandwich'` idempotency pattern from Story 37d (the `_tag` check already in preferences.ts). No filter accumulation on repeated toggles.
+- **New thumbnails created after puzzle start:** not applicable — bench sprites are created once on CUTS_COMPLETE; none are added later in current code paths. If that ever changes, a future story handles it.
+- **Piece extraction:** when a bench thumbnail is extracted to the canvas (spiralPlace, drag, zoomToPlacePiece — three paths in bench.ts), the bench-specific treatments (glow, sandwich if added here) are removed as part of reparenting — same way 47a removes the glow. The sandwich on the canvas-side is handled by the existing `applyHighContrast` on the scene spriteMap; no duplication.
 
-The board rect gets a 1 px stroke along its perimeter. The stroke color is derived from the **board fill luminance** (not from the table color — the board stays independent per asymmetry principle):
+### Sandwich parameters unchanged
 
-- Board fill luminance < 0.3 → stroke color light (~`#5a5a5a`, ~25% lighter than board dark preset `#2a2a2a`)
-- Board fill luminance > 0.7 → stroke color dark (~`#c0c0c0`, ~25% darker than board light preset `#f5f5f3`)
-- Mid luminance (0.3–0.7) → pick by contrast with fill; default dark stroke (~`#5a5a5a`) for mid (`#808080`) board since it reads slightly better than light against mid.
-
-Starting stroke alpha: `0.45` — visible but not heavy. The stroke's job is to guarantee a perceivable boundary even when `board fill ≈ table fill`; since it contrasts with the board, it will always be visible against the board itself — and in the matching-color diagonal case it also contrasts with the table (same color).
-
-This is analogous to the HC sandwich's logic (guarantee contrast at a boundary regardless of what's on the other side), scaled down to a single always-on stroke tuned for board/table separation.
-
-### 3. Verify distinctness across the 3×3 matrix
-
-All nine combinations of board preset × table preset must read as "clearly two surfaces, one elevated above the other." Dev explicitly checks all 9 during implementation and in the QA handoff. The three diagonal cases (matching colors) are the acceptance critical path.
+Use the exact same `addSandwichStroke` from Story 37d — inner white 1.5 px + outer black 2.5 px. Do not retune for bench thumbnail scale. At THUMBNAIL_SIZE = 128 (Story 46b), 2.5 px outer ring = ~2% of the piece extent, which looks subtle but is enough when combined with the glow slot-lift. If QA reveals the stroke thickness genuinely isn't perceptible on small bench pieces even with the glow, that's a separate follow-up story — do not diverge the parameters from the canvas version in this one.
 
 ## Constraints
 
-- **Do not change `computeBoardColor`** (Story 47b) or the 3-preset algorithm. Board color derivation is orthogonal to this story.
-- **Do not change table presets** (Story 37a). Table cycling via Shift+B stays as-is.
-- **Do not touch piece rendering, filters, geometry, or the bench glow** (Story 47a).
-- **Do not change the corner-alignment / board-sizing work** (Story 46e). Board dimensions stay `cols × pieceW` by `rows × pieceH`.
-- **Do not add rounded corners** to the board rect. A sharp rectangle is part of the current aesthetic and rounding subtly changes the character. If the dev feels strongly that a very small radius (≤ 2 px) helps, it can be proposed in QA — not part of this prompt.
-- **Do not introduce a "mat" / backdrop layer** behind the board. The edge + shadow should suffice; a second rect adds complexity without clear payoff.
-- **Do not make the board visually distinct from the table by coupling the two** (e.g. picking a board color that avoids the current table color). That violates the asymmetry principle in `decisions.md`.
-- **No user configurability.** Not now, not ever (per asymmetry principle). Stroke color / thickness / shadow params are constants in `board.ts`.
-- **Expose the shadow + stroke parameters as top-of-file module constants** — they will be tuned visually in QA. No burying.
+- **Do not touch the uplight glow** (Story 47a). Glow stays unconditional, glow stays at current parameters. This story is additive.
+- **Do not touch canvas HC behavior.** Canvas pieces continue to receive the sandwich exactly as today via scene.ts's spriteMap call.
+- **Do not re-tune the sandwich parameters** for bench scale. Same filter, same sizes.
+- **Preserve the `_tag: 'hc-sandwich'` idempotency.** Rapid HC toggle must not accumulate filters. Same `_tag` read/write pattern as canvas side.
+- **Preserve Story 46b bench clipping fix** — the mask still clips cleanly; adding the sandwich outline must not make pieces bleed past the tray body or cause new clipping regressions.
+- **Preserve the three extraction paths** (spiralPlace click, drag extraction, zoomToPlacePiece). Whichever path removes the glow today must now also remove the sandwich. If using Approach A, the preference system may handle removal automatically; if Approach B, the three paths call an additional remove helper.
+- **No algorithm change, no color change, no new filter primitive.** Reuses existing OutlineFilter sandwich infrastructure.
+- **Do not turn off the glow in HC.** The spike's original assumption that "sandwich alone suffices at canvas scale" did NOT hold at thumbnail scale; the fix is additive, not substitutive.
 
 ## Files likely to touch
 
-- `src/canvas/board.ts` — primary: beef shadow params, add edge stroke, derive stroke color from fill luminance
-- `docs/decisions.md` — record final tuned values and a short note on why these three levers (elevation, boundary, 3×3 verification) were chosen
+- `src/utils/preferences.ts` — primary if Approach A: new `registerBenchSpriteMap`, extend `applyHighContrast` iteration
+- `src/canvas/bench.ts` — call the new registration during `initTray` / CUTS_COMPLETE wiring; possibly add removal in the three extraction paths depending on approach
+- `src/canvas/scene.ts` — minor: if approach needs the bench sprite map passed through from scene context
+- `docs/decisions.md` — short note: why sandwich is now applied to bench, and the "glow + sandwich both required at thumbnail scale" conclusion
+- `docs/gotchas.md` — candidate one-liner: "HC sandwich at thumbnail scale is necessary but not sufficient — combine with slot-level chrome treatment"
 
 ## Acceptance
 
-User tests via the QA page. Write ACs into `public/qa.html` per `/qa` format.
+User tests via QA page. Write ACs into `public/qa.html`.
 
-Test across all **3 board colors × 3 table presets = 9 combinations**. Use Shift+B to cycle the table while loading different images to cycle the board.
-
-- **AC-1: Light board on off-white table (diagonal case 1).** Board is clearly visible as a distinct elevated plane. Shadow + edge stroke make the boundary unambiguous.
-- **AC-2: Mid board on gray table (diagonal case 2).** Same.
-- **AC-3: Dark board on charcoal table (diagonal case 3).** Same.
-- **AC-4: All 6 off-diagonal combinations.** Board reads clearly as elevated against the table — the edge + shadow don't overpower or look cheap.
-- **AC-5: Edge stroke visible on all 3 board colors.** Stroke contrasts with its own board fill; no invisible stroke.
-- **AC-6: Shadow reads as elevation, not as a drawn line.** Soft falloff; no sharp band.
-- **AC-7: No regression in 47b board color algorithm.** Load each spike fixture (pure-white / pure-black / split-wb / mid-gray) — correct board color still chosen.
-- **AC-8: No regression in 47a bench glow.** Bench uplight still present; not affected by board rendering changes.
-- **AC-9: No regression in 46e corner alignment.** Corner pieces still flush to board edges. Edge stroke sits *on* the rect boundary without interfering with piece placement geometry.
-- **AC-10: No regression in HC mode.** HC-specific piece rendering (sandwich stroke) unchanged. Board shadow + edge apply the same way in HC (no separate code path).
-- **AC-11: Visual feel.** Subjective: the user looks at the board and thinks "stage" / "card floating above the table" / "play surface." Not "rectangle I barely see."
+- **AC-1: HC ON, dark piece on HC bench.** Load `qa-scratch/spike-47a-pure-black.png` (or any fixture with very dark pieces — the Story 48 regression fixture on a dark patch works). Enable HC. Bench thumbnails show a visible white outer ring (the sandwich's inner white at 1.5 px) — pieces are now discernible as piece-shaped objects, not black silhouettes.
+- **AC-2: HC ON + glow visible.** Same scenario. The uplight glow from 47a is still visible behind each piece. Both treatments coexist.
+- **AC-3: HC OFF → HC ON → HC OFF.** Rapid toggle. No filter accumulation on bench thumbnails. No visible flicker other than the intended on/off state. Each toggle leaves the pieces in a correct state.
+- **AC-4: Canvas HC unchanged.** Pieces on the canvas/board in HC still have the sandwich as they did before this story. No double-sandwich, no missing sandwich.
+- **AC-5: HC OFF — bench thumbnails have NO sandwich.** Only the uplight glow. Confirms the sandwich is strictly HC-gated.
+- **AC-6: Extraction paths clean.** Extract a bench piece via (a) single click (spiralPlace), (b) drag-and-drop out of bench, (c) keyboard Enter on a focused bench piece (which goes through zoomToPlacePiece or spiralPlace depending on mode). In all three cases, the extracted piece on the canvas receives the normal canvas HC sandwich (if HC is on), and no ghost sandwich is left behind in the bench.
+- **AC-7: Story 47d mesa board unchanged.** No visual regression on board rendering — the board's 8-layer mesa stack is unaffected.
+- **AC-8: Story 46b clipping preserved.** Tabs with downward knobs still visible, focus ring still visible, pieces still clipped to bench body horizontally.
+- **AC-9: Story 47a glow lifecycle preserved.** Glow removal on extraction still happens; no glow ghosts appearing on the canvas.
+- **AC-10: Perf stable at 200-piece grid.** Large-grid image (2048×2048) loads; HC toggle doesn't introduce noticeable lag. Filter cost is "HC sandwich × number of bench thumbnails" — the same per-piece cost as canvas HC today, applied to the same piece count (before extraction), so this is worst-case doubling HC filter cost briefly while bench is full. Measure and note in QA report.
 
 ## Out of scope
 
-- **Story 47e (candidate) — HC bench visibility.** Still queued for after this story. Black pieces on the HC bench being hard to recognize is a separate gap (HC sandwich likely not applied to bench thumbnails; uplight glow currently HC-gated off). Flagged in `/qa` "what's coming up" so user knows it's known.
-- **Story 47c** (palette tuning + swap UI) — still candidate.
-- **Story 46f** (label clipping Approach B) — still candidate.
-- Any user-configurable board chrome (permanent: see `decisions.md` §"Board/Table asymmetry")
-- Rounded corners beyond a possible ≤ 2 px radius discussion in QA
-- A separate "mat" layer behind the board
-- Coupling board color to table color (violates asymmetry)
-- Piece rendering, piece filters, piece geometry
-- Board size / positioning (Story 46e territory)
+- Retuning sandwich thickness for bench scale (deferred — do sandwich at canonical parameters first, retune only if needed)
+- Any new piece-color-adaptive contrast treatment (rejected per the 47a prompt direction — art stays untouched)
+- Non-HC sandwich on bench (the uplight glow is the non-HC treatment; sandwich is HC-only)
+- Changes to Story 47d board rendering, Story 46b bench mask, Story 37d HC preference toggle UI
+- Story 47c (palette tuning) — still candidate
+- Story 46f (label clipping Approach B) — still candidate
+- Story 49 (metadata shape) — epic progression; queued after accessibility gaps close
 
 ## Known next
 
-Queued candidates after 47d ships, in likely order of priority:
+Queued candidates after 47e ships:
+- **Story 47c** — Palette tuning + swap UI (user's punchy-color frustration)
+- **Story 49** — Minimal metadata shape (Controlled Inputs epic progression)
+- **Story 46f** — Label clipping Approach B (architectural debt)
 
-- **Story 47e — HC bench visibility.** Accessibility gap surfaced during 47b testing (screenshot: HC mode, black pieces on dark bench, no visible separation). Proposed fix: extend HC sandwich to bench thumbnails + ungate the 47a uplight glow in HC mode.
-- **Story 47c — Palette tuning + swap UI.** User's earlier observation about punchy-color palette extraction.
-- **Story 46f — Label clipping Approach B.** Deferred architectural debt.
-- **Story 49 — Minimal metadata shape.** Epic progression.
-
-BA-session judgement picks the order once 47d ships.
+BA picks the order at that point.
