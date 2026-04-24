@@ -44,8 +44,11 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47d (candidate) — Board as stage: visual hierarchy**
-Follow-up to 47b. The board should read as a distinct, elevated plane against the table — not just a differently-colored rectangle. Work: strengthen board edge definition, tune drop shadow/elevation, ensure the 3 board color presets stay visually distinct from all table presets. Still no user-configurable knobs; this is pure system polish.
+**Story 47d — Board as stage: visual hierarchy** *(in progress — see `docs/next-story.md`)*
+Follow-up to 47b. The board should read as a distinct, elevated plane against the table — not just a differently-colored rectangle. Three levers: stronger drop shadow (alpha 0.06 → 0.18 starting point), always-on contrast-adaptive edge stroke (1 px, color derived from board fill luminance), and explicit 3×3 verification across all board × table combinations. Still no user-configurable knobs; pure system polish. Asymmetry principle preserved (board color stays independent of table color).
+
+**Story 47e (candidate) — HC bench visibility**
+Surfaced from 47b QA: in HC mode, black pieces on the dark bench produce no visible boundary — sandwich stroke (Story 37d) likely not applied to bench thumbnails, and Story 47a's uplight glow is HC-gated off on the premise that HC sandwich handles bench (clearly wrong at thumbnail scale). Proposed fix: extend sandwich to bench thumbnails AND ungate the uplight glow in HC mode. Accessibility-critical.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
