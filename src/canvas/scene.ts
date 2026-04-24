@@ -3,7 +3,7 @@ import { BevelFilter, DropShadowFilter } from 'pixi-filters';
 import { Viewport } from 'pixi-viewport';
 import type { CutPath, WorkerMessage } from '../puzzle/types';
 import { isInBench, isOnTable } from '../puzzle/types';
-import { createBoard } from './board';
+import { createBoard, computeBoardColor } from './board';
 import { buildPieceMask, gridCut, computeGrid, EDGE_INFLUENCE } from '../puzzle/cutter';
 import {
   createHitLayer,
@@ -924,6 +924,7 @@ export async function loadScene(
   });
 
   // ── Board (visible on empty canvas from load) ──────────────────────────────
+  const boardColor = computeBoardColor(imageData);
   const board = createBoard(
     texture.width,
     texture.height,
@@ -932,6 +933,7 @@ export async function loadScene(
     scale,
     app.screen.width,
     app.screen.height,
+    boardColor,
   );
   viewport.addChild(board);
 

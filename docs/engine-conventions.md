@@ -4,6 +4,8 @@
 
 *Critical rules for piece state management, stage transitions, and cluster handling.*
 
+**Board fill** is computed once at image load from piece-image luminance (`computeBoardColor` in `src/canvas/board.ts`); it does not mutate during a session.
+
 ## Piece Initialization
 
 All pieces start with these invariants:

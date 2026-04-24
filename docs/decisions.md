@@ -33,6 +33,24 @@ Allowing board customization would:
 
 V1 prioritizes **"always readable by default"** over **"user-configurable"** on the board. This is a permanent product principle, not a V1-punt: there is no V2 path that opens the board to user color choice. The table is the customization surface; the board stays clean.
 
+### Board color algorithm (Story 47b)
+
+Three presets chosen deterministically at image-load time:
+
+| Preset | Hex | Rationale |
+|--------|-----|-----------|
+| Light  | `#f5f5f3` | Matches Story 37a off-white workspace preset |
+| Mid    | `#808080` | Neutral midpoint — survives both extremes |
+| Dark   | `#2a2a2a` | Matches Story 37a charcoal workspace preset |
+
+Selection uses WCAG relative luminance (linearised sRGB: `L = 0.2126R + 0.7152G + 0.0722B`) sampled across the full image at stride 8:
+
+1. If `spread > 0.60` **and** `0.3 < mean < 0.7` → **mid** (image has extreme light and dark; binary choice sacrifices half the pieces)
+2. Else if `mean > 0.5` → **dark** (dominant bright image)
+3. Else → **light** (dominant dark image)
+
+Thresholds: spread cutoff `0.60`, mean window `0.3–0.7`, binary cutoff `0.5`. Three branches, no tie-breakers, no k-means, no per-piece analysis. Implemented in `src/canvas/board.ts` as `computeBoardColor(imageData: ImageData): number`.
+
 ### When the board needs to feel more "stage-like"
 
 The right lever is **visual hierarchy** (edge definition, drop shadow, elevation) — not user choice. Reserved for follow-up stories that tune the board's perceptual weight without exposing knobs.

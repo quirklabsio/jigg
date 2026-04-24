@@ -38,6 +38,27 @@ Files changed:
 
 ---
 
+## Story 47b: Adaptive board color
+
+**Shipped:** 2026-04-23
+
+Board fill is now image-aware. `computeBoardColor(imageData: ImageData): number` in `src/canvas/board.ts` samples the full image at stride 8, computes WCAG relative luminance mean and spread, and picks one of three presets:
+
+- **Light** `#f5f5f3` — dominant dark image (mean ≤ 0.5)
+- **Mid** `#808080` — high-spread, mid-mean image (spread > 0.60, 0.3 < mean < 0.7)
+- **Dark** `#2a2a2a` — dominant bright image (mean > 0.5)
+
+`createBoard` signature extended with `fillColor: number`. `loadScene` in `scene.ts` calls `computeBoardColor(imageData)` using the `imageData` already extracted for pixel-data reuse, then passes the result to `createBoard`. Board dimensions, shadow, and zIndex are unchanged. No user override; no animation between colors.
+
+Files changed:
+- `src/canvas/board.ts` — added `computeBoardColor`, updated `createBoard` signature
+- `src/canvas/scene.ts` — compute board color at load, pass to `createBoard`
+- `docs/decisions.md` — algorithm details, thresholds, rationale
+- `docs/engine-conventions.md` — board fill immutability invariant
+- `test/fixtures/images/slice/fixtures.json` — three new board-color fixtures promoted from qa-scratch
+
+---
+
 ## Story 47a-spike: Piece contrast audit + WCAG recommendation
 
 **Shipped:** 2026-04-22

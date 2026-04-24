@@ -31,5 +31,29 @@
       "grid": { "cols": 3, "rows": 3 },
       "pieceCount": 9
     }
+  },
+  {
+    "file": "board-color_pure-white_1024x1024_dark-board.png",
+    "case": "board-color-pure-white",
+    "automated": false,
+    "notes": "Solid white 1024×1024. Mean luminance ≈ 1.0, spread ≈ 0. Algorithm picks dark board (#2a2a2a). Pathological case no user photo reliably produces.",
+    "input": { "dimensions": [1024, 1024] },
+    "expected": { "boardColor": "#2a2a2a", "boardColorBranch": "dark" }
+  },
+  {
+    "file": "board-color_pure-black_1024x1024_light-board.png",
+    "case": "board-color-pure-black",
+    "automated": false,
+    "notes": "Solid black 1024×1024. Mean luminance ≈ 0.0, spread ≈ 0. Algorithm picks light board (#f5f5f3). Pathological case.",
+    "input": { "dimensions": [1024, 1024] },
+    "expected": { "boardColor": "#f5f5f3", "boardColorBranch": "light" }
+  },
+  {
+    "file": "board-color_split-wb_1024x1024_mid-board.png",
+    "case": "board-color-split-wb",
+    "automated": false,
+    "notes": "Left half white, right half black 1024×1024. Mean ≈ 0.5, spread ≈ 1.0. Only image that reliably triggers the mid-board branch (spread > 0.60, 0.3 < mean < 0.7).",
+    "input": { "dimensions": [1024, 1024] },
+    "expected": { "boardColor": "#808080", "boardColorBranch": "mid" }
   }
 ]
