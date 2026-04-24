@@ -401,4 +401,40 @@ const grad = new FillGradient({ type: 'linear', start: { x: 0, y: 0 }, end: { x:
 
 **Alternative:** use `textureSpace: 'global'` (or omit it if the default changes) and provide actual pixel/world coordinates. `'local'` is more convenient when you want the gradient to track the shape's bounds automatically, but requires the normalized convention.
 
+## `DropShadowFilter` with `resolution: 1` looks fine at small blur, jagged at large blur on retina
+
+`resolution: 1` forces the filter to render at 1× pixel density. On a DPR=2 retina display, the shadow texture is upscaled 2× by WebGL, producing visibly blocky/pixelated edges. For small shadows (blur ≤ 10, alpha ≤ 0.10) the low-res artifact is too subtle to notice — which is why `resolution: 1` was applied as a blanket fix for piece shadows (originally targeting a pixel-seam artifact at DPR resolution). For **large, prominent shadows** (blur ≥ 30, alpha ≥ 0.20) the pixelation is immediately obvious and looks like "old PC game graphics."
+
+**Fix for large shadows:** use `resolution: window.devicePixelRatio ?? 1`. Also set `padding = blur + offsetY + margin` to prevent the shadow from being clipped by the filter's default padding budget.
+
+```ts
+const shadow = new DropShadowFilter({ blur: 40, offset: { x: 0, y: 20 }, alpha: 0.42, quality: 4,
+  resolution: window.devicePixelRatio ?? 1,
+});
+shadow.padding = 64; // blur(40) + offsetY(20) + margin(4)
+```
+
+The small-shadow `resolution: 1` pattern in `scene.ts` (`makeShadow`) is intentional and safe for its scale — don't "fix" it.
+
+## PixiJS filter performance: quality, layering, and caching
+
+Three independent mistakes that compound badly:
+
+**1. High `quality` on filters re-runs every frame.** `quality: N` on a `DropShadowFilter` means N blur passes per render. Two filters at `quality: 8` = 16 shader passes drawn every frame the scene ticks. For a board that never moves, this is pure waste. Rule of thumb: `quality: 4` is enough for `blur ≤ 10`; `quality: 5` for `blur ≤ 25`. Going higher has diminishing returns on smoothness and direct FPS cost.
+
+**2. `BlurFilter` is isotropic — it spreads in all 4 directions equally.** Using `BlurFilter` on a solid rect to simulate a drop shadow produces a symmetric halo, not a directional shadow. `DropShadowFilter` is the correct tool for directional shadows; `BlurFilter` is only appropriate when you *want* an even glow (e.g. a neon or highlight effect).
+
+**3. Static objects with filters must be cached.** Any `Container` with `.filters` is re-evaluated by the GPU every frame the renderer ticks, even if nothing changed. For objects that never move or change after creation (board, background panels, static UI), call `container.cacheAsTexture({ resolution: window.devicePixelRatio })` immediately after setup. This bakes the filtered result to a texture once at load time and replaces the live filter with a simple sprite — zero shader cost per frame thereafter.
+
+```ts
+// Full pattern for a static board shadow:
+const umbra = new DropShadowFilter({ blur: 7, quality: 4, resolution: window.devicePixelRatio });
+const penumbra = new DropShadowFilter({ blur: 22, quality: 5, resolution: window.devicePixelRatio });
+container.filters = [umbra, penumbra];
+container.filterArea = new Rectangle(left - pad, top - pad, bw + pad * 2, bh + pad * 2);
+container.cacheAsTexture({ resolution: window.devicePixelRatio }); // <-- critical
+```
+
+**4. Asymmetric shadow clipping.** With `offset.x: 0`, a shadow should be symmetric left-right. If it looks different on one side, PixiJS computed asymmetric filter texture bounds from the container's geometry. Fix: set `container.filterArea` explicitly with generous padding on all sides. This gives PixiJS a fixed region instead of a dynamically-calculated one that can round differently on each edge.
+
 *Report new gotchas to maintain this list.*
