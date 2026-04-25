@@ -4,6 +4,20 @@
 
 *Product, process, and architectural choices made during Jigg development with rationale and context.*
 
+## Accessibility Architecture Audit (Story 47e-spike)
+
+Full audit in `docs/accessibility-architecture.md`. Completed 2026-04-25.
+
+**Recommended invariant:** Changes to one accessibility preference's behavior do not silently affect another preference's behavior.
+
+**Key finding — filter ordering bug (R-1):** Enabling HC when greyscale is already active inserts the sandwich filters AFTER greyscale (`[BevelFilter, ColorMatrixFilter, inner, outer]`), violating the "greyscale last" invariant. Reproducible in production builds; silent (no visual regression, but the ordering guarantee is broken). Fixed in the MVV refactor (Story 47f) by making `addSandwichStroke` insert before any greyscale filter.
+
+**Key finding — bench rendering gap (47e):** The HC sandwich IS applied to bench sprites via the shared `spriteMap`. The gap is a rendering issue at thumbnail scale — `quality: 0.15` and no `padding` on the OutlineFilter instances may produce no visible outline at bench's `thumbScale()` (≈ 0.08–0.15). 47e re-scoped to diagnose and fix render parameters.
+
+**Recommended sequence:** Story 47f (MVV ordering fix) → Story 47e (bench HC on MVV foundation) → Story 47c / 46f (independent).
+
+See `docs/accessibility-architecture.md` for: full behavior inventory, coupling map, risk surface (R-1 through R-5), architecture proposal (MVV + full FilterStack), 47e reassessment, and follow-up story briefs.
+
 ## V1 / V2 Split
 
 V1 is the free tier MVP — strictly frontend, no auth, no backend. Persistence is browser storage (IndexedDB) or portable via `.jigg` export. This makes the app frictionless to start: no account, no signup, works immediately. The architectural constraints below (no accounts, no backend) are deliberate V1 decisions, not omissions.

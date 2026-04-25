@@ -299,56 +299,36 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '47d',
-      title: 'Board as stage — visual hierarchy',
+      number: '47e-spike',
+      title: 'Accessibility architecture audit',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Mesa walls visible. On any fixture, the board has a clearly darker strip on its right and bottom edges — the edge layer offset 5 px right + 7 px down from the surface. This is crisp, not blurry. It reads as physical thickness, not a drawn border.',
+          text: 'Inventory complete. docs/accessibility-architecture.md §1 lists every accessibility behavior with: what / trigger / location / how applied / context covered / known gaps. Review the doc — nothing meaningful is missing.',
         },
         {
           id: 'AC-2',
-          text: 'Shadow bleeds onto all four table sides. Look at the table area above/left/right/below the board. A subtle dark shadow halo is visible around the mesa base — not just bottom-right. Most visible on off-white table.',
+          text: 'Coupling map exists. §2 documents interactions for each behavior: other prefs it depends on or affects; non-accessibility code it touches; shared state; order dependencies. The HC+greyscale filter ordering collision (R-1) is documented.',
         },
         {
           id: 'AC-3',
-          text: 'Surface noise grain visible. The board face has a very fine grain texture (noise at 6% alpha). It reads as a material surface — felt, slate, or MDF — not a dead-flat digital fill. Visible on all 3 board colors.',
+          text: 'Risk surface identified. §3 names at least 3 failure modes (R-1 through R-5) with worked examples. The structural pattern producing them (no enforced ordering, no extraction hook, no animation registry) is stated.',
         },
         {
           id: 'AC-4',
-          text: 'Highlight on top + left edges. Zoom in on the top-left corner of the board. There is a 1 physical-pixel white line on the top edge and left edge only — simulating overhead light catching the rim. Not visible on bottom or right edges.',
+          text: 'Architecture proposal present. §4 contains a concrete MVV (minimum viable refactor) — addSandwichStroke ordering fix + prepareContainerForCanvas — naming the exact files and functions. Also describes the full FilterStack option and cost.',
         },
         {
           id: 'AC-5',
-          text: 'Diagonal case: light board on off-white table. Load spike-47a-pure-black.png → light board (#f5f5f3), set table to Off-white. Board boundary is still clear — the dark edge walls and shadow halo define it even though board ≈ table color.',
+          text: '47e reassessed. §5 explains why the gap is a rendering issue (quality/padding at thumbScale) not an application issue. Gives a clear recommendation: 47e proceeds with narrowed diagnostic scope.',
         },
         {
           id: 'AC-6',
-          text: 'Diagonal case: mid board on gray table. Load spike-47a-split-wb.png → mid board (#808080), set table to Gray. Board is identifiable — edge walls darker than fill, shadow visible.',
+          text: 'Follow-up briefs present. §6 contains concrete next-story scope for Story 47e (re-scoped) and Story 47f (MVV refactor), with files and acceptance criteria. BA can lift directly into a prompt.',
         },
         {
           id: 'AC-7',
-          text: 'Diagonal case: dark board on charcoal table. Load spike-47a-pure-white.png → dark board (#2a2a2a), set table to Charcoal. Edge walls slightly lighter than table; shadow visible on adjacent table areas.',
-        },
-        {
-          id: 'AC-8',
-          text: 'No blur / no Photoshop feel. All depth comes from crisp pixel offsets. Nothing looks soft, hazy, or filtered. The mesa walls have sharp clean edges.',
-        },
-        {
-          id: 'AC-9',
-          text: 'No regression in 47b board color algorithm. Load each spike fixture: pure-white → dark board (#2a2a2a); pure-black → light board (#f5f5f3); split-wb → mid board (#808080). Correct board color still chosen.',
-        },
-        {
-          id: 'AC-10',
-          text: 'No regression in 47a bench glow. Bench uplight glow present behind each piece. No glow flash when clicking a bench piece in Focus Mode.',
-        },
-        {
-          id: 'AC-11',
-          text: 'No regression in corner alignment. Load test-image.jpg. Corner pieces flush to board edges — mesa walls do not push pieces inward or create a gap at the surface edge.',
-        },
-        {
-          id: 'AC-12',
-          text: 'Visual feel (subjective). Board reads as a physical slab — a mesa the pieces sit on top of. The table is the ground. No "Photoshop", no "drawn rectangle", no "dead flat." The grain, walls, and shadow work together.',
+          text: 'No production code committed. git diff src/ returns empty. Only docs/ and public/qa.html changed.',
         },
       ],
     };
@@ -358,42 +338,26 @@
         src: '/qa-scratch/spike-47a-pure-black.png',
         name: 'spike-47a-pure-black.png',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-5', 'AC-8', 'AC-9'],
-        expect: 'Solid black → light board (#f5f5f3). Test diagonal: set table to Off-white. Dark edge walls visible on right/bottom. Shadow halo on table. Grain on surface.',
+        acs: ['AC-1', 'AC-2', 'AC-3'],
+        expect: 'Reference only — use to verify HC sandwich behavior on bench thumbnails while reviewing §1.1 gap description. Load in HC mode, check bench: is outline visible on thumbnails?',
         qaFile: 'qa-scratch/spike-47a-pure-black.png',
-        recommended: false,
-      },
-      {
-        src: '/qa-scratch/spike-47a-split-wb.png',
-        name: 'spike-47a-split-wb.png',
-        dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-6', 'AC-8', 'AC-9'],
-        expect: 'Half white/half black → mid board (#808080). Set table to Gray for diagonal test. Edge walls visibly darker. Grain present.',
-        qaFile: 'qa-scratch/spike-47a-split-wb.png',
         recommended: false,
       },
       {
         src: '/qa-scratch/spike-47a-pure-white.png',
         name: 'spike-47a-pure-white.png',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-7', 'AC-8', 'AC-9'],
-        expect: 'Solid white → dark board (#2a2a2a). Set table to Charcoal. Edge walls and shadow most prominent here. Grain visible on dark surface.',
+        acs: ['AC-1', 'AC-2'],
+        expect: 'Solid white — bench pieces are pure white. Enable HC. Are bench thumbnails visibly outlined? This is the canonical 47e failure case described in §5.',
         qaFile: 'qa-scratch/spike-47a-pure-white.png',
         recommended: false,
-      },
-      {
-        src: '/test-image.jpg',
-        name: 'test-image.jpg',
-        dims: '800 × 600',
-        acs: ['AC-4', 'AC-10', 'AC-11', 'AC-12'],
-        expect: 'Real photo. Check 1px highlight on top+left corner. Corner pieces flush to surface edge. Focus Mode glow regression. Subjective: mesa feel.',
       },
       {
         src: '/curated/great-wave.jpg',
         name: 'great-wave.jpg',
         dims: 'curated',
-        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-8', 'AC-12'],
-        expect: 'High-spread image → mid board (#808080). All mesa layers visible: walls, shadow, grain. No blur anywhere. Reads as physical slab on table.',
+        acs: ['AC-1', 'AC-2', 'AC-3'],
+        expect: 'Real photo, diverse piece colors. Enable HC + greyscale simultaneously. Observe bench and canvas. R-1 coupling risk: greyscale last invariant may be violated. Check browser console for DEV assertions.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────
