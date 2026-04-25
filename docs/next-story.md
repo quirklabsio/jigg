@@ -1,89 +1,135 @@
-# Story 47e: Extend HC sandwich stroke to bench thumbnails
+# Story 47e-spike: Accessibility architecture audit
 
 ## Context
 
-User confirmed the HC bench visibility issue persists after Story 47a's revision (which made the uplight glow unconditional / coexistent with HC). Dark pieces on the HC bench still read as solid black silhouettes — the glow alone can't separate piece-edge from bench-background when the piece content is near-black and the HC bench is pure black (`#000000` α 1.0 per Story 37d).
+Story 47e (extend HC sandwich stroke to bench thumbnails) is failing — the dev is iterating without converging. That, plus the recurring pattern of:
 
-Root cause confirmed by inspection:
+- Story 47a's HC-gate flip (originally gated off, then made unconditional after QA proved it was needed in HC too)
+- The silent gap in the sandwich application (canvas pieces had it; bench pieces never did)
+- The 47e plumbing requiring three different approaches because no clean integration point exists
 
-- HC sandwich stroke is applied in `applyHighContrast` at [src/utils/preferences.ts:152](src/utils/preferences.ts#L152), which iterates a `spriteMap: Map<string, Sprite>` passed in by caller.
-- The caller (scene.ts) passes its **canvas piece sprite map**. Bench thumbnails live in their own separate map at [src/canvas/bench.ts:105](src/canvas/bench.ts#L105) — `let _spriteMap: Map<string, Sprite> | null = null`.
-- The two maps are completely disconnected. `applyHighContrast` has never touched bench thumbnails.
+…all signal the same thing: **the accessibility system isn't architected for safe modification.** Adding HC-only behavior without affecting non-HC, or modifying non-HC without leaking into HC, is currently more nervous-system than we want it to be.
 
-Fix: make the HC sandwich cover bench sprites too. In HC mode, bench pieces get **both** the uplight glow (Story 47a) and the sandwich stroke — glow gives slot-level visibility, sandwich gives WCAG-strict edge contrast. Neither is sufficient alone; together they solve the problem.
+This spike steps back from "fix HC bench" and instead audits the whole accessibility architecture. We need a contract that lets us change one preference's behavior in confidence that another isn't being silently affected.
+
+This replaces the previous Story 47e (HC sandwich fix). Story 47e — if still warranted post-spike — will be re-scoped from this audit's findings.
+
+## Scope: every accessibility preference, not just HC
+
+The audit covers all current accessibility-related behaviors, not just high contrast:
+
+- **High contrast** (Story 37a/c/d) — sandwich stroke, BevelFilter alpha shift, snap-highlight color, solid bench fill, possibly more
+- **Greyscale** (Story 37a) — `ColorMatrixFilter` toggle
+- **Reduced motion** (Story 37c) — `decelerate.friction` adjustment, viewport teleport tweaks, possibly other animation knobs
+- **Piece labels** (Story 37b + follow-up) — Text overlay with rotation sync
+- **Adaptive background presets** (Story 37a, Shift+B) — workspace bg cycle
+- **Always-on accessibility-by-default treatments** (Story 47a–d) — bench uplight glow, adaptive board color, mesa hierarchy
+- Any other preference or auto-applied accessibility behavior the audit surfaces
+
+If a behavior exists for accessibility reasons, it goes in the audit.
 
 ## Requirements
 
-### Extend sandwich application to bench
+This is a spike. **No production code changes.** Deliverables are documents and a follow-up plan.
 
-Implementation approach is dev's choice — the option space:
+### 1. Inventory
 
-- **A. Secondary sprite-map registration in `preferences.ts`.** Add `registerBenchSpriteMap(map: Map<string, Sprite>)` alongside the existing `registerApplyFn`. `applyHighContrast` iterates both the canvas and bench maps, applying the sandwich to any sprite found. Cleanest — preferences.ts stays the single source for filter management.
-- **B. Export the sandwich helpers and have `bench.ts` wire its own HC subscription.** Export `addSandwichStroke` / `removeSandwichStroke` from preferences.ts; `bench.ts` subscribes to HC changes (mirroring its existing pattern for labels or glow) and applies the sandwich to `_spriteMap` entries.
-- **C. Pass the bench sprite map through `applyHighContrast`'s signature.** Add a second optional map parameter; scene.ts passes both. Simpler but spreads the responsibility.
+For each accessibility behavior, document:
+- **What it does** — observable user-facing effect
+- **Trigger** — preference toggle, automatic on image load, hard-coded always-on, etc.
+- **Where it lives** — file(s), function(s), entry points
+- **How it's applied** — filter add/remove? state mutation? render-time conditional? container insertion?
+- **What context it covers** — canvas pieces? bench pieces? board? workspace? all? subset?
+- **What context it does NOT cover** — known or suspected gaps (the bench-sandwich gap is the seed example)
 
-Bias toward **A** — it keeps filter lifecycle centralized in `preferences.ts` and mirrors how scene.ts's spriteMap is registered today. But the dev decides based on what reads cleanly.
+### 2. Coupling map
 
-### Cover the lifecycle
+For each behavior, document its interactions:
+- **Other accessibility prefs it depends on or affects** — e.g., does HC change the snap-highlight color while reduced-motion changes its duration, and do they collide?
+- **Non-accessibility code it touches** — e.g., `applyHighContrast` reaching into the same filter array as BevelFilter and DropShadowFilter; does adding/removing a filter risk reordering or losing others?
+- **Shared state** — module-level variables, `_tag` patterns, sprite/container references. Where is mutation cross-cutting?
+- **Order dependencies** — does the order of filter add/remove matter? Are filter-array indices implicit assumptions?
 
-- **Initial CUTS_COMPLETE:** if HC is on at puzzle load, bench thumbnails get the sandwich as soon as they're created.
-- **HC toggle mid-session:** on → add sandwich to every bench thumbnail; off → remove. Uses the existing `_tag: 'hc-sandwich'` idempotency pattern from Story 37d (the `_tag` check already in preferences.ts). No filter accumulation on repeated toggles.
-- **New thumbnails created after puzzle start:** not applicable — bench sprites are created once on CUTS_COMPLETE; none are added later in current code paths. If that ever changes, a future story handles it.
-- **Piece extraction:** when a bench thumbnail is extracted to the canvas (spiralPlace, drag, zoomToPlacePiece — three paths in bench.ts), the bench-specific treatments (glow, sandwich if added here) are removed as part of reparenting — same way 47a removes the glow. The sandwich on the canvas-side is handled by the existing `applyHighContrast` on the scene spriteMap; no duplication.
+### 3. Risk surface
 
-### Sandwich parameters unchanged
+For each behavior, identify the regression failure modes:
+- "If a future story changes X, what could break?"
+- Specific examples: filter accumulation on toggle, missing remove path, lost ordering, stale state on toggle mid-extraction, etc.
+- Look for patterns where a future change to one preference would silently break another.
 
-Use the exact same `addSandwichStroke` from Story 37d — inner white 1.5 px + outer black 2.5 px. Do not retune for bench thumbnail scale. At THUMBNAIL_SIZE = 128 (Story 46b), 2.5 px outer ring = ~2% of the piece extent, which looks subtle but is enough when combined with the glow slot-lift. If QA reveals the stroke thickness genuinely isn't perceptible on small bench pieces even with the glow, that's a separate follow-up story — do not diverge the parameters from the canvas version in this one.
+### 4. Architecture proposal
+
+Based on findings, propose:
+- **A clean contract** for adding a new accessibility behavior — the dev should be able to specify what it does and which contexts it applies to without needing to understand the whole system. E.g., a registry pattern, or a per-context filter manager, or just better separation of concerns.
+- **What stays as-is** — call out what already works well so the proposal isn't a full rewrite for its own sake.
+- **What changes** — concrete refactoring with files, functions, and signatures.
+- **The invariant we want**: *changes to one accessibility preference's behavior do not silently affect another preference's behavior.* The proposal should make this checkable.
+- **Feasibility/cost**: is this one refactoring story, or several? What's the minimum viable refactor that gives us 80% of the safety, and what's the full version?
+
+### 5. Reassess Story 47e
+
+The original 47e premise was "extend HC sandwich to bench thumbnails." Re-evaluate:
+- Is the sandwich-on-bench actually what HC users need at thumbnail scale, or is the always-on glow already serving them?
+- If still needed, does it look right at 128 px thumbnail size, or should the parameters diverge?
+- Does the new architecture proposal change how 47e is implemented, or even whether it's still necessary?
+
+End with a clear recommendation: **47e proceeds with new scope X / 47e is closed without code / 47e is closed and a different story Y replaces it.**
+
+### 6. Follow-up story brief(s)
+
+Concrete scope for the next story (or stories) the audit recommends. Could be:
+- A refactor story (the architecture proposal applied)
+- A re-scoped 47e
+- Multiple stories sequenced (refactor first, then 47e on the new foundation)
+
+BA reads the brief and writes the formal next-story prompt from it.
 
 ## Constraints
 
-- **Do not touch the uplight glow** (Story 47a). Glow stays unconditional, glow stays at current parameters. This story is additive.
-- **Do not touch canvas HC behavior.** Canvas pieces continue to receive the sandwich exactly as today via scene.ts's spriteMap call.
-- **Do not re-tune the sandwich parameters** for bench scale. Same filter, same sizes.
-- **Preserve the `_tag: 'hc-sandwich'` idempotency.** Rapid HC toggle must not accumulate filters. Same `_tag` read/write pattern as canvas side.
-- **Preserve Story 46b bench clipping fix** — the mask still clips cleanly; adding the sandwich outline must not make pieces bleed past the tray body or cause new clipping regressions.
-- **Preserve the three extraction paths** (spiralPlace click, drag extraction, zoomToPlacePiece). Whichever path removes the glow today must now also remove the sandwich. If using Approach A, the preference system may handle removal automatically; if Approach B, the three paths call an additional remove helper.
-- **No algorithm change, no color change, no new filter primitive.** Reuses existing OutlineFilter sandwich infrastructure.
-- **Do not turn off the glow in HC.** The spike's original assumption that "sandwich alone suffices at canvas scale" did NOT hold at thumbnail scale; the fix is additive, not substitutive.
+- **No production code changes.** A small throwaway helper to inventory filter arrays is fine; don't commit it. `git diff src/` should be empty at session end.
+- **Read-only spike.** Goal is understanding, not modification.
+- **Cover the breadth, not the depth.** Don't go deep on any one preference. The point is to see the whole shape and identify coupling. Detailed implementation lives in the follow-up.
+- **Don't propose a full rewrite for its own sake.** Identify the minimum changes needed for the safety invariant. Big refactors invite bigger bugs.
+- **Don't try to fix anything during the spike** — even something obviously wrong. Note it in the audit and route to a follow-up story.
 
-## Files likely to touch
+## Files likely to touch (read, not write)
 
-- `src/utils/preferences.ts` — primary if Approach A: new `registerBenchSpriteMap`, extend `applyHighContrast` iteration
-- `src/canvas/bench.ts` — call the new registration during `initTray` / CUTS_COMPLETE wiring; possibly add removal in the three extraction paths depending on approach
-- `src/canvas/scene.ts` — minor: if approach needs the bench sprite map passed through from scene context
-- `docs/decisions.md` — short note: why sandwich is now applied to bench, and the "glow + sandwich both required at thumbnail scale" conclusion
-- `docs/gotchas.md` — candidate one-liner: "HC sandwich at thumbnail scale is necessary but not sufficient — combine with slot-level chrome treatment"
+- `src/utils/preferences.ts` — the main accessibility plumbing
+- `src/canvas/scene.ts` — where canvas-side prefs are wired (callbacks, applyHighContrast call site, sprite map registration)
+- `src/canvas/bench.ts` — bench-specific accessibility (glow, separate sprite map, label sync)
+- `src/canvas/board.ts` — adaptive board (Story 47b/d)
+- `src/canvas/app.ts`, possibly other canvas modules — anything called from preference-apply paths
+- `docs/decisions.md` — every existing accessibility decision (sandwich, BevelFilter alpha, snap colors, glow, mesa, etc.)
+- `docs/accessibility.md` — existing accessibility doc (status, principles)
+- `docs/engine-conventions.md` — any accessibility invariants
+
+### Files to write
+
+- `docs/accessibility-architecture.md` (NEW) — primary deliverable: inventory, coupling map, risk surface, architecture proposal, re-scoping for 47e, follow-up brief(s)
+- `docs/decisions.md` — short note: "Accessibility architecture audit (Story 47e-spike)" pointing at the new doc, with a one-paragraph summary of the recommended invariant and refactor approach
+- `public/qa.html` — STORY + FIXTURES updated for this spike (ACs are about the document, not runtime behavior)
 
 ## Acceptance
 
-User tests via QA page. Write ACs into `public/qa.html`.
-
-- **AC-1: HC ON, dark piece on HC bench.** Load `qa-scratch/spike-47a-pure-black.png` (or any fixture with very dark pieces — the Story 48 regression fixture on a dark patch works). Enable HC. Bench thumbnails show a visible white outer ring (the sandwich's inner white at 1.5 px) — pieces are now discernible as piece-shaped objects, not black silhouettes.
-- **AC-2: HC ON + glow visible.** Same scenario. The uplight glow from 47a is still visible behind each piece. Both treatments coexist.
-- **AC-3: HC OFF → HC ON → HC OFF.** Rapid toggle. No filter accumulation on bench thumbnails. No visible flicker other than the intended on/off state. Each toggle leaves the pieces in a correct state.
-- **AC-4: Canvas HC unchanged.** Pieces on the canvas/board in HC still have the sandwich as they did before this story. No double-sandwich, no missing sandwich.
-- **AC-5: HC OFF — bench thumbnails have NO sandwich.** Only the uplight glow. Confirms the sandwich is strictly HC-gated.
-- **AC-6: Extraction paths clean.** Extract a bench piece via (a) single click (spiralPlace), (b) drag-and-drop out of bench, (c) keyboard Enter on a focused bench piece (which goes through zoomToPlacePiece or spiralPlace depending on mode). In all three cases, the extracted piece on the canvas receives the normal canvas HC sandwich (if HC is on), and no ghost sandwich is left behind in the bench.
-- **AC-7: Story 47d mesa board unchanged.** No visual regression on board rendering — the board's 8-layer mesa stack is unaffected.
-- **AC-8: Story 46b clipping preserved.** Tabs with downward knobs still visible, focus ring still visible, pieces still clipped to bench body horizontally.
-- **AC-9: Story 47a glow lifecycle preserved.** Glow removal on extraction still happens; no glow ghosts appearing on the canvas.
-- **AC-10: Perf stable at 200-piece grid.** Large-grid image (2048×2048) loads; HC toggle doesn't introduce noticeable lag. Filter cost is "HC sandwich × number of bench thumbnails" — the same per-piece cost as canvas HC today, applied to the same piece count (before extraction), so this is worst-case doubling HC filter cost briefly while bench is full. Measure and note in QA report.
+- **AC-1: Inventory complete.** `docs/accessibility-architecture.md` lists every accessibility behavior in the codebase with the schema in §1 (what / trigger / location / application / context coverage / gaps). User reviews and confirms nothing meaningful is missing.
+- **AC-2: Coupling map exists.** Each behavior has its dependencies, non-accessibility-code interactions, shared state, and order dependencies documented.
+- **AC-3: Risk surface identified.** At least 3 named failure modes with worked examples, plus the structural pattern that creates them.
+- **AC-4: Architecture proposal.** A concrete refactoring proposal that makes the invariant *"changes to one accessibility preference do not silently affect another"* checkable. Names files, functions, signatures. Identifies the minimum viable version vs. the full version.
+- **AC-5: 47e reassessed.** Clear recommendation on the original 47e: proceed with new scope, close without code, or replace with a different story.
+- **AC-6: Follow-up brief.** Concrete next-story scope in `docs/accessibility-architecture.md` that BA can lift into a prompt.
+- **AC-7: No production code committed.** `git diff src/` returns empty at session end.
 
 ## Out of scope
 
-- Retuning sandwich thickness for bench scale (deferred — do sandwich at canonical parameters first, retune only if needed)
-- Any new piece-color-adaptive contrast treatment (rejected per the 47a prompt direction — art stays untouched)
-- Non-HC sandwich on bench (the uplight glow is the non-HC treatment; sandwich is HC-only)
-- Changes to Story 47d board rendering, Story 46b bench mask, Story 37d HC preference toggle UI
-- Story 47c (palette tuning) — still candidate
-- Story 46f (label clipping Approach B) — still candidate
-- Story 49 (metadata shape) — epic progression; queued after accessibility gaps close
+- Implementing any of the proposal — that's the follow-up story or stories
+- Visual tweaks to existing accessibility treatments (HC sandwich parameters, glow alpha, etc. — those are tuning, not architecture)
+- The original Story 47e implementation (paused pending audit)
+- Story 47c (palette tuning), Story 49 (metadata), Story 46f (label clipping Approach B) — still candidates, untouched
 
 ## Known next
 
-Queued candidates after 47e ships:
-- **Story 47c** — Palette tuning + swap UI (user's punchy-color frustration)
-- **Story 49** — Minimal metadata shape (Controlled Inputs epic progression)
-- **Story 46f** — Label clipping Approach B (architectural debt)
+After this spike: at minimum one follow-up story emerges from the audit. Likely shape:
+- **Architecture refactor story** — apply the minimum-viable invariant fix
+- **Re-scoped 47e** — or 47e closed and a different story takes its place
 
-BA picks the order at that point.
+Story 47c, 49, 46f remain candidates.
