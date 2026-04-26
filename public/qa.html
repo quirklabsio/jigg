@@ -299,65 +299,77 @@
   <script>
     // ── Story data — update this block each session ──────────────────────────
     const STORY = {
-      number: '47e-spike',
-      title: 'Accessibility architecture audit',
+      number: '47f',
+      title: 'MVV: filter ordering fix + extraction cleanup helper',
       criteria: [
         {
           id: 'AC-1',
-          text: 'Inventory complete. docs/accessibility-architecture.md §1 lists every accessibility behavior with: what / trigger / location / how applied / context covered / known gaps. Review the doc — nothing meaningful is missing.',
+          text: 'HC then greyscale → correct ordering. Load any image. Enable HC, then enable greyscale. Open browser console (DEV build). No assertion failures. sprite.filters on a canvas piece = [BevelFilter, OutlineFilter(inner), OutlineFilter(outer), ColorMatrixFilter]. Greyscale last; sandwich before greyscale.',
         },
         {
           id: 'AC-2',
-          text: 'Coupling map exists. §2 documents interactions for each behavior: other prefs it depends on or affects; non-accessibility code it touches; shared state; order dependencies. The HC+greyscale filter ordering collision (R-1) is documented.',
+          text: 'Greyscale then HC → same ordering. Enable greyscale first, then HC. Same final array shape: [BevelFilter, OutlineFilter(inner), OutlineFilter(outer), ColorMatrixFilter]. No console assertion failures. This is the R-1 bug directly fixed.',
         },
         {
           id: 'AC-3',
-          text: 'Risk surface identified. §3 names at least 3 failure modes (R-1 through R-5) with worked examples. The structural pattern producing them (no enforced ordering, no extraction hook, no animation registry) is stated.',
+          text: 'Rapid HC toggle with greyscale active → no filter accumulation. Enable greyscale. Toggle HC on/off/on/off/on. After settling: exactly one BevelFilter, two HC OutlineFilters, one ColorMatrixFilter on any canvas piece. No duplicates, no multi-ring visual artifact.',
         },
         {
           id: 'AC-4',
-          text: 'Architecture proposal present. §4 contains a concrete MVV (minimum viable refactor) — addSandwichStroke ordering fix + prepareContainerForCanvas — naming the exact files and functions. Also describes the full FilterStack option and cost.',
+          text: 'No visual regression on canvas pieces. Pieces rendered on the canvas look identical to pre-fix: same bevel depth, same sandwich ring when HC on, same greyscale tint when active, same drop shadow. No rendering artifacts.',
         },
         {
           id: 'AC-5',
-          text: '47e reassessed. §5 explains why the gap is a rendering issue (quality/padding at thumbScale) not an application issue. Gives a clear recommendation: 47e proceeds with narrowed diagnostic scope.',
+          text: 'No visual regression on bench thumbnails. Bench piece appearance identical to pre-fix. (Note: sandwich ring invisibility at bench scale is a known issue addressed by Story 47e-r — do NOT flag it here.)',
         },
         {
           id: 'AC-6',
-          text: 'Follow-up briefs present. §6 contains concrete next-story scope for Story 47e (re-scoped) and Story 47f (MVV refactor), with files and acceptance criteria. BA can lift directly into a prompt.',
+          text: 'Three extraction paths use the helper. In the running app, extract a bench piece via (a) keyboard Enter / click (spiralPlace), (b) drag-and-drop out of bench, (c) zoom-to-place click (if zoomToPlace enabled). In all three cases, the resulting canvas piece has no glow ghost.',
         },
         {
           id: 'AC-7',
-          text: 'No production code committed. git diff src/ returns empty. Only docs/ and public/qa.html changed.',
+          text: 'Glow removal still works at extraction. For each extraction method — (a) click/Enter, (b) drag out, (c) zoom-to-place — the extracted canvas piece has no uplight glow artifact remaining. Bench pieces still show the glow before extraction.',
+        },
+        {
+          id: 'AC-8',
+          text: 'Story 47a glow lifecycle preserved. Bench pieces show the warm uplight glow unconditionally (HC and non-HC modes). Glow is cleanly absent on all canvas pieces.',
+        },
+        {
+          id: 'AC-9',
+          text: 'Previously-shipped accessibility paths still pass. Spot-check: HC alone, greyscale alone, reduced-motion, piece labels. No regression from the structural change.',
+        },
+        {
+          id: 'AC-10',
+          text: 'Diff scope correct. Run `git diff --stat src/` in terminal. Exactly two files changed: src/utils/preferences.ts and src/canvas/bench.ts. No third file.',
         },
       ],
     };
 
     const FIXTURES = [
       {
+        src: '/curated/great-wave.jpg',
+        name: 'Great Wave (curated)',
+        dims: 'curated',
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-5', 'AC-6', 'AC-7', 'AC-8', 'AC-9'],
+        expect: 'Diverse mid-tone colors. Primary fixture: toggle HC and greyscale in both orders, check console for DEV assertions, extract pieces via all three paths.',
+      },
+      {
         src: '/qa-scratch/spike-47a-pure-black.png',
-        name: 'spike-47a-pure-black.png',
+        name: 'Pure black (synthetic)',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-2', 'AC-3'],
-        expect: 'Reference only — use to verify HC sandwich behavior on bench thumbnails while reviewing §1.1 gap description. Load in HC mode, check bench: is outline visible on thumbnails?',
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-4', 'AC-8'],
+        expect: 'All-black pieces — HC sandwich ring must be visible on canvas pieces. Enable greyscale then HC: ring should appear, greyscale filter should remain last. Bench glow should be visible before extraction.',
         qaFile: 'qa-scratch/spike-47a-pure-black.png',
         recommended: false,
       },
       {
         src: '/qa-scratch/spike-47a-pure-white.png',
-        name: 'spike-47a-pure-white.png',
+        name: 'Pure white (synthetic)',
         dims: '1024 × 1024',
-        acs: ['AC-1', 'AC-2'],
-        expect: 'Solid white — bench pieces are pure white. Enable HC. Are bench thumbnails visibly outlined? This is the canonical 47e failure case described in §5.',
+        acs: ['AC-1', 'AC-2', 'AC-3', 'AC-4'],
+        expect: 'All-white pieces — outer black ring of sandwich must be visible on canvas. Enable HC then greyscale: ring should remain visible, no duplication on rapid toggle.',
         qaFile: 'qa-scratch/spike-47a-pure-white.png',
         recommended: false,
-      },
-      {
-        src: '/curated/great-wave.jpg',
-        name: 'great-wave.jpg',
-        dims: 'curated',
-        acs: ['AC-1', 'AC-2', 'AC-3'],
-        expect: 'Real photo, diverse piece colors. Enable HC + greyscale simultaneously. Observe bench and canvas. R-1 coupling risk: greyscale last invariant may be violated. Check browser console for DEV assertions.',
       },
     ];
     // ── End story data ────────────────────────────────────────────────────────

@@ -320,6 +320,12 @@ function removeBenchGlowFromContainer(container: Container): void {
   glow.destroy();
 }
 
+/** Strip all bench-only chrome before reparenting a container to the canvas. */
+export function prepareContainerForCanvas(container: Container): void {
+  removeBenchGlowFromContainer(container);
+  // Future: any other bench-only chrome cleanup goes here
+}
+
 function addAllBenchGlows(): void {
   if (!_containerMap) return;
   const { piecesById } = usePuzzleStore.getState();
@@ -1105,8 +1111,8 @@ function spiralPlace(pieceId: string, sprite: Sprite, container: Container): voi
 
   const groupId = `group-${pieceId}`;
 
-  // Strip glow before reparent so it never renders on the canvas even for one frame.
-  removeBenchGlowFromContainer(container);
+  // Strip bench-only chrome before reparent so it never renders on the canvas even for one frame.
+  prepareContainerForCanvas(container);
 
   (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
   _viewport.addChild(container);
@@ -1192,8 +1198,8 @@ function extractToCanvas(
   const container = _containerMap.get(pieceId);
   if (!sprite || !container) return;
 
-  // Strip glow before reparent so it never renders on the canvas even for one frame.
-  removeBenchGlowFromContainer(container);
+  // Strip bench-only chrome before reparent so it never renders on the canvas even for one frame.
+  prepareContainerForCanvas(container);
 
   // Reparent from grid container into viewport
   (_gridContainer ?? _piecesContainer ?? _trayContainer!).removeChild(container);
@@ -1287,8 +1293,8 @@ function completeZoomAnimation(
     _zoomTickerFn = null;
   }
 
-  // Strip glow before reparent so it never renders on the canvas even for one frame.
-  removeBenchGlowFromContainer(container);
+  // Strip bench-only chrome before reparent so it never renders on the canvas even for one frame.
+  prepareContainerForCanvas(container);
 
   // Reparent from app.stage → viewport (world-space)
   _app.stage.removeChild(container);
@@ -1341,9 +1347,9 @@ function zoomToPlacePiece(pieceId: string): void {
   const startScreenX = spriteScreen.x;
   const startScreenY = spriteScreen.y;
 
-  // Strip glow before the container leaves the tray — the animation flies on
-  // app.stage where the bench glow must not render.
-  removeBenchGlowFromContainer(container);
+  // Strip bench-only chrome before the container leaves the tray — the animation
+  // flies on app.stage where bench chrome must not render.
+  prepareContainerForCanvas(container);
 
   // Reparent from tray grid → app.stage (screen-space, above viewport)
   _gridContainer.removeChild(container);

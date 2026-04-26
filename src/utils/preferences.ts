@@ -128,12 +128,14 @@ function addSandwichStroke(sprite: Sprite): void {
   (inner as TaggedFilter)._tag = HC_FILTER_TAG;
   (outer as TaggedFilter)._tag = HC_FILTER_TAG;
 
-  // Filter order is mandatory:
-  //   Index 0:   BevelFilter — internal piece depth, must render before outlines
-  //   Index n-1: inner OutlineFilter (white, 1.5px)
-  //   Index n:   outer OutlineFilter (black, 2.5px)
-  // Append to end of existing array — never reorder BevelFilter.
-  sprite.filters = [...(sprite.filters ?? []), inner, outer];
+  // Filter order invariant: BevelFilter @ 0, sandwich before greyscale, greyscale last.
+  // Insert sandwich immediately before any greyscale filter so the invariant holds
+  // regardless of whether greyscale was active before or after HC was toggled.
+  const existing = sprite.filters ?? [];
+  const greyIdx  = existing.findIndex((f) => (f as TaggedFilter)._tag === GREYSCALE_FILTER_TAG);
+  sprite.filters = greyIdx === -1
+    ? [...existing, inner, outer]
+    : [...existing.slice(0, greyIdx), inner, outer, ...existing.slice(greyIdx)];
 }
 
 function removeSandwichStroke(sprite: Sprite): void {
