@@ -50,13 +50,13 @@ Move labels from sprite children to a sibling overlay container above the sprite
 **Accessibility architecture pass complete.** Design doc at `docs/accessibility-design.md`. Story briefs sequenced and ready for BA to write next-story prompts. Phased migration: 47f → 47e-r → 47g (opt) → 47h → 47i (deferred).
 
 **Story 47e (CLOSED — original scope)**
-Premise was wrong. HC sandwich IS applied to bench sprites via `spriteMap`. Re-scoped as 47e-r below.
+Premise was wrong. HC sandwich IS applied to bench sprites via `spriteMap`. Re-scoped as 47e-r.
 
-**Story 47e-r — HC sandwich rendering at thumbnail scale** *(in progress — see `docs/next-story.md`)*
-Raise `OutlineFilter.quality` from `0.15` → `0.3` and add `padding: 8` to both instances in `addSandwichStroke`. Makes the sandwich ring visible at bench thumbnail scale. ≈5 lines (or ~10 if canvas regression forces bench-specific constants).
+**Story 47e-r (CLOSED — backed out)**
+Quality 0.15 → 0.3 + padding 8 on `OutlineFilter` did not produce a visible sandwich ring at bench thumbnail scale. Reverted. Empirical learning: OutlineFilter at thumbnail scale is unlikely to be the right primitive for HC bench visibility, regardless of parameter tuning.
 
-**Story 47g — HC bench color contract (optional, low priority)**
-Change `TRAY_BG_HC_COLOR` from `#000000` to `#1a1a1a` at α 1.0. Symmetric with normal-mode base color; satisfies the correct contract (solid, not pure-black). ≈3 lines.
+**Story 47g — Remove HC piece sandwich; switch HC bench to `#1a1a1a` α 1.0** *(in progress — see `docs/next-story.md`)*
+Two changes folded into one story given the empirical evidence: (1) flip bench HC color to `#1a1a1a` α 1.0 (architect's optional Phase 2b); (2) remove the per-piece HC sandwich entirely (Story 37d behavior, no longer earning its complexity). Bench filter-strip swatch HC styling is **explicitly preserved** — different feature, different code path. Deliberate walk-back of WCAG AAA-grade piece outline contrast in HC; HC retains its other treatments (BevelFilter, snap, label, swatches, solid tray).
 
 **Story 47h — Accessibility gotchas documentation** *(any time after 47f)*
 Add R-3/R-4/R-5 gotcha entries to `docs/gotchas.md`. No code.
