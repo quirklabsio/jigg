@@ -27,6 +27,8 @@
 | Story 47a | Bench piece uplight glow — per-slot chrome, HC-gated off (2026-04-22) |
 | Story 47b | Adaptive board color — three-preset algorithm (light/mid/dark) chosen from image luminance mean + spread at load time; no user override (2026-04-23) |
 | Story 47d | Board as stage — 8-layer painter's-algorithm mesa (offset-stacked rects + noise grain + center glow + edge highlights); no filters, all pure geometry (2026-04-24) |
+| Story 47e-spike | Accessibility architecture audit — 15 behaviors inventoried, 5 risks named, MVV vs full-version split (2026-04-25) |
+| Story 47f | Filter ordering fix + extraction cleanup helper (Phase 1 MVV) — `addSandwichStroke` inserts before greyscale; `prepareContainerForCanvas` consolidates 4 extraction sites (2026-04-25) |
 
 ---
 
@@ -47,14 +49,11 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Accessibility architecture pass complete.** Design doc at `docs/accessibility-design.md`. Story briefs sequenced and ready for BA to write next-story prompts. Phased migration: 47f → 47e-r → 47g (opt) → 47h → 47i (deferred).
 
-**Story 47f — MVV: filter ordering fix + extraction cleanup** *(in progress — see `docs/next-story.md`)*
-Fix R-1 (HC+greyscale filter ordering violation) and R-2 (extraction cleanup fragility). `addSandwichStroke` inserts before greyscale; `prepareContainerForCanvas` consolidates the three extraction-path glow-removal call sites. ≈35 lines, single session, no behavior change for users.
-
 **Story 47e (CLOSED — original scope)**
 Premise was wrong. HC sandwich IS applied to bench sprites via `spriteMap`. Re-scoped as 47e-r below.
 
-**Story 47e-r — HC sandwich rendering at thumbnail scale** *(after 47f)*
-Raise `OutlineFilter.quality` from `0.15` → `0.3` and add `padding: 8` to both instances in `addSandwichStroke`. Makes the sandwich ring visible at bench thumbnail scale. ≈5 lines.
+**Story 47e-r — HC sandwich rendering at thumbnail scale** *(in progress — see `docs/next-story.md`)*
+Raise `OutlineFilter.quality` from `0.15` → `0.3` and add `padding: 8` to both instances in `addSandwichStroke`. Makes the sandwich ring visible at bench thumbnail scale. ≈5 lines (or ~10 if canvas regression forces bench-specific constants).
 
 **Story 47g — HC bench color contract (optional, low priority)**
 Change `TRAY_BG_HC_COLOR` from `#000000` to `#1a1a1a` at α 1.0. Symmetric with normal-mode base color; satisfies the correct contract (solid, not pure-black). ≈3 lines.

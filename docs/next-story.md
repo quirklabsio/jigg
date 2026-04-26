@@ -1,110 +1,103 @@
-# Story 47f: Filter ordering fix + extraction cleanup helper (Phase 1 MVV)
+# Story 47e-r: HC sandwich rendering at thumbnail scale
 
 ## Context
 
-This is **Phase 1** of the accessibility architecture migration designed in `docs/accessibility-design.md`. It's the minimum viable refactor: two targeted structural fixes that close the only currently-reproducible bug (R-1) and reduce extraction-path fragility (R-2), with **zero behavior change for users**.
+Original Story 47e was based on a wrong premise — the HC sandwich stroke "wasn't applied to bench thumbnails." The 47e-spike audit (`docs/accessibility-architecture.md` §1.1) confirmed it IS applied: `applyHighContrast` iterates the entire piece sprite map, which includes bench sprites. The actual gap is **rendering**, not application: at bench thumbnail scale (~60–110 px wide), the existing `OutlineFilter` parameters (`quality: 0.15`, no `padding`) likely produce a sandwich ring too coarse or clipped to be visible. This is the long-overdue fix that closes the original 47e question.
+
+47f's filter-ordering MVV (Phase 1) shipped 2026-04-25; this story is **Phase 2** of the accessibility migration plan from `docs/accessibility-design.md`. The MVV foundation means we can change `addSandwichStroke`'s constructor parameters with confidence that the surrounding filter-array contract still holds.
 
 Before starting, read:
-- `docs/accessibility-design.md` — the architecture this story implements (focus on the §"Composition model" filter-ordering rules and Phase 1 in §"Migration plan")
-- `docs/accessibility-architecture.md` §3 R-1 and R-2 — the original risks this story closes
-- `src/utils/preferences.ts` `addSandwichStroke` (current implementation)
-- `src/canvas/bench.ts` `removeBenchGlowFromContainer` and the three extraction sites (`spiralPlace`, drag pointer-up, `zoomToPlacePiece`)
-
-This story does NOT introduce a `FilterStack` class or atomic-preference restructuring. Both are explicitly deferred per the design's MVV-first phasing — Phase 1 is the cheapest, highest-leverage safety improvement; subsequent phases stay queued only if needed.
+- `docs/accessibility-design.md` Phase 2 section and §"Brief 47e-r"
+- `docs/accessibility-architecture.md` §1.1 (the rendering-issue clarification)
+- `src/utils/preferences.ts` `addSandwichStroke` — the post-47f implementation
 
 ## Requirements
 
-### Fix 1: `addSandwichStroke` inserts before greyscale, not blind-append
+### The change
 
-In `src/utils/preferences.ts`, `addSandwichStroke` currently appends the two new `OutlineFilter` instances to the end of `sprite.filters`. When greyscale is already active, this puts greyscale at index 1 and the sandwich filters at the tail — the "greyscale must be last" invariant breaks.
+In `src/utils/preferences.ts`, in `addSandwichStroke`, modify both `OutlineFilter` constructor calls:
 
-Replace the append with an explicit insert-before-greyscale:
+- Raise `quality` from `0.15` to `0.3`
+- Add `padding: 8`
 
-1. Build the two `OutlineFilter` instances and tag them as today (`HC_FILTER_TAG`).
-2. Read `sprite.filters` (or `[]` if null).
-3. Find the index of any existing greyscale filter (matched by its `_tag === GREYSCALE_FILTER_TAG`).
-4. If no greyscale filter exists, append: `[...existing, inner, outer]`.
-5. If greyscale exists at index `i`, splice: `[...existing.slice(0, i), inner, outer, ...existing.slice(i)]`.
+That's it for the universal-fix path. Both inner (white 1.5 px) and outer (black 2.5 px) instances get the same two parameter additions. All other parameters (`thickness`, `color`, `alpha`) stay unchanged.
 
-The idempotency guard (`if (sprite.filters?.some(f => (f as TaggedFilter)._tag === HC_FILTER_TAG)) return`) stays unchanged — this is the existing protection against duplicate insertion, not the bug being fixed.
+### Decision fork (universal vs. bench-specific)
 
-### Fix 2: `prepareContainerForCanvas` helper in `bench.ts`
+Try the universal change first. Verify in QA that:
+- Canvas pieces in HC mode look identical (or visually indistinguishable) before/after
+- Bench thumbnails in HC mode now show the sandwich ring
 
-Three extraction sites in `bench.ts` each manually call `removeBenchGlowFromContainer(container)` before reparenting a piece container to the viewport. The fourth path (`extractPieceFromBench`) calls it as a catch-all. The risk: any future story that adds a fifth extraction path silently leaks the glow to canvas.
-
-Replace the manual removal at the three sites with a single named helper:
+**If canvas regresses visibly** (the 0.3 quality + padding 8 makes canvas pieces look chunkier, more aliased, or otherwise wrong), split into bench-specific constants:
 
 ```ts
-// Exported from bench.ts
-export function prepareContainerForCanvas(container: Container): void {
-  removeBenchGlowFromContainer(container);
-  // Future: any other bench-only chrome cleanup goes here
-}
+const HC_OUTLINE_QUALITY_CANVAS = 0.15;
+const HC_OUTLINE_QUALITY_BENCH = 0.3;
+const HC_OUTLINE_PADDING_CANVAS = 0;   // or whatever existing default is
+const HC_OUTLINE_PADDING_BENCH = 8;
 ```
 
-The three sites change from `removeBenchGlowFromContainer(container)` to `prepareContainerForCanvas(container)`. The single comment line ("Future: any other bench-only chrome cleanup goes here") is the named hook for the next bench-context behavior added — that addition lands in one place instead of having to update N extraction sites.
+…and pick the right values based on which sprite map is being iterated. Document the split in `decisions.md` if you go this route.
 
-`extractPieceFromBench` keeps its own direct `removeBenchGlowFromContainer` call as the catch-all safety net — do NOT change it. Catch-all and named-helper coexist by design; the helper makes new paths self-correcting, the catch-all protects against helper-skip mistakes.
+**Strong preference:** universal fix. Only split if the canvas regression is real and visible. Don't pre-emptively split for theoretical reasons.
 
 ### What does NOT change
 
-- **No visual change.** Pixel-for-pixel identical output before and after.
-- **No new abstractions.** No `FilterStack`, no behavior registry, no preference restructuring. Phase 1 is structural-fix only.
-- **No `quality` / `padding` changes** on `OutlineFilter` — that's Story 47e-r (Phase 2).
-- **No bench color changes** — that's Story 47g (Phase 2b, optional).
-- **No new gotcha doc entries** — that's Story 47h (separate doc-only story).
-- **No changes to `applyHighContrast`'s caller logic.** The fix lives entirely inside `addSandwichStroke`.
-- **No changes to `addGreyscaleFilter`** — already correct (appends last).
+- **Idempotency guard** — existing tag-based duplicate prevention stays.
+- **Filter ordering** — Story 47f's insert-before-greyscale logic is untouched. This story changes constructor parameters only.
+- **`OutlineFilter` thickness, color, alpha** — sandwich visual character (white inner ring, black outer ring) stays.
+- **`addGreyscaleFilter`, `addBenchGlowToContainer`, `prepareContainerForCanvas`, `applyHighContrast` caller** — none touched.
+- **Bench background color** (`TRAY_BG_HC_COLOR`) — separate concern, deferred to optional Story 47g.
 
 ## Constraints
 
-- **Single-session scope.** ≈35 lines of code change total. If you find yourself touching a third file, you're scope-crept.
-- **Do not introduce a `FilterStack` class.** The architect deferred it; the MVV inside-`addSandwichStroke` fix gives 80% of the safety at 1/5 the cost.
-- **Do not refactor `addGreyscaleFilter` for symmetry.** Greyscale already appends correctly; touching it adds risk for no gain.
-- **Do not change `OutlineFilter` constructor parameters** (`thickness`, `color`, `alpha`, `quality`, `padding`). Visual output stays identical.
-- **Do not change the idempotency guards** in either function. Existing tag-based duplicate prevention stays.
-- **Do not delete the catch-all in `extractPieceFromBench`.** The defense-in-depth coexists with the named helper.
-- **Per `decisions.md` §"Process":** never commit without explicit user instruction. Present the work via `/qa` and wait.
+- **Single file, ≈5 lines (or ≈10 if the bench-specific split is needed).** If `git diff src/` touches anything beyond `preferences.ts`, that's scope creep — flag it and revisit.
+- **No new dependencies, no new abstractions.** `OutlineFilter` from `pixi-filters` is already imported.
+- **Do not change `addBenchGlowToContainer` or any non-HC bench rendering.** This story is HC-mode-only.
+- **Do not touch the four extraction paths** that were updated in 47f. They use `prepareContainerForCanvas` correctly; not your concern.
+- **Do not start the optional Story 47g** (HC bench color `#000000` → `#1a1a1a` α 1.0). It's queued for later, only if 47e-r reveals it's still needed.
+- **Do not add the gotchas doc entries** (Story 47h). Doc-only follow-up, separate story.
+- **Per `decisions.md` §"Process":** never commit without explicit user instruction. Present via `/qa` and wait.
 
 ## Files
 
-- `src/utils/preferences.ts` — `addSandwichStroke` only (≈ 15 lines changed)
-- `src/canvas/bench.ts` — new exported `prepareContainerForCanvas`; three call-site replacements (≈ 20 lines changed)
+- `src/utils/preferences.ts` — `addSandwichStroke` only (~5 lines, or ~10 if splitting)
 
-`git diff src/` should show **only these two files**. Any third file touched is a scope violation; flag it and revisit before continuing.
+`git diff src/` should show **only this one file**.
 
 ## Acceptance
 
-User tests via QA page (`http://localhost:5173/qa`). Update `STORY` and `FIXTURES` per the `/qa` command format.
+User tests via QA page. Update `STORY` and `FIXTURES` per the `/qa` command format. Use the spike's synthetic fixtures (still in `/qa-scratch/`):
 
-- **AC-1: HC then greyscale produces correct ordering.** Load any image. Enable HC, then enable greyscale. `sprite.filters` on any piece = `[BevelFilter, OutlineFilter(inner), OutlineFilter(outer), ColorMatrixFilter]`. Greyscale last; sandwich before greyscale. Verify in console / debugger or DEV assertion.
-- **AC-2: Greyscale then HC produces same ordering.** Reverse order: enable greyscale first, then HC. Same final array shape. This is the bug R-1 directly fixes — pre-MVV would put greyscale at index 1 and sandwich at the tail.
-- **AC-3: Rapid HC toggle with greyscale active — no filter accumulation.** Greyscale on. Toggle HC: on / off / on / off / on. After the dust settles, the filter array contains exactly the expected filters (no duplicates, no orphaned sandwich filters). Visual output: clean ring, no multi-ring artifact.
-- **AC-4: No visual regression on canvas pieces.** Pieces rendered on the canvas / board look identical to pre-fix. Same BevelFilter, same sandwich (when HC), same greyscale (when active), same DropShadowFilter.
-- **AC-5: No visual regression on bench thumbnails.** Bench piece appearance identical to pre-fix. The sandwich's thumbnail-scale invisibility is a known issue addressed by Story 47e-r (Phase 2) — do not address it here.
-- **AC-6: Three extraction paths use the helper.** Grep `src/canvas/bench.ts` for `removeBenchGlowFromContainer`: only one direct call remains (in `extractPieceFromBench`); all three other extraction sites use `prepareContainerForCanvas`.
-- **AC-7: Glow removal still happens at extraction.** Extract a bench piece via (a) single click (spiralPlace), (b) drag-and-drop out of bench, (c) keyboard Enter (zoomToPlacePiece). In all three cases, the resulting canvas piece has no glow ghost.
-- **AC-8: Story 47a glow lifecycle preserved.** Glow appears on bench pieces, is unconditional (HC and non-HC), still removed cleanly on extraction.
-- **AC-9: All previously-shipped HC + greyscale + reduced-motion + label QA paths still pass.** Spot-check the `regression-script.md` flow. No regression introduced by structural change.
-- **AC-10: `git diff src/` shows only `preferences.ts` and `bench.ts`.** Run the diff yourself and report the line counts in the QA handoff.
+- `qa-scratch/spike-47a-pure-white.png` — solid white, exercises black outer ring on light bench pieces (in HC, bench is black; pieces from this image render mostly white → black outer ring is the visible separator)
+- `qa-scratch/spike-47a-pure-black.png` — solid black, exercises white inner ring on dark bench pieces (the original 47e visibility complaint)
+- `qa-scratch/spike-47a-split-wb.png` — half-and-half, exercises both rings simultaneously
+
+Acceptance criteria:
+
+- **AC-1: HC + dark piece + bench → visible white inner ring.** Load `spike-47a-pure-black.png`. Enable HC. Bench thumbnails show a discernible white ring distinguishing each piece silhouette from the dark bench background. The user can tell pieces apart at a glance.
+- **AC-2: HC + light piece + bench → visible black outer ring.** Load `spike-47a-pure-white.png`. Enable HC. Bench thumbnails show a discernible black ring distinguishing each piece from the surrounding bench (and from each other).
+- **AC-3: HC + mixed-luminance pieces → both rings visible where they're needed.** Load `spike-47a-split-wb.png`. Some bench thumbnails show the black outer ring (light pieces), some show the white inner ring (dark pieces). All are perceptible as discrete pieces.
+- **AC-4: Canvas pieces in HC mode — no visible regression.** Place a piece on the canvas in HC mode. Sandwich ring still renders correctly: same shape, no new artifacts, no visible parameter-change side effect. If you can't tell the canvas piece changed, you're done. If you can, decide: is it a regression? If yes, split into bench-specific constants per the decision fork above.
+- **AC-5: Rapid HC toggle — no filter accumulation.** With greyscale active and a puzzle loaded, toggle HC: on / off / on / off / on. After settling, sprite filters contain exactly the expected set (no duplicates). The 47f idempotency guarantee still holds; this story doesn't touch it.
+- **AC-6: All previously-shipped behaviors preserved.** Bench glow (Story 47a) still visible. Canvas mesa board (Story 47d) still rendered. Adaptive board color (Story 47b) still selected per image. Filter ordering (Story 47f) still correct (`[BevelFilter, ...sandwich, ColorMatrixFilter]` when greyscale + HC both active).
+- **AC-7: `git diff src/` shows only `preferences.ts`.** Run the diff yourself and report line count in the QA handoff. If you split into bench-specific constants, the diff is still one file.
+- **AC-8: User confirms 47e closed.** This is the moment the long-running 47e issue resolves. After QA passes, the user explicitly confirms: bench HC visibility no longer feels broken. If the user still says "I can barely see them in HC," consider Story 47g.
 
 ## Out of scope
 
-- **Story 47e-r** — HC sandwich rendering at thumbnail scale (`quality` / `padding` tuning). Queued next; depends on 47f shipping first.
-- **Story 47g (optional)** — HC bench color contract change (`#000000` → `#1a1a1a` α 1.0). Queue only if 47e-r reveals it's still needed.
-- **Story 47h** — Accessibility gotchas documentation (R-3, R-4, R-5 entries). Doc-only follow-up.
-- **Story 47i (deferred)** — Full `FilterStack` class. Queued only if a third managed filter type is added AND ordering bugs surface again.
-- **Story 47c (palette tuning + swap UI)** — independent of accessibility architecture; still candidate.
-- **Story 46f (label clipping Approach B)** — independent; still queued.
-- **Story 49 (metadata shape)** — Controlled Inputs epic progression; independent.
-- Anything visual: filter parameters, colors, alphas, padding, quality.
-- Anything new: new behaviors, new abstractions, new preferences, new contexts.
+- **Story 47g (optional)** — HC bench color contract change. Only queue if AC-8 fails (bench HC still feels wrong after this story).
+- **Story 47h** — gotchas doc entries (R-3/R-4/R-5). Doc-only follow-up.
+- **Story 47i (deferred)** — `FilterStack` class. Only if a third managed filter type appears.
+- **Story 47c** — palette tuning + swap UI. Independent.
+- **Story 46f** — label clipping Approach B. Independent.
+- **Story 49** — metadata shape. Epic progression, independent.
+- Any other `OutlineFilter` parameter (`thickness`, `color`, `alpha`) — out of scope; keep visual character identical.
+- Any rendering performance optimization — separate concern.
 
 ## Known next
 
-After 47f ships:
-1. **Story 47e-r** — raise `OutlineFilter.quality` from 0.15 → 0.3, add `padding: 8`. ~5 lines. Closes the long-running 47e question.
-2. **Story 47g (optional)** — only if 47e-r's bench HC visual QA reveals the pure-black bench is still a problem. ~3 lines.
-3. **Story 47h** — gotchas doc entries for R-3/R-4/R-5. Doc-only, low priority, any time after Phase 1.
-
-Then back to feature work: 47c, 49, 46f, etc.
+After 47e-r ships:
+1. **If AC-8 fails:** Story 47g (HC bench color → `#1a1a1a` α 1.0). ~3 lines.
+2. **Story 47h** — gotchas doc entries. Doc-only, low priority, anytime.
+3. **Then:** back to feature work — 47c (palette UI), 49 (metadata), 46f (label clipping), or 50+ (Daily Mechanic epic).

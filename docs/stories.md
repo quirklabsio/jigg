@@ -19,6 +19,22 @@ Files changed:
 
 -->
 
+## Story 47f: Filter ordering fix + extraction cleanup helper (Phase 1 MVV)
+
+**Shipped:** 2026-04-25
+
+Two targeted structural fixes, zero behavior change.
+
+**Fix 1 (`src/utils/preferences.ts`):** `addSandwichStroke` previously appended HC `OutlineFilter` instances to the end of `sprite.filters`. With greyscale active, this broke the "greyscale must be last" invariant (R-1). Replaced the blind-append with an insert-before-greyscale: find the index of any `GREYSCALE_FILTER_TAG` filter and splice the sandwich immediately before it. Idempotency guard unchanged. `addGreyscaleFilter` was correct already and was not touched.
+
+**Fix 2 (`src/canvas/bench.ts`):** Four extraction paths (spiralPlace, extractToCanvas/drag, completeZoomAnimation, zoomToPlacePiece) each manually called `removeBenchGlowFromContainer`. Added exported helper `prepareContainerForCanvas` that wraps the call with a named hook for future bench-only cleanup. All four non-catch-all sites now call the helper. `extractPieceFromBench` keeps its direct call as defense-in-depth catch-all.
+
+Note: the story brief said "three sites" but the codebase has four (completeZoomAnimation is a separate function from zoomToPlacePiece). AC-6 ("only one direct call remains") was the operative spec; all four were updated.
+
+Files changed:
+- `src/utils/preferences.ts` — `addSandwichStroke` insert-before-greyscale (~14 lines)
+- `src/canvas/bench.ts` — `prepareContainerForCanvas` helper + four call-site replacements (~24 lines)
+
 ## Story 47a: Bench piece uplight glow
 
 **Shipped:** 2026-04-22
