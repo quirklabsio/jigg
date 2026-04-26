@@ -45,11 +45,10 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Story 47e-spike — Accessibility architecture audit** *(in progress — see `docs/next-story.md`)*
-Original 47e (HC sandwich → bench) failed in implementation. Plus recurring pattern of HC↔non-HC bleed (47a HC-gate flip, silent bench gap, 47e's three-approach fork). Spike steps back: inventory every accessibility behavior, map coupling and risk surface, propose an architecture where changes to one preference don't silently affect another. Re-scopes (or closes) 47e from the audit's findings. No production code; deliverable is `docs/accessibility-architecture.md` + follow-up story brief. Replaces the prior 47e queue.
+**Accessibility architecture — upstream of dev queue.** 47e-spike audit shipped (see `docs/accessibility-architecture.md`). Next: a `tech-architect` skill session designs the target architecture and produces a sequenced backlog of implementation story briefs. BA writes individual next-story prompts from those briefs; dev implements per the new pattern. No accessibility-related dev story should queue until the architect pass completes.
 
 **Story 47e (paused) — HC sandwich for bench thumbnails**
-Paused pending architecture audit. Will be re-scoped, replaced, or closed based on spike findings.
+Paused pending architecture pass. Will be re-scoped, replaced, or closed in the architect's migration plan.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.

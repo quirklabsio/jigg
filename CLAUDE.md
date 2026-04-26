@@ -16,6 +16,24 @@ For spec work, also read:
 For any work touching piece positions, coordinate math, or world-space logic:
 - `docs/engine-conventions.md` — Coordinate systems, stage rules, rotation, cluster lifecycle
 
+## Roles
+
+Three roles, three skills, one direction of flow:
+
+```
+tech-architect (designs the pattern, when needed)
+       ↓ produces story briefs
+biz-writer (scopes individual stories from briefs)
+       ↓ produces next-story prompt
+dev-writer (implements per the pattern)
+```
+
+- **tech-architect** owns architecture / pattern design. Read-only re: production code. Output: design docs + sequenced story briefs. Triggered when the *pattern itself* is the question (audit → architecture, cross-cutting refactor, foundational decision). See `.claude/skills/tech-architect/SKILL.md`.
+- **biz-writer** owns story scoping and the roadmap. Writes `docs/next-story.md`. Hands off to dev. See `.claude/skills/biz-writer/SKILL.md`.
+- **dev-writer** owns implementation. Writes code. Logs to `docs/stories.md`. See `.claude/skills/dev-writer/SKILL.md`.
+
+If dev keeps failing on a story, that's a signal the architectural decision was hidden inside it — kick back upstream to tech-architect.
+
 ## Story Implementation
 - `docs/next-story.md` is the handoff contract — **BA owns this file exclusively. Dev reads only, never writes, never clears, never overwrites.**
 - **Staleness guardrail:** before implementing, cross-check the prompt against `docs/stories.md`. If the story number or described work already appears as shipped, stop and ask the user — do not re-implement. The BA may not have queued the next story yet.
