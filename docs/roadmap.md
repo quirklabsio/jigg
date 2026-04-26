@@ -47,7 +47,7 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Accessibility architecture pass complete.** Design doc at `docs/accessibility-design.md`. Story briefs sequenced and ready for BA to write next-story prompts. Phased migration: 47f → 47e-r → 47g (opt) → 47h → 47i (deferred).
 
-**Story 47f — MVV: filter ordering fix + extraction cleanup** *(next up for BA)*
+**Story 47f — MVV: filter ordering fix + extraction cleanup** *(in progress — see `docs/next-story.md`)*
 Fix R-1 (HC+greyscale filter ordering violation) and R-2 (extraction cleanup fragility). `addSandwichStroke` inserts before greyscale; `prepareContainerForCanvas` consolidates the three extraction-path glow-removal call sites. ≈35 lines, single session, no behavior change for users.
 
 **Story 47e (CLOSED — original scope)**
