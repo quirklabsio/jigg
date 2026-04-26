@@ -4,19 +4,34 @@
 
 *Product, process, and architectural choices made during Jigg development with rationale and context.*
 
-## Accessibility Architecture Audit (Story 47e-spike)
+## Accessibility Architecture Design (tech-architect pass, 2026-04-25)
 
-Full audit in `docs/accessibility-architecture.md`. Completed 2026-04-25.
+Full audit: `docs/accessibility-architecture.md`. Full design: `docs/accessibility-design.md`.
 
-**Recommended invariant:** Changes to one accessibility preference's behavior do not silently affect another preference's behavior.
+**Core invariant:** Changes to one accessibility preference's behavior do not silently affect another preference's behavior.
 
-**Key finding — filter ordering bug (R-1):** Enabling HC when greyscale is already active inserts the sandwich filters AFTER greyscale (`[BevelFilter, ColorMatrixFilter, inner, outer]`), violating the "greyscale last" invariant. Reproducible in production builds; silent (no visual regression, but the ordering guarantee is broken). Fixed in the MVV refactor (Story 47f) by making `addSandwichStroke` insert before any greyscale filter.
+**Five risks identified (R-1 through R-5).** Only R-1 and R-2 are currently reproducible; R-3/R-4/R-5 are latent.
 
-**Key finding — bench rendering gap (47e):** The HC sandwich IS applied to bench sprites via the shared `spriteMap`. The gap is a rendering issue at thumbnail scale — `quality: 0.15` and no `padding` on the OutlineFilter instances may produce no visible outline at bench's `thumbScale()` (≈ 0.08–0.15). 47e re-scoped to diagnose and fix render parameters.
+**Key architectural decisions:**
 
-**Recommended sequence:** Story 47f (MVV ordering fix) → Story 47e (bench HC on MVV foundation) → Story 47c / 46f (independent).
+*Filter ordering (R-1):* `addSandwichStroke` must insert before any greyscale filter, not blindly append. Correct array: `[BevelFilter, inner, outer, ColorMatrixFilter(greyscale)]`. Fix in Story 47f (Phase 1 MVV).
 
-See `docs/accessibility-architecture.md` for: full behavior inventory, coupling map, risk surface (R-1 through R-5), architecture proposal (MVV + full FilterStack), 47e reassessment, and follow-up story briefs.
+*Extraction cleanup (R-2):* `prepareContainerForCanvas(container)` in `bench.ts` is the single named contract for bench-to-canvas container cleanup. Replaces the three direct `removeBenchGlowFromContainer` call sites at visual reparent points. `extractPieceFromBench` retains its own call as a catch-all. Fix in Story 47f (Phase 1 MVV).
+
+*HC sandwich rendering at thumbnail scale (47e):* The sandwich IS applied to bench sprites via `spriteMap`. The gap is rendering parameters — `quality: 0.15` and no `padding` on `OutlineFilter` instances. Fix: raise quality to 0.3, add `padding: 8`. Original 47e scope closed; re-scoped as Story 47e-r (Phase 2).
+
+*HC bench color contract:* The requirement is SOLID (α 1.0), not PURE BLACK. `TRAY_BG_HC_COLOR = 0x000000` satisfies the requirement but is unnecessarily strict. The correct contract is: solid (α 1.0), dark (L ≤ ~0.01). Changing to `#1a1a1a` at α 1.0 is symmetric with normal mode's base color. Optional Story 47g (Phase 2b).
+
+*Always-on behaviors (bench glow, focus ring, mesa, board color, ARIA):* Must never acquire preference conditions. Structurally separate; enforced by documentation and review.
+
+**Phased migration:**
+- Phase 1 (Story 47f): MVV — filter ordering fix + `prepareContainerForCanvas`. ≈35 lines. Single session.
+- Phase 2 (Story 47e-r): OutlineFilter quality + padding. ≈5 lines. Single session. Prerequisite: 47f.
+- Phase 2b (Story 47g, optional): HC bench color `#000000` → `#1a1a1a`. ≈3 lines.
+- Phase 3 (Story 47h): Gotchas documentation for R-3, R-4, R-5. No code.
+- Phase 4 (Story 47i, deferred): Full FilterStack — trigger only if third filter type added and ordering bugs recur.
+
+See `docs/accessibility-design.md` for: design principles, primitives, contracts, composition model, extension contract, full behavior mapping, migration plan with code sketches, testing strategy, and story briefs.
 
 ## V1 / V2 Split
 

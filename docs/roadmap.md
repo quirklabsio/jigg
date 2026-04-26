@@ -45,10 +45,22 @@ Move labels from sprite children to a sibling overlay container above the sprite
 
 **Story 47 — File Picker (minimal UI)** ✅ Shipped 2026-04-21
 
-**Accessibility architecture — upstream of dev queue.** 47e-spike audit shipped (see `docs/accessibility-architecture.md`). Next: a `tech-architect` skill session designs the target architecture and produces a sequenced backlog of implementation story briefs. BA writes individual next-story prompts from those briefs; dev implements per the new pattern. No accessibility-related dev story should queue until the architect pass completes.
+**Accessibility architecture pass complete.** Design doc at `docs/accessibility-design.md`. Story briefs sequenced and ready for BA to write next-story prompts. Phased migration: 47f → 47e-r → 47g (opt) → 47h → 47i (deferred).
 
-**Story 47e (paused) — HC sandwich for bench thumbnails**
-Paused pending architecture pass. Will be re-scoped, replaced, or closed in the architect's migration plan.
+**Story 47f — MVV: filter ordering fix + extraction cleanup** *(next up for BA)*
+Fix R-1 (HC+greyscale filter ordering violation) and R-2 (extraction cleanup fragility). `addSandwichStroke` inserts before greyscale; `prepareContainerForCanvas` consolidates the three extraction-path glow-removal call sites. ≈35 lines, single session, no behavior change for users.
+
+**Story 47e (CLOSED — original scope)**
+Premise was wrong. HC sandwich IS applied to bench sprites via `spriteMap`. Re-scoped as 47e-r below.
+
+**Story 47e-r — HC sandwich rendering at thumbnail scale** *(after 47f)*
+Raise `OutlineFilter.quality` from `0.15` → `0.3` and add `padding: 8` to both instances in `addSandwichStroke`. Makes the sandwich ring visible at bench thumbnail scale. ≈5 lines.
+
+**Story 47g — HC bench color contract (optional, low priority)**
+Change `TRAY_BG_HC_COLOR` from `#000000` to `#1a1a1a` at α 1.0. Symmetric with normal-mode base color; satisfies the correct contract (solid, not pure-black). ≈3 lines.
+
+**Story 47h — Accessibility gotchas documentation** *(any time after 47f)*
+Add R-3/R-4/R-5 gotcha entries to `docs/gotchas.md`. No code.
 
 **Story 47c (candidate) — Palette tuning + swap UI**
 Current k=5 palette (Story 35) doesn't capture the punchy / saturated colors human eyes focus on. Two sub-concerns; may split into 47c + 47d: (a) tune extraction — higher k, saturation weighting, or alternate algorithm; (b) paint-drop icon at the right of the palette strip that opens an overlay to preview and swap palette variants. Start with (a) alone — may resolve the complaint without needing the UI.
