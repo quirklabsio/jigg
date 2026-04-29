@@ -1,0 +1,110 @@
+# SME — Jigg Runtime
+
+Authority: Store mutation rules, runtime state shape, Plate behavior, interaction lifecycle.
+
+Invoke when a story involves:
+- deciding what lives in the store vs pipeline
+- piece state mutations (position, stage, rotation, cluster)
+- store ↔ Plate reactivity
+- ARIA behavior, focus management, keyboard navigation
+- anything that changes during active play
+
+---
+
+## Runtime = Everything Live
+
+The runtime system is everything that happens while the app is running:
+- Store holds mutable state
+- Plate reacts to it
+- `plate/aria/runtime/` owns all interaction behavior
+
+The boundary that matters:
+> "Is this derivation or live behavior?"
+> Derivation → pipeline. Live → runtime.
+
+---
+
+## Accessibility in Runtime
+
+Accessibility is not a module — it is distributed:
+
+| Layer | Location | What |
+|---|---|---|
+| User intent | Store (`puzzleStore.a11y`) | contrast mode, reduce motion, focus mode |
+| Derivation | `cook/deriveA11ySpec.ts` | produces `RenderSpec.a11y` — pipeline concern |
+| Runtime behavior | `plate/aria/runtime/` | focus, keyboard, ARIA, announcements |
+
+`plate/aria/runtime/` is the ONLY place runtime a11y behavior lives.
+There is no `src/a11y/` folder.
+
+---
+
+## What Lives in the Store
+
+```ts
+import type { JiggAssembly, PieceState } from '@jigg-spec/types'
+```
+
+| Concern | Store? |
+|---|---|
+| Piece positions, stage, rotation | ✅ `JiggAssembly.pieces` |
+| Cluster membership | ✅ `PieceState.clusterId` |
+| Play time | ✅ `JiggAssembly.playTimeSeconds` |
+| Camera / viewport | ✅ `JiggAssembly.view` |
+| User a11y prefs (contrast, motion) | ✅ passed as `A11yPrefs` snapshot to Cook |
+| Focus mode, selection | ✅ runtime only — consumed by `plate/aria/runtime/` |
+| Cut geometry / piece definitions | ❌ `JiggDissection` |
+| Board color, contrast rules | ❌ `RenderSpec.a11y` |
+
+---
+
+## Store ↔ Plate
+
+```
+User interaction → Store mutation → Plate reacts → PixiJS + ARIA update
+```
+
+Plate reads from Store during runtime loop. Never writes derived structure back.
+
+---
+
+## Piece State Invariants
+
+- `placed === true` → `clusterId` absent (enforce immediately)
+- `STAGE_BENCH` → `pos` absent, `clusterId` absent
+- Non-bench → `pos` present
+- `rot` always a valid cardinal: `{0, 90, 180, 270}`
+- No piece transitions back to `STAGE_BENCH`
+- Ghost tray: missing `stageId` → move piece to `STAGE_TABLE`
+
+---
+
+## Cluster Rules
+
+- `clusterId` generated at snap time (NanoID 8)
+- Merge: larger group survives; tie → lower `PieceDefinition.index` wins
+- Surviving origin piece stays fixed in world space
+- Absorbed pieces recompute `pos` relative to origin
+- Incompatible rotations → merge rejected
+- No cluster breakup
+
+---
+
+## ARIA Structure
+
+```
+#app
+  [bench]   role="application" — inert when table mode active
+  [table]   role="application" — inert when bench mode active
+  [live]    aria-live — announcements only
+[app shell] siblings of #app — never inside PixiJS region
+```
+
+`role="application"` suppresses AT shortcut keys — app owns all key events.
+
+---
+
+## Overflow
+
+Mutation patterns, action creators, selector conventions, full keyboard map:
+→ `docs/sme/jigg-runtime.md`

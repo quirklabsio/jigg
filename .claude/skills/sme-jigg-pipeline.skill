@@ -1,0 +1,130 @@
+# SME — Jigg Pipeline
+
+Authority: stage boundaries, Cook derivation rules, pipeline contracts.
+
+Invoke when a story involves:
+- deciding which stage a concern belongs to
+- defining target file location
+- enforcing contract or import rules
+- Cook purity or determinism questions
+
+---
+
+## The Pipeline
+
+```
+Intake → Chop → Cook → Plate
+```
+
+```
+Derivation (pure):    Intake → Chop → Cook → RenderSpec
+Realization (impure): Plate + Store (runtime)
+```
+
+---
+
+## Stage Boundaries
+
+### Intake (`src/pipeline/intake/`)
+Accepts raw input. Validates, normalizes, identifies path.
+Output: `IntakeResult` — discriminated union, invalid combinations unrepresentable.
+
+```ts
+type IntakeResult =
+  | { kind: 'new-image'; payload: IntakePayload }
+  | { kind: 'new-jigg';  payload: IntakePayload; hasDissection: boolean }
+  | { kind: 'resume';    dissection: JiggDissection; assembly: JiggAssembly }
+```
+
+NOT responsible for: image analysis, game state, UI.
+
+---
+
+### Chop (`src/pipeline/chop/`)
+WASM + Web Worker only. Cut geometry + palette. Off main thread.
+`CutsReady` = transport (crosses worker boundary).
+`JiggDissection` = domain artifact (written once to `.jiggstate`).
+
+```ts
+interface CutsReady {
+  type: 'CutsReady';
+  cuts: CutGeometry[];
+  palette: DerivedPalette;
+}
+```
+
+NOT responsible for: piece semantics, a11y, main thread work.
+
+---
+
+### Cook (`src/pipeline/cook/`)
+Receives `JiggDissection` → produces `RenderSpec`. Pure. Deterministic.
+
+```ts
+interface RenderSpec {
+  version: 1;
+  board: BoardSpec;
+  pieces: PieceSpec[];
+  a11y: A11ySpec;
+  meta: { generatedAt: number; source: 'fresh' | 'resume' };
+}
+```
+
+`deriveA11ySpec.ts` is the ONLY a11y derivation entry point in the codebase.
+
+Cook admission — ALL must be true:
+1. Pure function of Cook inputs (`JiggDissection` + `A11yStatic`)
+2. Deterministic — no randomness, time, or external state
+3. No store reads
+4. Affects structure of the world, not interaction behavior
+5. Identical across fresh load and resume
+
+Litmus: "Does this change while the user is playing?" → never Cook.
+
+---
+
+### Plate (`src/pipeline/plate/`)
+Bridge between derivation and runtime.
+
+Initialization (one-shot): `plate(RenderSpec) → PixiJS + ARIA DOM`
+Runtime loop: reacts to Store changes, handles input, runs ARIA behaviors.
+
+Plate reacts only to `RenderSpec` and Store. Never derives. Never invents.
+
+```
+plate/
+  pixi/       # PixiJS executor
+  aria/
+    index.ts  # static ARIA mirror from RenderSpec
+    runtime/  # sole runtime a11y behavior — focus, keyboard, announcements
+```
+
+---
+
+## Import Rules
+
+- Stages import only from `src/pipeline/types.ts`, `src/store/`, own folder
+- No cross-stage imports
+- No PixiJS outside `plate/pixi/`
+- No ARIA DOM manipulation outside `plate/aria/`
+- No WASM outside `chop/`
+- No `src/a11y/` — this folder does not exist
+
+---
+
+## Intake Paths
+
+| Path | Chop? | Cook? |
+|---|---|---|
+| New from image | Always | Always |
+| New from .jigg | Conditional | Always |
+| Resume from .jigg | Never | Always |
+
+Cook always runs. `RenderSpec` always produced by Cook. Plate's input never changes.
+
+---
+
+## Overflow
+
+WASM build steps, worker protocol, implementation mechanics:
+→ `docs/sme/jigg-pipeline.md`
