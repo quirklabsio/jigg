@@ -1,0 +1,94 @@
+# SME — Jigg Spec
+
+Authority: `.jigg` file format, persistence contracts, save/load invariants.
+
+Invoke when a story involves:
+- reading or writing `.jigg`, `.jiggsaw`, or `.jiggstate`
+- mapping pipeline artifacts to persisted data
+- game creation, resume, or save behavior
+- `JiggDissection`, `JiggAssembly`, `JiggGlue` usage
+
+---
+
+## Import Alias
+
+```ts
+import type { JiggDissection, JiggAssembly, PieceState } from '@jigg-spec/types'
+import { STAGE_TABLE, STAGE_BENCH } from '@jigg-spec/types'
+```
+
+Alias: `@jigg-spec` → `./jigg-spec` (vite.config.ts). Never import via relative path.
+
+---
+
+## File Format Summary
+
+| Format | Role | Mutability |
+|---|---|---|
+| `.jigg` | User bundle | Mutable — header updated on save |
+| `.jiggsaw` | Artist product | Immutable after creation |
+| `.jiggstate` | Playthrough instance | Mutable — assembly updated on save |
+
+`.jigg` always contains a `.jiggsaw`. Users only ever touch `.jigg`.
+
+---
+
+## .jiggstate Structure
+
+| Entry | Mutability | Purpose |
+|---|---|---|
+| `glue.json` | Immutable | Playthrough identity + puzzle binding |
+| `dissection.json` | Immutable | Sealed cut — Cook's input on resume |
+| `assembly.json` | Mutable | Piece state — updated every save |
+
+`dissection.json` = `JiggDissection`. Written once. Never touched again.
+`assembly.json` = `JiggAssembly`. The Store's serialized form.
+
+---
+
+## Pipeline ↔ Persistence Mapping
+
+| Artifact | Persisted as | When |
+|---|---|---|
+| `JiggDissection` | `dissection.json` | Once at game creation |
+| `JiggAssembly` | `assembly.json` | Every save |
+| `RenderSpec` | Not persisted | Recomputed by Cook on every load |
+| `CutsReady` | Not persisted | Transport only |
+
+---
+
+## Resume Path
+
+```
+dissection.json → JiggDissection → Cook → RenderSpec → Plate
+assembly.json   → JiggAssembly  → Store → Plate (runtime)
+```
+
+Cook always runs on resume. Chop does not.
+
+---
+
+## Game Creation Invariants
+
+All pieces must satisfy:
+- `stageId === STAGE_BENCH`
+- `pos` absent
+- `rot` valid cardinal (0 | 90 | 180 | 270)
+- `placed === false`
+- `clusterId` absent
+
+---
+
+## Key Rules
+
+- `placed` is sole correctness authority — not stage
+- `glue.json` mismatch on load → fatal, abort immediately
+- `JiggHeader` is write-through cache — recomputed on every save
+- `completed` is derived (`placedCount === pieceCount`) — never stored
+
+---
+
+## Overflow
+
+Full schema, integrity tiers, filename conventions, whimsy:
+→ `docs/sme/jigg-spec.md`

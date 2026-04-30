@@ -6,3 +6,4 @@ crates/jigg-analysis/target/
 *.env
 .env.local
 qa-scratch/
+.claude/settings.local.json
