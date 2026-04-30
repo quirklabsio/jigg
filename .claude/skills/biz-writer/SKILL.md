@@ -20,13 +20,27 @@ When triggered, automatically read these files in order:
 
 ### Required Reading (Always)
 1. **`docs/roadmap.md`** — Story status, planning board, and sequencing
-2. **`docs/BA.md`** — Story writing guidelines and handoff workflow
+2. **`docs/BA.md`** — Story writing guidelines, SME invocation workflow, and handoff process
 3. **`docs/decisions.md`** — Technical constraints that affect planning
 
 ### Conditional Reading (When Relevant)
 - **Story writing:** Reference existing patterns in `docs/stories.md`
-- **Technical questions:** Check `docs/architecture.md` for feasibility
-- **User experience:** Review `docs/accessibility.md` for inclusive design
+- **Technical questions:** Check `docs/architecture.md` for pipeline boundaries and stage placement
+- **User experience:** Invoke `.claude/skills/sme-jigg-runtime.skill` for inclusive design guidance
+- **Persistence/save/load:** Invoke `.claude/skills/sme-jigg-spec.skill` for format constraints
+- **Any code placement question:** Invoke `.claude/skills/sme-jigg-pipeline.skill` for stage boundaries
+
+## SME Invocation
+
+SMEs are required for any story that touches implementation. They are not optional references — they supply binding guidance that goes directly into the story's SME Inputs section.
+
+| SME | Skill | When to invoke |
+|---|---|---|
+| Pipeline | `.claude/skills/sme-jigg-pipeline.skill` | Required for all migration stories. Any story with code placement questions. |
+| Runtime | `.claude/skills/sme-jigg-runtime.skill` | Any story touching piece state, interaction, ARIA, focus, store mutations, or a11y behavior |
+| Spec | `.claude/skills/sme-jigg-spec.skill` | Any story touching persistence, save/load, or `.jigg` files |
+
+**Invoke SMEs before writing the story, not after.** SME outputs determine what goes in the story, they don't just annotate it.
 
 ## Business Analysis Behavior
 
@@ -42,8 +56,11 @@ Follow the established format from `docs/BA.md`:
 
 1. **Imperative Title:** `Story XX: [Action] [Component] [Outcome]`
 2. **Technical Requirements:** Clear, implementable behavior with constraints
-3. **File Touch List:** Specific files the developer should modify
-4. **Acceptance Criteria:** Measurable success conditions
+3. **SME Inputs:** Outputs from Pipeline, Runtime, and Spec SMEs (see `docs/BA.md` for template)
+4. **File Touch List:** Specific files the developer should modify
+5. **Acceptance Criteria:** Measurable success conditions
+
+For migration stories, always append the migration principle block (see `docs/BA.md`).
 
 ### Requirements Clarity
 - Ask clarifying questions about user needs and business goals
@@ -75,10 +92,11 @@ Maintain the three-column structure:
 - **Deferred:** Postponed with clear reasons
 
 ### Story Lifecycle
-1. Identify user need → write story prompt
-2. Story goes in **Next** column
-3. Dev implements, logs to `stories.md`
-4. Move to **Shipped** when complete
+1. Identify user need
+2. Invoke relevant SMEs
+3. Write story with SME Inputs populated → place in **Next** column
+4. Dev implements, logs to `stories.md`
+5. Move to **Shipped** when complete
 
 ### Epic Planning
 Group related stories into coherent chunks:
@@ -103,7 +121,7 @@ Group related stories into coherent chunks:
 ### Handoff Quality
 - Ensure stories are implementable without additional requirements gathering
 - Include enough context for technical decisions
-- Flag areas where technical consultation is needed
+- SME Inputs section must be populated before handoff — never leave it empty
 - Provide clear acceptance criteria for testing
 
 ## Integration with Dev Workflow
@@ -112,22 +130,24 @@ Group related stories into coherent chunks:
 - Understand the jigg-spec format limitations
 - Consider PixiJS performance characteristics
 - Respect accessibility-first design principles
-- Work within established architecture patterns
+- Work within the pipeline architecture (Intake → Chop → Cook → Plate)
 
 ### Developer Handoff
-- Stories should follow the format developers expect
-- Include file touch lists to guide implementation scope
-- Provide context about user value to guide technical trade-offs
-- Be available for clarification during implementation
+- Stories follow the format in `docs/BA.md`
+- SME Inputs section populated — Dev does not make placement decisions
+- File touch list scopes implementation
+- Migration principle block included for all migration stories
 
 ## Common Planning Patterns
 
 ### Epic Structure
-```
-Story XXa: [Foundation] — Basic capability
-Story XXb: [Core behavior] — Main feature implementation  
-Story XXc: [Polish] — Edge cases and refinement
-```
+Story XXa: [Foundation] — Basic capability Story XXb: [Core behavior] — Main feature implementation Story XXc: [Polish] — Edge cases and refinement
+### Migration Stories
+Always follow this before writing:
+1. Invoke Pipeline SME — get stage placement and contracts
+2. Invoke Spec SME if persistence is involved
+3. Include migration principle block in story
+4. AC must include behavior parity and no cross-stage leakage
 
 ### Documentation Stories
 - Include doc updates in main feature stories when possible

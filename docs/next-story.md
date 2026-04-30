@@ -1,119 +1,212 @@
-# Story 47g: Remove HC sandwich; switch HC bench to `#1a1a1a` α 1.0
+# Spike: Architecture Migration Assessment
 
-## Context
+**Type:** Spike (read-only research)
+**Timebox:** Half day (4 hours max)
+**Output:** `docs/migration.md` — written recommendation. No code. No doc moves.
+**Depends on:** Story 0 — `src/pipeline/` scaffolded, `.claude/skills/sme-jigg-*.skill` exist, `docs/architecture.md` rewritten as the pipeline reference. ✅ shipped (commits `f2b43ec`, `e89a2a0`).
 
-Two changes, one story. Both are admissions that the HC sandwich primitive isn't delivering the value it was designed for, and both are user-driven decisions made after the 47e-r failure:
+---
 
-**Change 1 — Switch HC bench color from `#000000` to `#1a1a1a` α 1.0.** The architectural contract (per `decisions.md` §"HC bench color contract") is *solid (α 1.0), dark*, not specifically *pure black*. The lighter base symmetric with normal mode + the always-on bench glow (Story 47a) provides perceptible silhouettes for dark pieces — without requiring any sandwich ring at all.
+## Required Reading (before starting)
 
-**Change 2 — Remove the HC sandwich stroke from PIECES.** Story 37d added the sandwich (inner white + outer black `OutlineFilter` pair) as a WCAG AAA-grade contrast guarantee around every piece in HC mode. Story 47e-r tried tuning its rendering parameters at thumbnail scale and failed. Story 47f tightened its filter-array ordering. None of it has delivered the user-visible benefit it was supposed to: bench HC pieces are still invisible without the bench-color change. **The piece sandwich doesn't solve the problem we keep trying to solve with it.** Maintaining it has cost (two filter passes per piece, ordering invariant complexity, all of Story 47f's work). User's call: rip it out from pieces. If a real HC user later reports canvas pieces are insufficiently bordered, we re-add it as a targeted treatment — for now, the defaults (BevelFilter, adaptive board, bench glow, mesa) plus the new HC bench color carry HC's perceptual character on pieces.
+1. `docs/architecture.md` — the target structure (Intake → Chop → Cook → Plate, derivation vs realization, contracts, import rules)
+2. `.claude/skills/sme-jigg-pipeline.skill` — stage boundaries, Cook admission rules, contracts at a glance
+3. `.claude/skills/sme-jigg-runtime.skill` — what belongs in store vs pipeline, runtime a11y placement
+4. `.claude/skills/sme-jigg-spec.skill` — persistence shape, dissection vs assembly
+5. `src/pipeline/` (the scaffold) and `src/pipeline/types.ts` — the contracts that already exist as types
 
-**Critical scope boundary: this removes the sandwich from PIECE sprites only.** The HC treatment on the bench's filter-strip swatches (a separate concern in `renderFilterStrip` / `bench.ts`, audit §1.6 — uses `SWATCH_HC_ACTIVE_CLR` and the dual-ring black-inner / magenta-outer styling on the active swatch) is **untouched**. That's a different HC treatment in a different code path, serving a different purpose (active-selection visibility on filter chrome, not piece visibility). Don't confuse the two.
+This is a research story. You are not writing code. You are walking the existing codebase and producing a written assessment that will sequence every migration story that follows.
 
-This is a deliberate walk-back of WCAG AAA-level piece outline contrast. HC retains its other treatments: BevelFilter alpha boost, magenta snap highlight, label backing alpha, **filter-strip swatch ring colors and dual-ring HC styling**, solid tray. Only the sandwich-on-pieces is removed.
+---
 
-Before starting, read:
-- `docs/decisions.md` §"HC bench color contract" (around line 23)
-- `docs/decisions.md` §"High Contrast Repair (Story 37d)" (the original sandwich rationale)
-- `docs/accessibility-design.md` Phase 2/2b sections
-- `src/canvas/bench.ts` — `TRAY_BG_HC_*` constants
-- `src/utils/preferences.ts` — `addSandwichStroke`, `removeSandwichStroke`, the `applyHighContrast` call site, `HC_FILTER_TAG` constant
+## Goal
 
-## Requirements
+Produce `docs/migration.md` — a short written assessment that informs the sequencing of all migration stories.
 
-### Change 1: HC bench color
+The architecture is fixed (`docs/architecture.md` is load-bearing). The scaffold exists (`src/pipeline/`). What does not yet exist is a **map from today's code to the target stages**, with honest assessment of where the migration is clean vs. tangled. That map is this spike's deliverable.
 
-In `src/canvas/bench.ts`:
+---
 
-1. Change `TRAY_BG_HC_COLOR` from `0x000000` to `0x1a1a1a`.
-2. Keep `TRAY_BG_HC_ALPHA` at `1.0` (solid contract preserved).
-3. Update the constant's comment to: *solid (α 1.0), dark — symmetric with normal mode `TRAY_BG_DEFAULT_COLOR`. The contract is "solid, dark," not specifically "pure black." Lighter base + bench glow makes dark pieces perceptible without per-piece outline.*
+## What to Investigate
 
-### Change 2: Remove HC sandwich from PIECES
+### 1. Stage mapping
 
-**Scope is `src/utils/preferences.ts` only.** The bench filter-strip swatch HC treatment (`renderFilterStrip` in `bench.ts`, `SWATCH_HC_ACTIVE_CLR`) is a **different feature** — leave it completely alone.
+Walk `src/` (everything except `src/pipeline/` itself) and map existing modules to the four pipeline stages. Produce a table:
 
-In `src/utils/preferences.ts`:
+| Current module | Target stage | Clean boundary? | Notes |
+|---|---|---|---|
+| `src/puzzle/` | ? | ? | |
+| `src/canvas/` | ? | ? | |
+| `src/workers/` | ? | ? | |
+| `src/store/` | (stays as Store) | n/a | Confirm no derivation logic has accumulated here |
+| `src/utils/` | various | per-file | Likely splits across stages — call out each file |
+| `src/imageNormalize.ts` | ? | ? | |
+| `src/curated/` | ? | ? | |
+| `src/main.ts` | (orchestration) | ? | Will become `src/pipeline/index.ts` consumer |
 
-1. Delete `addSandwichStroke` and `removeSandwichStroke` functions entirely.
-2. Delete the `HC_FILTER_TAG` constant (no longer referenced).
-3. Delete the inner/outer `OutlineFilter` constants if they were extracted at module scope (parameters that no longer have a caller in this file).
-4. In `applyHighContrast`, remove the `addSandwichStroke(sprite)` / `removeSandwichStroke(sprite)` call branches. The function still exists for the BevelFilter alpha boost — that's the remaining HC-on-pieces behavior.
-5. If `OutlineFilter` is no longer imported anywhere in `preferences.ts`, remove the import from `preferences.ts`. **Do not touch the `OutlineFilter` import or any usage in `bench.ts`** — bench has its own HC swatch logic that may use `OutlineFilter` independently.
-6. Story 47f's insert-before-greyscale logic was inside `addSandwichStroke` — it dies with the function. The greyscale "must be last" invariant becomes trivially satisfied when sandwich doesn't exist; `addGreyscaleFilter` already appends correctly.
+For each: is the module cleanly bounded, or co-mingled with other concerns? Flag anything that needs untangling **before** it can move (e.g., a single file that contains both Cook-shaped derivation and Plate-shaped rendering).
 
-The DEV assertion in `applyGreyscale` that checks filter ordering may need adjustment — if it asserts on sandwich presence, simplify it to "BevelFilter at 0, greyscale at last (if present)." Don't delete the assertion; just relax it.
+**Note on interaction code specifically.** The expected mapping per `docs/architecture.md`:
+- Pointer/touch input → `plate/pixi/`
+- Keyboard input → `plate/aria/runtime/`
 
-**Do not modify anything in `bench.ts` related to HC swatch styling, swatch active rings, filter strip rendering, or `SWATCH_HC_ACTIVE_CLR`.** Change 1 (above) touches `bench.ts` for the `TRAY_BG_HC_COLOR` constant — that's the only `bench.ts` change in this story.
+Today, there is no `src/interaction/`; pointer and keyboard logic appear to live inside `src/canvas/` and possibly `src/puzzle/`. Confirm where the pointer hit-test layer, drag lifecycle, snap detection trigger, keyboard mode (bench/table), and `inert` toggling actually live. Flag whether these are extractable cleanly or tangled into rendering.
 
-### Documentation updates (in this story, not deferred)
+### 2. Contract gaps
 
-- `docs/decisions.md` — mark the Story 37d "Two `OutlineFilter` instances (sandwich stroke) over one" decision as **superseded by Story 47g**. Add a short superseding entry near it: "HC sandwich removed in Story 47g — see entry below" with a one-paragraph explanation. The original entry stays for historical reference; readers see the supersession marker.
-- `docs/decisions.md` §"HC bench color contract" — add a one-line follow-up: "Story 47g flipped to `#1a1a1a` α 1.0 (was `#000000`)."
-- `docs/accessibility-design.md` — the design doc references the sandwich extensively. Add a banner at the top (after the title): *"Updated 2026-04-25: Story 47g removed the HC sandwich primitive. Sandwich-related sections (1.1, parts of 4 composition rules, Brief 47e-r, etc.) are kept for historical reference but no longer reflect current code."* Don't rewrite the design doc — note the supersession.
-- `docs/accessibility-architecture.md` (the audit) — same banner. The audit was a snapshot in time; it stays as-is with a marker.
+For each contract already typed in `src/pipeline/types.ts`, identify whether a partial version exists in today's code:
 
-### What does NOT change
+- `IntakeResult` (discriminated union) — does anything resembling this exist? File picker + drag-and-drop both produce *something* today; what shape?
+- `IntakePayload` — image normalization (Story 45) produces a normalized buffer; is its return shape close to `IntakePayload`?
+- `CutsReady` — the worker handoff message. What does the worker→main `postMessage` look like today?
+- `JiggDissection` — already in `@jigg-spec`. Is it being consumed correctly today, or is the cut data flowing through some ad-hoc shape?
+- `RenderSpec` — is there anything in today's code that looks like a single source of truth for rendering, or is render data scattered?
+- `A11ySpec` / `A11yStatic` — accessibility decisions today (board color in Story 47b, contrast mode handling): where do they live, and what would `deriveA11ySpec.ts` need to absorb?
 
-- **Normal mode bench** — `TRAY_BG_DEFAULT_COLOR` and `TRAY_BG_DEFAULT_ALPHA` untouched.
-- **Bench glow** (Story 47a) — unchanged. Same color, same alpha, same fade. Both modes.
-- **HC's other treatments** — BevelFilter alpha boost, magenta snap highlight, label backing alpha, swatch ring colors, solid tray. All preserved.
-- **Greyscale** (Story 37a) — `addGreyscaleFilter` and `applyGreyscale` untouched. Just the ordering-assertion relaxation noted above.
-- **Story 47f's `prepareContainerForCanvas` helper** — still useful for future bench-only chrome cleanup. Don't remove.
-- **Adaptive board color** (Story 47b), **mesa hierarchy** (Story 47d), **filter strip rendering** (Stories 32+) — all independent, untouched.
+For each: note where the partial version lives and how close it is to the target shape. "Identical," "needs renaming + relocation," "needs a wrapper," "needs to be derived from scratch" — be specific.
 
-## Constraints
+### 3. Migration-sensitive working code
 
-- **Two files, ≈30–50 lines net.** Most of the diff is deletions in `preferences.ts`. If `git diff src/` touches any third file, that's scope creep.
-- **Single session.** This is bigger than 47e-r (~5 lines) but still a tight, well-bounded change.
-- **Do not re-tune `OutlineFilter` parameters** — there's no `OutlineFilter` left in HC after this story.
-- **Do not bump the bench glow** to compensate for sandwich removal. We're testing whether glow + lighter base color is sufficient. If it isn't, the next story is "boost glow in HC" — separate decision.
-- **Do not de-bundle HC into atomic preferences** in this story. The architect's Phase 3 is still queued; this story works inside the current bundled HC toggle.
-- **Do not change normal mode** in any way.
-- **Do not delete the historical decisions/audit content** — supersession markers only.
-- **Per `decisions.md` §"Process":** never commit without explicit user instruction. Present via `/qa` and wait.
+Some logic is proven, fragile, and must not regress during migration. For each, assess isolation:
+
+- **WASM cut generation** (`crates/`, `src/wasm-pkg/`, worker glue) — how isolated? Can the worker move into `src/pipeline/chop/worker/` without touching the WASM build?
+- **PixiJS rendering** (bench, table, mesa, filters, glow, sandwich-removed-as-of-47g) — what's the cleanest carve from `src/canvas/` into `src/pipeline/plate/pixi/`? Are there imports out into puzzle logic that need breaking first?
+- **Snap detection** — currently runs on drag end. Where does the detection logic live vs. the position correction? Snap is interaction → moves to Plate runtime, but the rules feel like Cook. Confirm.
+- **Accessibility DOM layer** (Stories 40–43, 47-series) — landmarks, hidden button tree, live region. Where does this live now? Does any of it derive (→ Cook → `RenderSpec.a11y`) vs. behave (→ `plate/aria/runtime/`)? The split matters.
+- **Adaptive board color** (Story 47b) — pure derivation from image luminance; this is a Cook concern. Where does it live today?
+- **Mesa / 8-layer board chrome** (Story 47d) — pure geometry, derived from board dimensions. Cook or Plate?
+
+For each: how isolated is it today, and can it move without dragging neighbors?
+
+### 4. Doc consolidation
+
+Today's `docs/` contains implementation detail. The new model is: **skills are the lookup point, `docs/sme/*.md` are overflow detail, `docs/architecture.md` is load-bearing.** No doc should exist in two places after migration.
+
+Review each doc and recommend its fate. Suggested starting table:
+
+| Doc | Recommendation |
+|---|---|
+| `docs/spec-integration.md` | Absorb into `docs/sme/jigg-spec.md`? |
+| `docs/accessibility.md` | Split — runtime behavior into `docs/sme/jigg-runtime.md`, derivation rules into `docs/sme/jigg-pipeline.md`? |
+| `docs/accessibility-architecture.md` | Historical audit — keep as-is with archive marker? |
+| `docs/accessibility-design.md` | Historical design doc — keep as-is with archive marker? |
+| `docs/wasm-pipeline.md` | Absorb into `docs/sme/jigg-pipeline.md`? |
+| `docs/drag-and-drop.md` | Absorb into `docs/sme/jigg-pipeline.md` or `jigg-runtime.md`? |
+| `docs/snap-detection.md` | Absorb into `docs/sme/jigg-runtime.md`? |
+| `docs/engine-conventions.md` | Absorb into `docs/sme/jigg-spec.md` or `jigg-pipeline.md`? |
+| `docs/conventions.md` | ? |
+| `docs/decisions.md` | Keep standalone — architectural rationale doesn't belong in skills |
+| `docs/gotchas.md` | Keep standalone — surprising failures need a single bucket |
+| `docs/regression-script.md` | Keep standalone — operational, not architectural |
+| `docs/stories.md` | Keep standalone — implementation log |
+| `docs/roadmap.md` | Keep standalone — BA's planning board |
+| `docs/BA.md` | Keep standalone — BA workflow |
+| `docs/README.md` | Verify still accurate after the rest is reorganized |
+| `docs/archive/` | Already archived — leave |
+
+You may add rows for any doc not listed. Goal: every doc has either a destination (absorbed into a skill/overflow doc) or an explicit "keep standalone" rationale.
+
+### 5. Architecture contradictions
+
+Does anything in the current codebase contradict `docs/architecture.md` in a way that warrants updating the doc rather than moving the code? Note any cases where the architecture may need to flex — but be conservative. The default assumption is "code moves to fit the architecture," not "the architecture flexes to fit the code." Flag a contradiction only if the existing code embodies a real constraint that the architecture missed.
+
+### 6. Migration path recommendation
+
+Based on the above, recommend an approach:
+
+- **Parallel structure** — scaffold new folders alongside existing code, migrate stage by stage, remove old code only when replaced. This is the current default per the migration principle.
+- **Greenfield pipeline** — pull proven logic into the new structure deliberately rather than migrating wholesale. Use if the existing structure is too tangled to migrate incrementally.
+- **Branch rewrite** — port logic, not files. Most aggressive option.
+
+Include **proposed stage sequencing** — which stage to migrate first, second, etc., and why. Include any pre-requisites that aren't a stage themselves (e.g., "must extract pointer hit-test out of `src/canvas/` into a sibling before Plate migration can begin").
+
+Sketch a story sequence — not full prompts, just a list of titles and one-sentence scopes, in the order they should run. This is the input the BA will use to write the actual migration story prompts.
+
+---
+
+## SME Inputs
+
+### Pipeline (consult, don't request)
+This is a research story, not a migration story. The Pipeline SME (`.claude/skills/sme-jigg-pipeline.skill`) is your **reference during analysis**, not the source of placement decisions to put into a migration story. Read it before you start mapping. Apply Cook admission rules and import rules when judging "clean boundary?" — that judgment is the spike's contribution.
+
+### Runtime
+N/A — no runtime work in this story. (`sme-jigg-runtime.skill` is reference reading for the store/pipeline boundary judgments in §1 and §3, but no SME *output* goes into a code story here.)
+
+### Spec
+N/A — no persistence work in this story. (`sme-jigg-spec.skill` is reference reading for §2's `JiggDissection` / `JiggAssembly` questions.)
+
+---
+
+## Output Format — `docs/migration.md`
+
+Structure the document as:
+
+1. **Stage mapping table** — one row per existing module, with target stage and clean-boundary assessment (§1 above)
+2. **Contract gap summary** — for each pipeline contract, where its partial form lives today and the delta to target (§2)
+3. **Migration-sensitive code list** — proven logic that must not regress, with isolation assessment (§3)
+4. **Doc consolidation table** — current doc → destination (§4)
+5. **Architecture contradictions** — none expected; flag any found (§5)
+6. **Recommended migration path + stage sequencing** — with a sketched story sequence (§6)
+7. **Open questions** — anything the spike couldn't answer that needs a decision before migration begins. The user will answer these; do not invent answers.
+
+Keep it short. The whole doc should be readable in 15 minutes. This is the input to BA's next planning pass; brevity matters.
+
+---
 
 ## Files
 
-- `src/canvas/bench.ts` — `TRAY_BG_HC_COLOR` constant value + comment (~3 lines)
-- `src/utils/preferences.ts` — delete `addSandwichStroke` / `removeSandwichStroke` / `HC_FILTER_TAG` + related constants and import; remove call sites in `applyHighContrast`; relax greyscale ordering assertion (~30–40 lines net deletion)
-- `docs/decisions.md` — supersession markers (~10 lines added)
-- `docs/accessibility-design.md` — supersession banner (~3 lines added)
-- `docs/accessibility-architecture.md` — supersession banner (~3 lines added)
+**Created:**
+- `docs/migration.md` (the deliverable)
 
-`git diff src/` should show **only `bench.ts` and `preferences.ts`**.
+**Touched:** none. No code changes. No existing doc edits. If you find yourself wanting to fix something during the spike — flag it in §7 (Open questions) and leave it alone.
+
+---
 
 ## Acceptance
 
-User tests via QA page. Update `STORY` and `FIXTURES` per the `/qa` command format. Use the spike's synthetic fixtures (still in `/qa-scratch/`).
+- **AC-1:** `docs/migration.md` exists with all seven sections populated.
+- **AC-2:** Stage mapping table covers every top-level item under `src/` (excluding `src/pipeline/` itself).
+- **AC-3:** Contract gap summary covers `IntakeResult`, `IntakePayload`, `CutsReady`, `JiggDissection`, `RenderSpec`, `A11ySpec` — at minimum.
+- **AC-4:** Doc consolidation table covers every file in `docs/` (excluding `docs/sme/`, `docs/archive/`, and `docs/migration.md` itself).
+- **AC-5:** A migration path is recommended (one of the three, or a clear hybrid) with rationale. Stage sequencing is concrete (ordered list with one-sentence scopes), not vague.
+- **AC-6:** No code changed. `git diff src/` is empty. `git diff crates/` is empty.
+- **AC-7:** No existing docs changed. `git diff docs/` should show only the addition of `docs/migration.md`.
+- **AC-8:** Open questions are explicit and unanswered. Do not pretend to know what only the user can decide.
 
-- **AC-1: HC + dark piece + bench → dark pieces discernible.** Load `spike-47a-pure-black.png`. Enable HC. The user can tell bench thumbnails apart at a glance. Pieces no longer disappear into the bench. Mechanism: warm glow + lighter base creates a visible silhouette; no per-piece ring needed.
-- **AC-2: HC + canvas pieces — no sandwich ring.** Place a piece on the canvas in HC mode. Pieces have BevelFilter and DropShadowFilter (existing depth treatments) but no white/black outline ring around the piece edge. This is the deliberate change.
-- **AC-3: Normal mode — unchanged.** Toggle HC off. Normal mode bench, normal mode pieces, normal mode everything renders identically to pre-fix.
-- **AC-4: HC's other treatments preserved.** BevelFilter alpha boost still applies on HC toggle (verify visually: piece edges are slightly more pronounced in HC than normal). Snap highlight is magenta in HC. **Filter-strip swatch active state uses its full HC ring colors and dual-ring styling — explicitly verify the active swatch shows the magenta-outer / black-inner ring exactly as before. This treatment is intentionally untouched and must not regress.** Tray is solid.
-- **AC-5: Greyscale + HC interaction.** Enable greyscale, then HC: filter array on each piece is `[BevelFilter, ColorMatrixFilter]` (no sandwich filters between them). Reverse order: same result. The 47f insert-before-greyscale logic dies with the sandwich, but the ordering invariant is now trivially satisfied.
-- **AC-6: Bench glow (47a) preserved.** Glow visible behind each bench piece in both modes. Unaffected.
-- **AC-7: HC bench background reads "dark / solid".** Slightly lighter than pure black, but the user shouldn't notice the change perceptually unless directly comparing. No canvas content visible through.
-- **AC-8: All other shipped behaviors preserved.** Adaptive board color (47b), mesa (47d), filter strip layout (Story 32+), keyboard navigation, focus ring, all preferences except HC sandwich.
-- **AC-9: `git diff src/` shows only `bench.ts` and `preferences.ts`.** Run the diff yourself; report line counts in the QA handoff.
-- **AC-10: Documentation supersession markers applied.** `decisions.md` Story 37d entry marked superseded; `accessibility-design.md` and `accessibility-architecture.md` have supersession banners. Historical content preserved, current state clear.
-- **AC-11: User confirms bench HC visibility resolved.** This is the moment the long-running issue closes. After QA, the user explicitly confirms whether bench HC visibility now works. If still failing, kick to tech-architect for a rethink (sandwich tuned, sandwich removed, bench color changed — what's left?).
+---
 
 ## Out of scope
 
-- **Boosting the bench glow** in HC mode. Separate decision after this story's QA.
-- **De-bundling HC into atomic preferences.** Phase 3 of the architect's plan; deferred.
-- **Story 47h** — gotchas doc entries for R-3/R-4/R-5. Doc-only follow-up, low priority, anytime.
-- **Story 47c** — palette tuning + swap UI. Independent.
-- **Story 46f** — label clipping Approach B. Independent.
-- **Story 49** — metadata shape. Epic progression, independent.
-- Any other HC behavior change (BevelFilter parameters, snap highlight color, **filter-strip swatch styling**, label alpha). Out of scope; HC visual character preserved beyond the piece-sandwich removal.
-- **Filter-strip swatch HC treatment in `bench.ts`** (`SWATCH_HC_ACTIVE_CLR`, `renderFilterStrip` HC branch, dual-ring active styling). Explicitly out of scope. Different feature, different code path, different purpose. Untouched.
-- Re-adding the piece sandwich as a targeted canvas-only treatment in some future story. Possible but not now; if a real HC user reports canvas piece outline insufficient, we revisit.
+- Any code migration. This story produces a plan, not a move.
+- Any doc moves or merges. The consolidation **table** is the deliverable; the actual moves happen in later stories.
+- Updates to `docs/architecture.md`. If the spike surfaces a contradiction, log it under §5; the actual edit is a separate decision point.
+- Updates to `roadmap.md` or `stories.md`. The BA owns roadmap; the BA will turn the spike's stage sequencing into queued stories. Dev's job is to log this spike's completion in `stories.md` per the usual workflow.
+- Anything in `src/pipeline/` itself — it's already typed, do not modify.
 
-## Known next
+---
 
-After 47g ships, two branches based on AC-11:
+## Migration principle (reference, since this spike informs migration)
 
-- **AC-11 passes (bench HC visibility resolved):** the entire bench HC saga closes. HC sandwich removal is permanent (until/unless a user reports the canvas-side regression). Next: 47h (gotchas docs, low priority anytime), then back to feature work — 47c, 49, 46f, or 50+ (Daily Mechanic).
-- **AC-11 fails (bench HC visibility still broken):** kick to tech-architect for a rethink. Three failed attempts (47e-r sandwich tuning, sandwich removal, bench color change) means our architectural primitive for "make HC bench pieces visible" is wrong at a fundamental level. Architect designs the next approach — possibly involving bench-context-specific chrome the sandwich never could provide.
+```
+The pipeline is net new.
+
+Migration stories will incrementally:
+- introduce pipeline structure (Story 0 — done), or
+- migrate existing logic into it, or
+- remove old code that has been replaced
+
+Behavior must remain unchanged throughout migration.
+```
+
+The spike does none of the above — it produces the plan that sequences them.
+
+---
+
+## QA handoff
+
+This is a doc-only deliverable. The QA page (`http://localhost:5173/qa`) is for runtime regression verification — not relevant here. Update `docs/stories.md` per the usual workflow when the spike completes. The "QA" for this story is the user reading `docs/migration.md` and either approving the recommended path or sending the spike back for refinement.
+
+After the spike ships, expect the BA to:
+1. Reset/refresh `docs/roadmap.md` based on the recommended sequencing
+2. Write the first migration story prompt
+3. Move this spike into `docs/stories.md` shipped log
